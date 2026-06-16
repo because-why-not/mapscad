@@ -4,10 +4,11 @@ import './app.css';
 import { Env } from './Env';
 import { fetchTileMapManifest, ManifestMap } from './TileMapManifest';
 import { prettifyMapName, iconForMapType } from './mapMeta';
-import { availableCustomMaps } from './customMaps';
+import { availableCustomMaps, isSunCapable } from './customMaps';
 import { MapController } from './MapController';
 import { OpenLayersEngine } from './engine/OpenLayersEngine';
 import { MapLibreTerrainEngine } from './engine/MapLibreTerrainEngine';
+import { DeckTerrainEngine } from './engine/DeckTerrainEngine';
 import type { GeoView, MapEngine } from './engine/MapEngine';
 
 // This file is the composition root: the only place that names concrete engines.
@@ -48,6 +49,14 @@ function saveSunDate(date: Date): void {
     try { localStorage.setItem('sunDate', date.toISOString()); } catch (e) { Env.error('save sunDate', e); }
 }
 
+function loadShadows(): boolean {
+    try { return localStorage.getItem('shadows') !== '0'; } catch (e) { Env.error('load shadows', e); return true; }
+}
+
+function saveShadows(enabled: boolean): void {
+    try { localStorage.setItem('shadows', enabled ? '1' : '0'); } catch (e) { Env.error('save shadows', e); }
+}
+
 async function init(): Promise<void> {
     const root = document.getElementById('map-root')!;
 
@@ -59,15 +68,21 @@ async function init(): Promise<void> {
     const customSpecs = availableCustomMaps(mapsById);
 
     // Composition root: choose concrete engines here; nothing else knows about them.
+    // Split the custom maps by which renderer claims them.
+    const deckSpecs = customSpecs.filter(s => s.surface.type === 'shaded-relief');
+    const mapLibreSpecs = customSpecs.filter(s => s.surface.type !== 'shaded-relief');
     const engines: MapEngine[] = [new OpenLayersEngine(maps)];
-    if (customSpecs.length) engines.push(new MapLibreTerrainEngine(customSpecs, mapsById));
+    if (mapLibreSpecs.length) engines.push(new MapLibreTerrainEngine(mapLibreSpecs, mapsById));
+    if (deckSpecs.length) engines.push(new DeckTerrainEngine(deckSpecs, mapsById));
 
     const initialSunDate = loadSunDate();
+    const initialShadows = loadShadows();
     const controller = new MapController({
         engines,
         container: root,
         initialView: loadView(),
         initialSunDate,
+        initialShadows,
         onActiveChange: id => appInstance?.setActiveProvider(id),
         onViewPersist: saveView,
         onActivePersist: saveActive,
@@ -82,7 +97,8 @@ async function init(): Promise<void> {
         id: s.id,
         name: s.name,
         icon: s.icon,
-        sun: s.surface.type === 'hillshade',
+        sun: isSunCapable(s),
+        shadows: s.surface.type === 'shaded-relief',
     }));
 
     const saved = localStorage.getItem('activeProvider');
@@ -97,8 +113,10 @@ async function init(): Promise<void> {
             customMaps,
             initialActiveProviderId: initialId,
             initialSunDate,
+            initialShadows,
             onLayerSwitch: (id: string) => controller.select(id),
             onSunChange: (date: Date) => { saveSunDate(date); controller.setSunDate(date); },
+            onShadowsChange: (enabled: boolean) => { saveShadows(enabled); controller.setShadowsEnabled(enabled); },
         },
     });
 

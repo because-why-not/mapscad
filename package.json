@@ -10,6 +10,9 @@
   },
   "license": "MIT",
   "dependencies": {
+    "@deck.gl/core": "^9.3.4",
+    "@deck.gl/geo-layers": "^9.3.4",
+    "deck.gl": "^9.3.4",
     "maplibre-gl": "^4.7.1",
     "ol": "^10.3.1"
   },

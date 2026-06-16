@@ -6,6 +6,7 @@ export interface MapControllerOptions {
     container: HTMLElement;
     initialView: GeoView;
     initialSunDate?: Date;
+    initialShadows?: boolean;
     onActiveChange?: (id: string) => void;   // active source changed (update UI)
     onViewPersist?: (view: GeoView) => void; // user moved the map (persist)
     onActivePersist?: (id: string) => void;  // active source changed (persist)
@@ -24,10 +25,12 @@ export class MapController {
     private active: MapEngine | null = null;
     private view: GeoView;
     private sunDate: Date;
+    private shadows: boolean;
 
     constructor(private opts: MapControllerOptions) {
         this.view = opts.initialView;
         this.sunDate = opts.initialSunDate ?? new Date();
+        this.shadows = opts.initialShadows ?? true;
         for (const engine of opts.engines) {
             for (const id of engine.sourceIds) this.bySource.set(id, engine);
         }
@@ -57,11 +60,13 @@ export class MapController {
             }
             engine.setActiveSource(id);
             this.applySun(engine);
+            engine.setShadows?.(this.shadows);
             engine.show(this.view);
             this.active = engine;
         } else {
             engine.setActiveSource(id);
             this.applySun(engine);
+            engine.setShadows?.(this.shadows);
         }
 
         this.activeId = id;
@@ -79,5 +84,11 @@ export class MapController {
         if (!engine.setSun) return;
         const { azimuth, altitude } = sunPosition(this.sunDate, this.view.lat, this.view.lng);
         engine.setSun(azimuth, altitude);
+    }
+
+    /** Toggle cast shadows on the active (and future) engines that support them. */
+    setShadowsEnabled(enabled: boolean): void {
+        this.shadows = enabled;
+        this.active?.setShadows?.(enabled);
     }
 }

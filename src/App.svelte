@@ -6,8 +6,10 @@
         customMaps = [],
         initialActiveProviderId = '',
         initialSunDate = new Date(),
+        initialShadows = true,
         onLayerSwitch = () => {},
         onSunChange = () => {},
+        onShadowsChange = () => {},
     } = $props();
 
     let menuOpen = $state(false);
@@ -19,8 +21,11 @@
     let dateValue = $state(untrack(() => toDateInput(initialSunDate)));
     let minutesOfDay = $state(untrack(() => initialSunDate.getHours() * 60 + initialSunDate.getMinutes()));
 
+    let shadowsOn = $state(untrack(() => initialShadows));
+
     // The Sun controls only make sense for sun-capable maps (e.g. hillshade).
     let sunEnabled = $derived(!!customList.find(c => c.id === activeProviderId)?.sun);
+    let shadowsCapable = $derived(!!customList.find(c => c.id === activeProviderId)?.shadows);
     let timeLabel = $derived(formatTime(minutesOfDay));
 
     // Called by index.ts after the manifest loads / when the active map changes.
@@ -61,6 +66,10 @@
         dateValue = toDateInput(now);
         minutesOfDay = now.getHours() * 60 + now.getMinutes();
         onSunChange(now);
+    }
+
+    function toggleShadows() {
+        onShadowsChange(shadowsOn);
     }
 </script>
 
@@ -140,6 +149,12 @@
                     />
                     <span class="text-sm font-mono tabular-nums w-12 text-right">{timeLabel}</span>
                 </div>
+                {#if shadowsCapable}
+                    <label class="flex items-center gap-2 cursor-pointer py-1">
+                        <input type="checkbox" class="toggle toggle-sm" bind:checked={shadowsOn} onchange={toggleShadows} />
+                        <span class="text-sm">Cast shadows</span>
+                    </label>
+                {/if}
                 <button class="btn btn-sm btn-outline" onclick={setSunNow}>Now</button>
             </div>
         {/if}

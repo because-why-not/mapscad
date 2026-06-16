@@ -13,11 +13,6 @@ const toGeoZoom = (z: number) => z + 1;
 // lets terrain stay 3D when zoomed out a bit rather than flattening abruptly.
 const DEM_UNDERZOOM = 3;
 
-// Report the DEM at a fraction of its true tile size so MapLibre fetches a zoom level
-// deeper for any given view, reaching the server's fine native data sooner. 2 ≈ double
-// the terrain detail (and ~4x the tile requests).
-const DEM_DETAIL = 2;
-
 interface SunDirection { azimuth: number; altitude: number; }
 
 /**
@@ -142,7 +137,7 @@ function buildTerrainStyle(spec: CustomMapSpec, mapsById: Record<string, Manifes
         dem: {
             type: 'raster-dem',
             tiles: [dem.tiles[0]],
-            tileSize: (dem.mmapsrv.tileSize ?? 256) / DEM_DETAIL,
+            tileSize: dem.mmapsrv.tileSize ?? 256,
             // Respect the server's lowest stored zoom (requesting below it 404s), but
             // permit a few extra under-zoom levels that the server downsamples on demand.
             minzoom: Math.max(dem.minzoom, (dem.mmapsrv.minStoredZoom ?? dem.minzoom) - DEM_UNDERZOOM),

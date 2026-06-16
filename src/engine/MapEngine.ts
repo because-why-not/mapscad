@@ -40,4 +40,7 @@ export interface MapEngine {
      * this as a no-op.
      */
     setSun?(azimuthDeg: number, altitudeDeg: number): void;
+
+    /** Optional: toggle cast shadows. Only engines that render shadows implement this. */
+    setShadows?(enabled: boolean): void;
 }
