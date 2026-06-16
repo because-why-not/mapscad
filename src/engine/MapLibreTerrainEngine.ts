@@ -112,7 +112,7 @@ export class MapLibreTerrainEngine implements MapEngine {
         this.map.jumpTo({ center: [view.lng, view.lat], zoom: toMlZoom(view.zoom) });
     }
 
-    /** Push the current sun direction onto the live hillshade layer, if present. */
+    /** Push the current sun onto the live hillshade + land-base layers, if present. */
     private applySunToMap(): void {
         const map = this.map;
         if (!map) return;
@@ -120,6 +120,9 @@ export class MapLibreTerrainEngine implements MapEngine {
             if (!map.getLayer || !map.getLayer('hillshade')) return;
             const paint = hillshadePaint(this.sun);
             for (const key of Object.keys(paint)) map.setPaintProperty('hillshade', key, paint[key]);
+            if (map.getLayer('bg')) {
+                map.setPaintProperty('bg', 'background-color', terrainBaseColor(this.sun));
+            }
         } catch {
             // style not ready yet — the style.load handler will re-apply.
         }
@@ -148,8 +151,11 @@ function buildTerrainStyle(spec: CustomMapSpec, mapsById: Record<string, Manifes
             attribution: dem.attribution,
         },
     };
+    // Land base under the hillshade (flat ground shows this, since the hillshade layer
+    // only paints slopes); imagery maps just use a dark void behind the raster.
+    const baseColor = spec.surface.type === 'hillshade' ? terrainBaseColor(sun) : '#0b1021';
     const layers: any[] = [
-        { id: 'bg', type: 'background', paint: { 'background-color': '#0b1021' } },
+        { id: 'bg', type: 'background', paint: { 'background-color': baseColor } },
     ];
 
     if (spec.surface.type === 'imagery') {
@@ -189,25 +195,51 @@ function buildTerrainStyle(spec: CustomMapSpec, mapsById: Record<string, Manifes
     };
 }
 
+// How much of full daylight we have: 0 at/below the horizon, 1 once the sun is high.
+function daylightFactor(altitudeDeg: number): number {
+    return Math.max(0, Math.min(1, altitudeDeg / 25));
+}
+
 /**
- * Hillshade paint derived from the sun direction. MapLibre's hillshade layer only
- * takes an illumination azimuth (not an altitude), so we additionally use the sun's
- * altitude to modulate the relief: a low sun yields long, strong shadows, and once
- * the sun is below the horizon the surface goes dark and flat (night).
+ * Land base colour the relief sits on. Tracks the sun's altitude so the whole scene
+ * brightens through the day and darkens to a moonlit blue at night — this is what
+ * makes the time-of-day visibly change the map (the hillshade layer alone only
+ * shades slopes, leaving flat ground showing this colour).
+ */
+function terrainBaseColor(sun: SunDirection): string {
+    const day = daylightFactor(sun.altitude);
+    return lerpHex('#141823', '#c9c3b2', day); // night blue-grey -> daylit tan
+}
+
+/**
+ * Hillshade paint derived from the sun. MapLibre's hillshade layer only takes an
+ * illumination azimuth (not an altitude), so we use the altitude to modulate the
+ * relief strength: a low sun yields longer, stronger shadows.
  */
 function hillshadePaint(sun: SunDirection): Record<string, any> {
-    // 0 at/below the horizon, 1 once the sun is ≥ 45° up.
-    const daylight = Math.max(0, Math.min(1, sun.altitude / 45));
-    const exaggeration = 0.4 + (1 - daylight) * 0.5;            // 0.4 (high sun) .. 0.9 (low sun)
-    const highlight = sun.altitude <= 0 ? '#3a4660' : '#ffffff'; // dim the lit side at night
+    const day = daylightFactor(sun.altitude);
+    const exaggeration = 0.45 + (1 - day) * 0.35;   // 0.45 (high sun) .. 0.8 (low/night)
     return {
         'hillshade-exaggeration': exaggeration,
-        'hillshade-shadow-color': '#1b2230',
-        'hillshade-highlight-color': highlight,
-        'hillshade-accent-color': '#3a4a5a',
+        'hillshade-shadow-color': '#23252e',
+        'hillshade-highlight-color': '#ffffff',
+        'hillshade-accent-color': '#6b7280',
         'hillshade-illumination-direction': Math.round(sun.azimuth),
         // Anchor the light to the map (north), not the viewport, so rotating the
         // camera doesn't swing the shading around.
         'hillshade-illumination-anchor': 'map',
     };
+}
+
+/** Linear interpolate between two #rrggbb colours. */
+function lerpHex(a: string, b: string, t: number): string {
+    const pa = parseInt(a.slice(1), 16);
+    const pb = parseInt(b.slice(1), 16);
+    const mix = (sh: number) => {
+        const ca = (pa >> sh) & 0xff;
+        const cb = (pb >> sh) & 0xff;
+        return Math.round(ca + (cb - ca) * t) & 0xff;
+    };
+    const r = mix(16), g = mix(8), bl = mix(0);
+    return `#${((1 << 24) | (r << 16) | (g << 8) | bl).toString(16).slice(1)}`;
 }

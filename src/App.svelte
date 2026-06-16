@@ -14,10 +14,14 @@
     let activeProviderId = $state(untrack(() => initialActiveProviderId));
     let providerList = $state(untrack(() => tileProviders));
     let customList = $state(untrack(() => customMaps));
-    let sunValue = $state(untrack(() => toLocalInput(initialSunDate)));
+    // Date + minutes-of-day kept separately so the time is a self-formatted 24h control
+    // (datetime-local / time inputs render 12h or 24h per browser locale — unreliable).
+    let dateValue = $state(untrack(() => toDateInput(initialSunDate)));
+    let minutesOfDay = $state(untrack(() => initialSunDate.getHours() * 60 + initialSunDate.getMinutes()));
 
     // The Sun controls only make sense for sun-capable maps (e.g. hillshade).
     let sunEnabled = $derived(!!customList.find(c => c.id === activeProviderId)?.sun);
+    let timeLabel = $derived(formatTime(minutesOfDay));
 
     // Called by index.ts after the manifest loads / when the active map changes.
     export function setTileProviders(providers) { providerList = providers; }
@@ -31,19 +35,31 @@
         onLayerSwitch(id);
     }
 
-    // Format a Date as the local 'YYYY-MM-DDThh:mm' string a datetime-local needs.
-    function toLocalInput(date) {
-        const p = (n) => String(n).padStart(2, '0');
-        return `${date.getFullYear()}-${p(date.getMonth() + 1)}-${p(date.getDate())}T${p(date.getHours())}:${p(date.getMinutes())}`;
+    function pad(n) { return String(n).padStart(2, '0'); }
+
+    // Format a Date as the local 'YYYY-MM-DD' string a date input needs.
+    function toDateInput(date) {
+        return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+    }
+
+    // Always 24h, formatted by us — independent of browser locale.
+    function formatTime(minutes) {
+        return `${pad(Math.floor(minutes / 60))}:${pad(minutes % 60)}`;
+    }
+
+    function composeSunDate() {
+        const [y, m, d] = dateValue.split('-').map(Number);
+        return new Date(y, m - 1, d, Math.floor(minutesOfDay / 60), minutesOfDay % 60);
     }
 
     function emitSun() {
-        if (sunValue) onSunChange(new Date(sunValue));
+        if (dateValue) onSunChange(composeSunDate());
     }
 
     function setSunNow() {
         const now = new Date();
-        sunValue = toLocalInput(now);
+        dateValue = toDateInput(now);
+        minutesOfDay = now.getHours() * 60 + now.getMinutes();
         onSunChange(now);
     }
 </script>
@@ -107,12 +123,23 @@
             <div class="px-4 py-1 mt-2 text-xs font-bold uppercase tracking-wider opacity-50">Sun</div>
             <div class="px-4 py-2 flex flex-col gap-2">
                 <input
-                    type="datetime-local"
-                    lang="en-GB"
+                    type="date"
                     class="input input-sm input-bordered w-full"
-                    bind:value={sunValue}
-                    oninput={emitSun}
+                    bind:value={dateValue}
+                    onchange={emitSun}
                 />
+                <div class="flex items-center gap-2">
+                    <input
+                        type="range"
+                        min="0"
+                        max="1439"
+                        step="5"
+                        class="range range-sm flex-1"
+                        bind:value={minutesOfDay}
+                        oninput={emitSun}
+                    />
+                    <span class="text-sm font-mono tabular-nums w-12 text-right">{timeLabel}</span>
+                </div>
                 <button class="btn btn-sm btn-outline" onclick={setSunNow}>Now</button>
             </div>
         {/if}
