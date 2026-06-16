@@ -3,6 +3,7 @@
 
     let {
         tileProviders = [],
+        customMaps = [],
         initialActiveProviderId = '',
         onLayerSwitch = () => {},
     } = $props();
@@ -10,9 +11,11 @@
     let menuOpen = $state(false);
     let activeProviderId = $state(untrack(() => initialActiveProviderId));
     let providerList = $state(untrack(() => tileProviders));
+    let customList = $state(untrack(() => customMaps));
 
-    // Called by index.ts after the manifest loads / when the active layer changes.
+    // Called by index.ts after the manifest loads / when the active map changes.
     export function setTileProviders(providers) { providerList = providers; }
+    export function setCustomMaps(maps) { customList = maps; }
     export function setActiveProvider(id) { activeProviderId = id; }
 
     function handleLayerSwitch(id) {
@@ -60,5 +63,22 @@
                 </li>
             {/each}
         </ul>
+
+        {#if customList.length}
+            <div class="px-4 py-1 mt-2 text-xs font-bold uppercase tracking-wider opacity-50">Custom Maps</div>
+            <ul class="menu px-2">
+                {#each customList as custom (custom.id)}
+                    <li>
+                        <button
+                            class={custom.id === activeProviderId ? 'active' : ''}
+                            onclick={() => handleLayerSwitch(custom.id)}
+                        >
+                            <span>{custom.icon}</span>
+                            {custom.name}
+                        </button>
+                    </li>
+                {/each}
+            </ul>
+        {/if}
     </div>
 </div>

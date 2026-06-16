@@ -2,12 +2,20 @@
 @tailwind components;
 @tailwind utilities;
 
-/* Map must cover the full viewport — OpenLayers targets #map by ID */
-#map {
+/* The active map engine renders its surface(s) into #map-root, full viewport. */
+#map-root {
     position: absolute;
     top: 0;
     left: 0;
     width: 100%;
     height: 100%;
     z-index: 1;
+}
+
+.map-surface {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
 }

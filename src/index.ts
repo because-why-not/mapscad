@@ -1,26 +1,23 @@
 import { mount } from 'svelte';
 import App from './App.svelte';
-import Map from 'ol/Map';
-import View from 'ol/View';
-import { fromLonLat, toLonLat } from 'ol/proj';
-import { defaults as defaultControls, ScaleLine } from 'ol/control';
-import 'ol/ol.css';
 import './app.css';
 import { Env } from './Env';
-import { fetchTileMapManifest } from './TileMapManifest';
-import { layerFromManifest, LayerEntry, VIEW_MAX_ZOOM } from './manifestLayers';
+import { fetchTileMapManifest, ManifestMap } from './TileMapManifest';
+import { prettifyMapName, iconForMapType } from './mapMeta';
+import { availableCustomMaps } from './customMaps';
+import { MapController } from './MapController';
+import { OpenLayersEngine } from './engine/OpenLayersEngine';
+import { MapLibreTerrainEngine } from './engine/MapLibreTerrainEngine';
+import type { GeoView, MapEngine } from './engine/MapEngine';
 
-interface MapView { lng: number; lat: number; zoom: number; }
+// This file is the composition root: the only place that names concrete engines.
+// Everything it wires together (MapController, App, persistence) is engine-agnostic.
 
-const DEFAULT_VIEW: MapView = { lng: 170.5028, lat: -45.8788, zoom: 13 }; // Dunedin
+const DEFAULT_VIEW: GeoView = { lng: 170.5028, lat: -45.8788, zoom: 13 }; // Dunedin
 
-let olMap: Map;
-let view: View;
-let providers: LayerEntry[] = [];
-let activeId = '';
 let appInstance: any = null;
 
-function loadMapView(): MapView {
+function loadView(): GeoView {
     try {
         const s = localStorage.getItem('mapView');
         if (s) return JSON.parse(s);
@@ -28,56 +25,60 @@ function loadMapView(): MapView {
     return DEFAULT_VIEW;
 }
 
-function saveMapView(): void {
-    const c = toLonLat(view.getCenter()!);
-    const v: MapView = { lng: c[0], lat: c[1], zoom: view.getZoom() ?? DEFAULT_VIEW.zoom };
+function saveView(v: GeoView): void {
     try { localStorage.setItem('mapView', JSON.stringify(v)); } catch (e) { Env.error('save mapView', e); }
 }
 
-function saveActiveProvider(): void {
-    try { localStorage.setItem('activeProvider', activeId); } catch (e) { Env.error('save activeProvider', e); }
-}
-
-function setActiveLayer(id: string): void {
-    const entry = providers.find(p => p.id === id);
-    if (!entry) return;
-    for (const p of providers) p.layer.setVisible(p.id === id);
-    activeId = id;
-    appInstance?.setActiveProvider(id);
-    saveActiveProvider();
+function saveActive(id: string): void {
+    try { localStorage.setItem('activeProvider', id); } catch (e) { Env.error('save activeProvider', e); }
 }
 
 async function init(): Promise<void> {
-    const v = loadMapView();
-    view = new View({ center: fromLonLat([v.lng, v.lat]), zoom: v.zoom, maxZoom: VIEW_MAX_ZOOM });
-    olMap = new Map({
-        target: 'map',
-        layers: [],
-        view,
-        controls: defaultControls().extend([new ScaleLine()]),
-    });
-    view.on('change', saveMapView); // or olMap.on('moveend', saveMapView)
+    const root = document.getElementById('map-root')!;
 
     const maps = await fetchTileMapManifest();
     if (maps.length === 0) {
         Env.warn('No maps returned by manifest — check tile server / network.');
     }
-    providers = maps.map(layerFromManifest);
-    for (const p of providers) olMap.addLayer(p.layer);
+    const mapsById: Record<string, ManifestMap> = Object.fromEntries(maps.map(m => [m.name, m]));
+    const customSpecs = availableCustomMaps(mapsById);
 
-    // Restore previously selected layer, else first in the manifest.
+    // Composition root: choose concrete engines here; nothing else knows about them.
+    const engines: MapEngine[] = [new OpenLayersEngine(maps)];
+    if (customSpecs.length) engines.push(new MapLibreTerrainEngine(customSpecs, mapsById));
+
+    const controller = new MapController({
+        engines,
+        container: root,
+        initialView: loadView(),
+        onActiveChange: id => appInstance?.setActiveProvider(id),
+        onViewPersist: saveView,
+        onActivePersist: saveActive,
+    });
+
+    const tileProviders = maps.map(m => ({
+        id: m.name,
+        name: prettifyMapName(m.name),
+        icon: iconForMapType(m.mmapsrv.type),
+    }));
+    const customMaps = customSpecs.map(s => ({ id: s.id, name: s.name, icon: s.icon }));
+
     const saved = localStorage.getItem('activeProvider');
-    const initial = providers.find(p => p.id === saved)?.id ?? providers[0]?.id ?? '';
-    if (initial) setActiveLayer(initial);
+    const initialId = (saved && controller.sourceIds.includes(saved))
+        ? saved
+        : (tileProviders[0]?.id ?? customMaps[0]?.id ?? '');
 
     appInstance = mount(App, {
         target: document.getElementById('svelte-app')!,
         props: {
-            tileProviders: providers.map(({ id, name, icon }) => ({ id, name, icon })),
-            initialActiveProviderId: initial,
-            onLayerSwitch: (id: string) => setActiveLayer(id),
+            tileProviders,
+            customMaps,
+            initialActiveProviderId: initialId,
+            onLayerSwitch: (id: string) => controller.select(id),
         },
     });
+
+    if (initialId) controller.select(initialId);
 }
 
 if (document.readyState === 'loading') {
