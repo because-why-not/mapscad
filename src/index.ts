@@ -33,6 +33,21 @@ function saveActive(id: string): void {
     try { localStorage.setItem('activeProvider', id); } catch (e) { Env.error('save activeProvider', e); }
 }
 
+function loadSunDate(): Date {
+    try {
+        const s = localStorage.getItem('sunDate');
+        if (s) {
+            const d = new Date(s);
+            if (!isNaN(d.valueOf())) return d;
+        }
+    } catch (e) { Env.error('load sunDate', e); }
+    return new Date();
+}
+
+function saveSunDate(date: Date): void {
+    try { localStorage.setItem('sunDate', date.toISOString()); } catch (e) { Env.error('save sunDate', e); }
+}
+
 async function init(): Promise<void> {
     const root = document.getElementById('map-root')!;
 
@@ -47,10 +62,12 @@ async function init(): Promise<void> {
     const engines: MapEngine[] = [new OpenLayersEngine(maps)];
     if (customSpecs.length) engines.push(new MapLibreTerrainEngine(customSpecs, mapsById));
 
+    const initialSunDate = loadSunDate();
     const controller = new MapController({
         engines,
         container: root,
         initialView: loadView(),
+        initialSunDate,
         onActiveChange: id => appInstance?.setActiveProvider(id),
         onViewPersist: saveView,
         onActivePersist: saveActive,
@@ -61,7 +78,12 @@ async function init(): Promise<void> {
         name: prettifyMapName(m.name),
         icon: iconForMapType(m.mmapsrv.type),
     }));
-    const customMaps = customSpecs.map(s => ({ id: s.id, name: s.name, icon: s.icon }));
+    const customMaps = customSpecs.map(s => ({
+        id: s.id,
+        name: s.name,
+        icon: s.icon,
+        sun: s.surface.type === 'hillshade',
+    }));
 
     const saved = localStorage.getItem('activeProvider');
     const initialId = (saved && controller.sourceIds.includes(saved))
@@ -74,7 +96,9 @@ async function init(): Promise<void> {
             tileProviders,
             customMaps,
             initialActiveProviderId: initialId,
+            initialSunDate,
             onLayerSwitch: (id: string) => controller.select(id),
+            onSunChange: (date: Date) => { saveSunDate(date); controller.setSunDate(date); },
         },
     });
 

@@ -1,9 +1,11 @@
 import type { GeoView, MapEngine } from './engine/MapEngine';
+import { sunPosition } from './solar';
 
 export interface MapControllerOptions {
     engines: MapEngine[];
     container: HTMLElement;
     initialView: GeoView;
+    initialSunDate?: Date;
     onActiveChange?: (id: string) => void;   // active source changed (update UI)
     onViewPersist?: (view: GeoView) => void; // user moved the map (persist)
     onActivePersist?: (id: string) => void;  // active source changed (persist)
@@ -21,9 +23,11 @@ export class MapController {
     private mounted = new Set<MapEngine>();
     private active: MapEngine | null = null;
     private view: GeoView;
+    private sunDate: Date;
 
     constructor(private opts: MapControllerOptions) {
         this.view = opts.initialView;
+        this.sunDate = opts.initialSunDate ?? new Date();
         for (const engine of opts.engines) {
             for (const id of engine.sourceIds) this.bySource.set(id, engine);
         }
@@ -52,14 +56,28 @@ export class MapController {
                 this.mounted.add(engine);
             }
             engine.setActiveSource(id);
+            this.applySun(engine);
             engine.show(this.view);
             this.active = engine;
         } else {
             engine.setActiveSource(id);
+            this.applySun(engine);
         }
 
         this.activeId = id;
         this.opts.onActiveChange?.(id);
         this.opts.onActivePersist?.(id);
+    }
+
+    /** Set the date/time used to compute the sun position, and apply it live. */
+    setSunDate(date: Date): void {
+        this.sunDate = date;
+        if (this.active) this.applySun(this.active);
+    }
+
+    private applySun(engine: MapEngine): void {
+        if (!engine.setSun) return;
+        const { azimuth, altitude } = sunPosition(this.sunDate, this.view.lat, this.view.lng);
+        engine.setSun(azimuth, altitude);
     }
 }

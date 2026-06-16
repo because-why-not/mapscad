@@ -18,6 +18,7 @@ export interface MmapSrv {
     proxy: boolean;          // true => proxied public upstream (rate-limit, single-stream download)
     downloadable?: boolean;
     minDownloadZoom?: number; // lowest zoom with natively stored tiles (== floor of coarsest level)
+    minStoredZoom?: number;   // lowest zoom the server actually has tiles for (below this => 404)
     tileFormat: string;       // 'png' | 'jpeg'
     tileSize?: number;
     tileCrs?: string;

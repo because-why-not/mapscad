@@ -8,6 +8,13 @@ import type { GeoView, MapEngine } from './MapEngine';
 const toMlZoom = (z: number) => z - 1;
 const toGeoZoom = (z: number) => z + 1;
 
+// Allow requesting DEM tiles a few zooms below the server's lowest stored level: the
+// server can downsample further on demand (just increasingly inefficiently), and it
+// lets terrain stay 3D when zoomed out a bit rather than flattening abruptly.
+const DEM_UNDERZOOM = 3;
+
+interface SunDirection { azimuth: number; altitude: number; }
+
 /**
  * 3D renderer: drapes a raster imagery source over terrain derived from a
  * terrarium-encoded DEM. The heavy maplibre-gl library is dynamically imported on
@@ -21,6 +28,7 @@ export class MapLibreTerrainEngine implements MapEngine {
     private moveCb: (() => void) | null = null;
     private activeId = '';
     private specById = new Map<string, CustomMapSpec>();
+    private sun: SunDirection = { azimuth: 315, altitude: 45 };
 
     constructor(specs: CustomMapSpec[], private mapsById: Record<string, ManifestMap>) {
         this.sourceIds = specs.map(s => s.id);
@@ -42,7 +50,12 @@ export class MapLibreTerrainEngine implements MapEngine {
         const spec = this.specById.get(id);
         if (!spec) return;
         this.activeId = id;
-        if (this.map) this.map.setStyle(buildTerrainStyle(spec, this.mapsById));
+        if (this.map) this.map.setStyle(buildTerrainStyle(spec, this.mapsById, this.sun));
+    }
+
+    setSun(azimuthDeg: number, altitudeDeg: number): void {
+        this.sun = { azimuth: azimuthDeg, altitude: altitudeDeg };
+        this.applySunToMap();
     }
 
     show(view: GeoView): void {
@@ -72,7 +85,7 @@ export class MapLibreTerrainEngine implements MapEngine {
 
     private create(view: GeoView): void {
         const spec = this.specById.get(this.activeId);
-        const style = spec ? buildTerrainStyle(spec, this.mapsById) : { version: 8, sources: {}, layers: [] };
+        const style = spec ? buildTerrainStyle(spec, this.mapsById, this.sun) : { version: 8, sources: {}, layers: [] };
         const map = new this.gl.Map({
             container: this.el,
             style,
@@ -85,11 +98,26 @@ export class MapLibreTerrainEngine implements MapEngine {
         const nav = new this.gl.NavigationControl({ visualizePitch: true });
         map.addControl(nav, 'bottom-left');
         if (this.moveCb) map.on('moveend', this.moveCb);
+        // Re-apply the current sun whenever a style (re)loads, e.g. after setStyle.
+        map.on('style.load', () => this.applySunToMap());
         this.map = map;
     }
 
     private applyView(view: GeoView): void {
         this.map.jumpTo({ center: [view.lng, view.lat], zoom: toMlZoom(view.zoom) });
+    }
+
+    /** Push the current sun direction onto the live hillshade layer, if present. */
+    private applySunToMap(): void {
+        const map = this.map;
+        if (!map) return;
+        try {
+            if (!map.getLayer || !map.getLayer('hillshade')) return;
+            const paint = hillshadePaint(this.sun);
+            for (const key of Object.keys(paint)) map.setPaintProperty('hillshade', key, paint[key]);
+        } catch {
+            // style not ready yet — the style.load handler will re-apply.
+        }
     }
 }
 
@@ -100,14 +128,16 @@ export class MapLibreTerrainEngine implements MapEngine {
  * the DEM itself. Returned loosely-typed so the abstraction above carries no
  * compile-time dependency on maplibre's style types.
  */
-function buildTerrainStyle(spec: CustomMapSpec, mapsById: Record<string, ManifestMap>): any {
+function buildTerrainStyle(spec: CustomMapSpec, mapsById: Record<string, ManifestMap>, sun: SunDirection): any {
     const dem = mapsById[spec.demSource];
     const sources: Record<string, any> = {
         dem: {
             type: 'raster-dem',
             tiles: [dem.tiles[0]],
             tileSize: dem.mmapsrv.tileSize ?? 256,
-            minzoom: dem.minzoom,
+            // Respect the server's lowest stored zoom (requesting below it 404s), but
+            // permit a few extra under-zoom levels that the server downsamples on demand.
+            minzoom: Math.max(dem.minzoom, (dem.mmapsrv.minStoredZoom ?? dem.minzoom) - DEM_UNDERZOOM),
             maxzoom: dem.maxzoom,
             encoding: 'terrarium',
             attribution: dem.attribution,
@@ -134,16 +164,7 @@ function buildTerrainStyle(spec: CustomMapSpec, mapsById: Record<string, Manifes
             id: 'hillshade',
             type: 'hillshade',
             source: 'dem',
-            paint: {
-                'hillshade-exaggeration': 0.7,
-                'hillshade-shadow-color': '#1b2230',
-                'hillshade-highlight-color': '#ffffff',
-                'hillshade-accent-color': '#3a4a5a',
-                'hillshade-illumination-direction': 315,
-                // Anchor the light to the map (north), not the viewport, so rotating
-                // the camera doesn't swing the shading around.
-                'hillshade-illumination-anchor': 'map',
-            },
+            paint: hillshadePaint(sun),
         });
     }
 
@@ -160,5 +181,28 @@ function buildTerrainStyle(spec: CustomMapSpec, mapsById: Record<string, Manifes
             'horizon-fog-blend': 0.5,
             'fog-ground-blend': 0.5,
         },
+    };
+}
+
+/**
+ * Hillshade paint derived from the sun direction. MapLibre's hillshade layer only
+ * takes an illumination azimuth (not an altitude), so we additionally use the sun's
+ * altitude to modulate the relief: a low sun yields long, strong shadows, and once
+ * the sun is below the horizon the surface goes dark and flat (night).
+ */
+function hillshadePaint(sun: SunDirection): Record<string, any> {
+    // 0 at/below the horizon, 1 once the sun is ≥ 45° up.
+    const daylight = Math.max(0, Math.min(1, sun.altitude / 45));
+    const exaggeration = 0.4 + (1 - daylight) * 0.5;            // 0.4 (high sun) .. 0.9 (low sun)
+    const highlight = sun.altitude <= 0 ? '#3a4660' : '#ffffff'; // dim the lit side at night
+    return {
+        'hillshade-exaggeration': exaggeration,
+        'hillshade-shadow-color': '#1b2230',
+        'hillshade-highlight-color': highlight,
+        'hillshade-accent-color': '#3a4a5a',
+        'hillshade-illumination-direction': Math.round(sun.azimuth),
+        // Anchor the light to the map (north), not the viewport, so rotating the
+        // camera doesn't swing the shading around.
+        'hillshade-illumination-anchor': 'map',
     };
 }

@@ -33,4 +33,11 @@ export interface MapEngine {
 
     /** Register a callback fired on user-driven view changes. Called once after mount. */
     onViewChange(cb: () => void): void;
+
+    /**
+     * Optional: set the sun/light direction (azimuth & altitude, degrees). Engines
+     * that don't model lighting — or sources that have nothing to light — may treat
+     * this as a no-op.
+     */
+    setSun?(azimuthDeg: number, altitudeDeg: number): void;
 }
