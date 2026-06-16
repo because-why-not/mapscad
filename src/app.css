@@ -19,3 +19,9 @@
     width: 100%;
     height: 100%;
 }
+
+/* Crosshair while the region-selection tool is active. */
+.map-crosshair,
+.map-crosshair canvas {
+    cursor: crosshair;
+}

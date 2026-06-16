@@ -10,6 +10,8 @@
         onLayerSwitch = () => {},
         onSunChange = () => {},
         onShadowsChange = () => {},
+        onSelectToggle = () => {},
+        onSelectionSave = () => {},
     } = $props();
 
     let menuOpen = $state(false);
@@ -22,6 +24,8 @@
     let minutesOfDay = $state(untrack(() => initialSunDate.getHours() * 60 + initialSunDate.getMinutes()));
 
     let shadowsOn = $state(untrack(() => initialShadows));
+    let selectActive = $state(false);
+    let hasSelection = $state(false);
 
     // The Sun controls only make sense for sun-capable maps (e.g. hillshade).
     let sunEnabled = $derived(!!customList.find(c => c.id === activeProviderId)?.sun);
@@ -32,6 +36,14 @@
     export function setTileProviders(providers) { providerList = providers; }
     export function setCustomMaps(maps) { customList = maps; }
     export function setActiveProvider(id) { activeProviderId = id; }
+    export function setSelectActive(active) { selectActive = active; }
+    export function setHasSelection(has) { hasSelection = has; }
+
+    function toggleSelect() {
+        selectActive = !selectActive;
+        if (!selectActive) hasSelection = false;
+        onSelectToggle(selectActive);
+    }
 
     function handleLayerSwitch(id) {
         if (id === activeProviderId) return;
@@ -72,6 +84,24 @@
         onShadowsChange(shadowsOn);
     }
 </script>
+
+<!-- Selection toolbar (top-left) -->
+<div class="fixed top-4 left-4 z-[1000] flex flex-col gap-2">
+    <button
+        class="btn btn-square shadow-md border-0 {selectActive ? 'btn-primary' : 'bg-base-100'}"
+        aria-label="Select area"
+        title="Select area"
+        onclick={toggleSelect}
+    >⬚</button>
+    {#if selectActive && hasSelection}
+        <button
+            class="btn btn-square bg-base-100 shadow-md border-0"
+            aria-label="Save selection"
+            title="Save selection"
+            onclick={onSelectionSave}
+        >💾</button>
+    {/if}
+</div>
 
 <!-- Menu button (top-right, above map) -->
 <button

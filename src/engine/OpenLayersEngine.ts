@@ -21,7 +21,7 @@ export class OpenLayersEngine implements MapEngine {
     private view!: View;
     private layerById = new Map<string, TileLayer<XYZ>>();
 
-    constructor(private maps: ManifestMap[]) {
+    constructor(private maps: ManifestMap[], private onReady?: (map: OlMap) => void) {
         this.sourceIds = maps.map(m => m.name);
     }
 
@@ -57,6 +57,7 @@ export class OpenLayersEngine implements MapEngine {
         const controls = defaultControls().extend([scaleLine]);
         const map = new OlMap({ target: el, layers, view: olView, controls });
         this.map = map;
+        this.onReady?.(map);
     }
 
     setActiveSource(id: string): void {

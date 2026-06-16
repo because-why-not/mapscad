@@ -9,6 +9,7 @@ import { MapController } from './MapController';
 import { OpenLayersEngine } from './engine/OpenLayersEngine';
 import { MapLibreTerrainEngine } from './engine/MapLibreTerrainEngine';
 import { DeckTerrainEngine } from './engine/DeckTerrainEngine';
+import { SelectionArea, LonLat } from './SelectionArea';
 import type { GeoView, MapEngine } from './engine/MapEngine';
 
 // This file is the composition root: the only place that names concrete engines.
@@ -57,6 +58,24 @@ function saveShadows(enabled: boolean): void {
     try { localStorage.setItem('shadows', enabled ? '1' : '0'); } catch (e) { Env.error('save shadows', e); }
 }
 
+function loadSelectionCorners(): LonLat[] | null {
+    try {
+        const s = localStorage.getItem('selectionCorners');
+        if (s) {
+            const c = JSON.parse(s);
+            if (Array.isArray(c) && c.length === 4) return c;
+        }
+    } catch (e) { Env.error('load selectionCorners', e); }
+    return null;
+}
+
+function saveSelectionCorners(corners: LonLat[] | null): void {
+    try {
+        if (corners) localStorage.setItem('selectionCorners', JSON.stringify(corners));
+        else localStorage.removeItem('selectionCorners');
+    } catch (e) { Env.error('save selectionCorners', e); }
+}
+
 async function init(): Promise<void> {
     const root = document.getElementById('map-root')!;
 
@@ -71,7 +90,26 @@ async function init(): Promise<void> {
     // Split the custom maps by which renderer claims them.
     const deckSpecs = customSpecs.filter(s => s.surface.type === 'shaded-relief');
     const mapLibreSpecs = customSpecs.filter(s => s.surface.type !== 'shaded-relief');
-    const engines: MapEngine[] = [new OpenLayersEngine(maps)];
+
+    // The region-selection tool lives on the OpenLayers 2D map; it's created once the
+    // OL map is ready, then restored from any previously saved selection.
+    let selection: SelectionArea | null = null;
+    const olEngine = new OpenLayersEngine(maps, olMap => {
+        if (selection) return; // already created on an earlier mount
+        selection = new SelectionArea(olMap, {
+            onChange: corners => {
+                saveSelectionCorners(corners);
+                appInstance?.setHasSelection(!!corners);
+            },
+        });
+        const savedCorners = loadSelectionCorners();
+        if (savedCorners) {
+            selection.restore(savedCorners);
+            appInstance?.setSelectActive(true);
+            appInstance?.setHasSelection(true);
+        }
+    });
+    const engines: MapEngine[] = [olEngine];
     if (mapLibreSpecs.length) engines.push(new MapLibreTerrainEngine(mapLibreSpecs, mapsById));
     if (deckSpecs.length) engines.push(new DeckTerrainEngine(deckSpecs, mapsById));
 
@@ -117,6 +155,15 @@ async function init(): Promise<void> {
             onLayerSwitch: (id: string) => controller.select(id),
             onSunChange: (date: Date) => { saveSunDate(date); controller.setSunDate(date); },
             onShadowsChange: (enabled: boolean) => { saveShadows(enabled); controller.setShadowsEnabled(enabled); },
+            onSelectToggle: (active: boolean) => {
+                if (!selection) return;
+                if (active) selection.activate();
+                else { selection.deactivate(); appInstance?.setHasSelection(false); }
+            },
+            onSelectionSave: () => {
+                const corners = selection?.getCorners();
+                if (corners) Env.log('[selection] corners', JSON.stringify(corners));
+            },
         },
     });
 
