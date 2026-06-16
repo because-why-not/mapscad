@@ -94,37 +94,63 @@ export class MapLibreTerrainEngine implements MapEngine {
 }
 
 /**
- * Build a MapLibre GL StyleSpecification (a plain object) that drapes the imagery
- * raster over terrain from the terrarium-encoded DEM. Returned loosely-typed so the
- * abstraction above carries no compile-time dependency on maplibre's style types.
+ * Build a MapLibre GL StyleSpecification (a plain object) for a 3D terrain map. The
+ * terrarium-encoded DEM always drives the terrain; the surface painted on top is
+ * either a draped raster (e.g. aerial imagery) or a computed hillshade derived from
+ * the DEM itself. Returned loosely-typed so the abstraction above carries no
+ * compile-time dependency on maplibre's style types.
  */
 function buildTerrainStyle(spec: CustomMapSpec, mapsById: Record<string, ManifestMap>): any {
-    const imagery = mapsById[spec.imagerySource];
     const dem = mapsById[spec.demSource];
+    const sources: Record<string, any> = {
+        dem: {
+            type: 'raster-dem',
+            tiles: [dem.tiles[0]],
+            tileSize: dem.mmapsrv.tileSize ?? 256,
+            minzoom: dem.minzoom,
+            maxzoom: dem.maxzoom,
+            encoding: 'terrarium',
+            attribution: dem.attribution,
+        },
+    };
+    const layers: any[] = [
+        { id: 'bg', type: 'background', paint: { 'background-color': '#0b1021' } },
+    ];
+
+    if (spec.surface.type === 'imagery') {
+        const imagery = mapsById[spec.surface.source];
+        sources.imagery = {
+            type: 'raster',
+            tiles: [imagery.tiles[0]],
+            tileSize: imagery.mmapsrv.tileSize ?? 256,
+            minzoom: imagery.minzoom,
+            maxzoom: imagery.maxzoom,
+            attribution: imagery.attribution,
+        };
+        layers.push({ id: 'imagery', type: 'raster', source: 'imagery' });
+    } else {
+        // Shaded relief computed straight from the DEM — no separate tileset needed.
+        layers.push({
+            id: 'hillshade',
+            type: 'hillshade',
+            source: 'dem',
+            paint: {
+                'hillshade-exaggeration': 0.7,
+                'hillshade-shadow-color': '#1b2230',
+                'hillshade-highlight-color': '#ffffff',
+                'hillshade-accent-color': '#3a4a5a',
+                'hillshade-illumination-direction': 315,
+                // Anchor the light to the map (north), not the viewport, so rotating
+                // the camera doesn't swing the shading around.
+                'hillshade-illumination-anchor': 'map',
+            },
+        });
+    }
+
     return {
         version: 8,
-        sources: {
-            imagery: {
-                type: 'raster',
-                tiles: [imagery.tiles[0]],
-                tileSize: imagery.mmapsrv.tileSize ?? 256,
-                minzoom: imagery.minzoom,
-                maxzoom: imagery.maxzoom,
-                attribution: imagery.attribution,
-            },
-            dem: {
-                type: 'raster-dem',
-                tiles: [dem.tiles[0]],
-                tileSize: dem.mmapsrv.tileSize ?? 256,
-                minzoom: dem.minzoom,
-                maxzoom: dem.maxzoom,
-                encoding: 'terrarium',
-            },
-        },
-        layers: [
-            { id: 'bg', type: 'background', paint: { 'background-color': '#0b1021' } },
-            { id: 'imagery', type: 'raster', source: 'imagery' },
-        ],
+        sources,
+        layers,
         terrain: { source: 'dem', exaggeration: spec.exaggeration },
         sky: {
             'sky-color': '#9ec9ff',
