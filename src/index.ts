@@ -61,12 +61,16 @@ function onModelChange(): void {
     const grid = model.getGrid();
     if (!grid || !geo) { appInstance?.setPreviewStats(null); return; }
     const mem = estimateMemory(grid);
+    const surfaceVerts = grid.cols * grid.rows;
     appInstance?.setPreviewStats({
         vertices: geo.vertexCount,
         triangles: geo.triangleCount,
         zoom: grid.zoom,
         widthMeters: Math.round(grid.widthMeters),
         heightMeters: Math.round(grid.heightMeters),
+        gridCols: grid.cols,
+        gridRows: grid.rows,
+        metersPerVertex: (grid.widthMeters * grid.heightMeters) / surfaceVerts,
         memoryText: formatBytes(mem.totalBytes),
         memoryLevel: memoryLevel(mem.totalBytes),
     });

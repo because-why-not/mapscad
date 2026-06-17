@@ -22,6 +22,7 @@
 
     const memColor = { ok: '', warn: 'text-warning', high: 'text-error' };
     const fmt = n => n.toLocaleString();
+    const fmtArea = n => n >= 100 ? Math.round(n).toLocaleString() : n.toFixed(n >= 10 ? 1 : 2);
 
     // 3D-build settings (UI + state only for now; Generate/Save just report them out).
     let heightZoom = $state(untrack(() => initialSettings.heightZoom ?? zoomMax));
@@ -45,6 +46,7 @@
     {#if previewStats}
         <div class="absolute top-4 left-4 z-[1000] bg-base-100/80 backdrop-blur rounded shadow-md px-3 py-2 text-xs font-mono leading-5 pointer-events-none">
             <div>Selection: {fmt(previewStats.widthMeters)} × {fmt(previewStats.heightMeters)} m</div>
+            <div>Detail: {fmt(previewStats.gridCols)} × {fmt(previewStats.gridRows)} vtx ({fmtArea(previewStats.metersPerVertex)} m²/vtx)</div>
             <div>Heightmap zoom: z{previewStats.zoom}</div>
             <div>Vertices: {fmt(previewStats.vertices)}</div>
             <div>Triangles: {fmt(previewStats.triangles)}</div>
