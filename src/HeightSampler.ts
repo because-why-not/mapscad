@@ -38,6 +38,23 @@ function haversine([lon1, lat1]: LonLat, [lon2, lat2]: LonLat): number {
     return 2 * R * Math.asin(Math.sqrt(a));
 }
 
+/** Web Mercator ground resolution (metres per DEM pixel) at a zoom and latitude. */
+export function groundResolution(lat: number, zoom: number): number {
+    return EARTH_CIRCUMFERENCE * Math.cos(lat * Math.PI / 180) / (TILE * Math.pow(2, zoom));
+}
+
+/** How many DEM tiles (across × down) the selection covers at a given zoom. */
+export function tileCoverage(corners: LonLat[], dem: ManifestMap, zoom: number): { z: number; tilesX: number; tilesY: number } {
+    const minStored = dem.mmapsrv.minStoredZoom ?? dem.minzoom;
+    const z = Math.max(minStored, Math.min(dem.maxzoom, Math.round(zoom)));
+    const cornerPx = corners.map(c => lonLatToWorldPx(c[0], c[1], z));
+    const tx0 = Math.floor(Math.min(...cornerPx.map(p => p[0])) / TILE);
+    const tx1 = Math.floor(Math.max(...cornerPx.map(p => p[0])) / TILE);
+    const ty0 = Math.floor(Math.min(...cornerPx.map(p => p[1])) / TILE);
+    const ty1 = Math.floor(Math.max(...cornerPx.map(p => p[1])) / TILE);
+    return { z, tilesX: tx1 - tx0 + 1, tilesY: ty1 - ty0 + 1 };
+}
+
 /** Lon/lat -> global pixel coordinate at a given zoom (Web Mercator, 256px tiles). */
 function lonLatToWorldPx(lon: number, lat: number, z: number): [number, number] {
     const scale = TILE * Math.pow(2, z);
@@ -80,17 +97,14 @@ export function rectExtent(corners: LonLat[]): { widthMeters: number; heightMete
 }
 
 export async function sampleSelectionHeights(
-    corners: LonLat[], dem: ManifestMap, cols: number, rows: number,
+    corners: LonLat[], dem: ManifestMap, cols: number, rows: number, zoom: number,
 ): Promise<HeightGrid> {
     const { widthMeters, heightMeters } = rectExtent(corners);
 
-    // Pick a tile zoom whose pixel size roughly matches the requested sample spacing,
-    // clamped to what the server actually stores. Independent of the on-screen zoom.
-    const lat0 = corners[0][1];
-    const spacing = widthMeters / cols;
-    const groundResAtZ0 = EARTH_CIRCUMFERENCE * Math.cos(lat0 * Math.PI / 180) / TILE;
+    // Sample at the requested DEM zoom (which now drives detail), clamped to what the
+    // server actually stores.
     const minStored = dem.mmapsrv.minStoredZoom ?? dem.minzoom;
-    const z = Math.max(minStored, Math.min(dem.maxzoom, Math.round(Math.log2(groundResAtZ0 / spacing))));
+    const z = Math.max(minStored, Math.min(dem.maxzoom, Math.round(zoom)));
 
     // Pixel bbox of the rectangle at this zoom, then the covering tile range.
     const cornerPx = corners.map(c => lonLatToWorldPx(c[0], c[1], z));

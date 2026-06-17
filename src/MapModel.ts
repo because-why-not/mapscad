@@ -13,7 +13,8 @@ import type { HeightGrid } from './HeightSampler';
  */
 
 export interface ModelSettings {
-    heightZoom: number;      // DEM tile zoom to sample at (wired to resampling later)
+    heightZoom: number;      // DEM tile zoom to sample at — drives mesh detail/density
+    resolutionLimit: number; // hard cap on vertices along the longest side
     heightScale: number;     // vertical exaggeration, baked into geometry
     socketEnabled: boolean;  // add a base below the terrain to make a manifold solid
     socketSize: number;      // metres of socket below the lowest point (+ a small floor)
@@ -40,6 +41,7 @@ export interface ModelGeometry {
 
 const DEFAULTS: ModelSettings = {
     heightZoom: 0,
+    resolutionLimit: 256,
     heightScale: 1,
     socketEnabled: false,
     socketSize: 0,
@@ -232,6 +234,7 @@ export class MapModel {
 function sanitize(s: ModelSettings): ModelSettings {
     return {
         heightZoom: Math.round(num(s.heightZoom, 0)),
+        resolutionLimit: Math.min(4096, Math.max(2, Math.floor(num(s.resolutionLimit, 256)))),
         heightScale: Math.max(0.01, num(s.heightScale, 1)),
         socketEnabled: !!s.socketEnabled,
         socketSize: Math.max(0, num(s.socketSize, 0)),

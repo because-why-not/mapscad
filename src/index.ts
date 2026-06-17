@@ -10,11 +10,11 @@ import { OpenLayersEngine } from './engine/OpenLayersEngine';
 import { MapLibreTerrainEngine } from './engine/MapLibreTerrainEngine';
 import { DeckTerrainEngine } from './engine/DeckTerrainEngine';
 import { SelectionArea, LonLat } from './SelectionArea';
-import { sampleSelectionHeights, rectExtent } from './HeightSampler';
+import { sampleSelectionHeights, rectExtent, groundResolution, tileCoverage } from './HeightSampler';
 import { TerrainPreview } from './TerrainPreview';
 import { MapModel } from './MapModel';
 import { exportModelStl } from './StlMaker';
-import { estimateMemory, formatBytes, memoryLevel } from './memory';
+import { estimateMemory, formatBytes, memoryLevel, isOverBudget } from './memory';
 import type { GeoView, MapEngine } from './engine/MapEngine';
 
 // This file is the composition root: the only place that names concrete engines.
@@ -22,10 +22,10 @@ import type { GeoView, MapEngine } from './engine/MapEngine';
 
 const DEFAULT_VIEW: GeoView = { lng: 170.5028, lat: -45.8788, zoom: 13 }; // Dunedin
 
-// Elevation source for the 3D preview, and the preview's grid detail (samples on the
-// longer side) — independent of map zoom; will become user-controllable later.
+// Elevation source for the 3D preview. The heightmap zoom (a model setting) now drives
+// detail: one mesh vertex per DEM pixel at that zoom, so density is set by zoom, not by
+// the selection size.
 const PREVIEW_DEM = 'dunedin_elevation_raw';
-const PREVIEW_GRID_LONG = 256;
 
 let appInstance: any = null;
 let previewDem: ManifestMap | undefined;
@@ -36,22 +36,52 @@ let previewRoot: HTMLElement | null = null;
 const model = new MapModel();
 let currentCorners: LonLat[] | null = null;
 
-function gridResolution(corners: LonLat[]): { cols: number; rows: number } {
+/** Grid size at a zoom: one sample per DEM pixel, capped to the resolution limit. */
+function gridResolution(corners: LonLat[], zoom: number, limit: number): { cols: number; rows: number } {
     const { widthMeters, heightMeters } = rectExtent(corners);
-    if (widthMeters >= heightMeters) {
-        return { cols: PREVIEW_GRID_LONG, rows: Math.max(2, Math.round(PREVIEW_GRID_LONG * heightMeters / widthMeters)) };
+    const res = groundResolution(corners[0][1], zoom); // metres per DEM pixel at this zoom
+    let cols = Math.max(2, Math.round(widthMeters / res) + 1);
+    let rows = Math.max(2, Math.round(heightMeters / res) + 1);
+    const long = Math.max(cols, rows);
+    if (long > limit) {
+        const f = limit / long;
+        cols = Math.max(2, Math.round(cols * f));
+        rows = Math.max(2, Math.round(rows * f));
     }
-    return { cols: Math.max(2, Math.round(PREVIEW_GRID_LONG * widthMeters / heightMeters)), rows: PREVIEW_GRID_LONG };
+    return { cols, rows };
+}
+
+/** Largest zoom ≤ desired whose DEM canvas + mesh fits the memory budget. */
+function safeZoom(corners: LonLat[], desired: number, limit: number): number {
+    const zMin = previewDem!.mmapsrv.minStoredZoom ?? previewDem!.minzoom;
+    const zMax = previewDem!.maxzoom;
+    let z = Math.max(zMin, Math.min(zMax, Math.round(desired)));
+    for (; z > zMin; z--) {
+        const cov = tileCoverage(corners, previewDem!, z);
+        const { cols, rows } = gridResolution(corners, z, limit);
+        const est = estimateMemory({ cols, rows, tilesX: cov.tilesX, tilesY: cov.tilesY });
+        if (!isOverBudget(est.totalBytes)) break;
+    }
+    return z;
 }
 
 /** Re-sample the DEM over the current selection and feed the heights into the model. */
 async function resample(): Promise<void> {
     if (!previewDem || !currentCorners) return;
     try {
-        const { cols, rows } = gridResolution(currentCorners);
-        const grid = await sampleSelectionHeights(currentCorners, previewDem, cols, rows);
+        const { heightZoom, resolutionLimit } = model.getSettings();
+        const zoom = safeZoom(currentCorners, heightZoom, resolutionLimit);
+        const { cols, rows } = gridResolution(currentCorners, zoom, resolutionLimit);
+        const grid = await sampleSelectionHeights(currentCorners, previewDem, cols, rows, zoom);
         model.setGrid(grid); // notifies -> preview + stats rebuild from the model
     } catch (e) { Env.error('resample', e); }
+}
+
+// Resampling hits the network, so changes to zoom / resolution limit are debounced.
+let resampleTimer = 0;
+function scheduleResample(): void {
+    clearTimeout(resampleTimer);
+    resampleTimer = window.setTimeout(resample, 200);
 }
 
 /** The model changed (new heights or new settings): rebuild the preview and the stats. */
@@ -165,7 +195,8 @@ async function init(): Promise<void> {
 
     const previewZoomMin = previewDem ? (previewDem.mmapsrv.minStoredZoom ?? previewDem.minzoom) : 0;
     const previewZoomMax = previewDem ? previewDem.maxzoom : 17;
-    const initialPreviewSettings = loadPreviewSettings();
+    // Default the heightmap zoom to the DEM's finest stored level; saved settings win.
+    const initialPreviewSettings = { heightZoom: previewZoomMax, ...loadPreviewSettings() };
     model.applySettings(initialPreviewSettings);
 
     const tileProviders = maps.map(m => ({
@@ -213,8 +244,16 @@ async function init(): Promise<void> {
             previewZoomMin,
             previewZoomMax,
             initialPreviewSettings,
-            onPreviewSettingsChange: (s: Record<string, any>) => { savePreviewSettings(s); model.applySettings(s); },
-            onPreviewGenerate: (s: Record<string, any>) => { model.applySettings(s); Env.log('[3d] generate', JSON.stringify(s)); },
+            onPreviewSettingsChange: (s: Record<string, any>) => {
+                const prev = model.getSettings();
+                savePreviewSettings(s);
+                model.applySettings(s); // rebuilds geometry from the current grid
+                // Zoom / resolution change the sampling itself, so re-fetch the heights.
+                if (s.heightZoom !== prev.heightZoom || s.resolutionLimit !== prev.resolutionLimit) {
+                    scheduleResample();
+                }
+            },
+            onPreviewGenerate: (s: Record<string, any>) => { model.applySettings(s); resample(); },
             onPreviewSave: (s: Record<string, any>) => { savePreviewSettings(s); model.applySettings(s); exportModelStl(model); },
             onLayoutChange: () => preview?.resize(),
         },

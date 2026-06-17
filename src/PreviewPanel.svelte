@@ -26,6 +26,7 @@
 
     // 3D-build settings (UI + state only for now; Generate/Save just report them out).
     let heightZoom = $state(untrack(() => initialSettings.heightZoom ?? zoomMax));
+    let resolutionLimit = $state(untrack(() => initialSettings.resolutionLimit ?? 256));
     let heightScale = $state(untrack(() => initialSettings.heightScale ?? 1));
     let socketEnabled = $state(untrack(() => initialSettings.socketEnabled ?? false));
     let socketSize = $state(untrack(() => initialSettings.socketSize ?? 0));
@@ -34,7 +35,7 @@
     let tilesY = $state(untrack(() => initialSettings.tilesY ?? 1));
 
     function settings() {
-        return { heightZoom, heightScale, socketEnabled, socketSize, tilesEnabled, tilesX, tilesY };
+        return { heightZoom, resolutionLimit, heightScale, socketEnabled, socketSize, tilesEnabled, tilesX, tilesY };
     }
     function emit() { onSettingsChange(settings()); }
     function selectAll(e) { e.target.select(); }
@@ -88,6 +89,11 @@
                 <div class="flex flex-col gap-1">
                     <span class="text-sm flex items-center justify-between">Zoom <span class="font-mono">z{heightZoom}</span></span>
                     <input type="range" min={zoomMin} max={zoomMax} step="1" class="range range-sm" bind:value={heightZoom} oninput={emit} />
+                </div>
+                <div class="flex items-center gap-2">
+                    <span class="text-sm flex-1">Resolution limit</span>
+                    <input type="number" min="64" step="64" class="input input-sm input-bordered w-24" bind:value={resolutionLimit} onfocus={selectAll} oninput={emit} />
+                    <span class="text-sm opacity-60">vtx</span>
                 </div>
                 <div class="flex flex-col gap-1">
                     <span class="text-sm flex items-center justify-between">Height scale <span class="font-mono">{heightScale}×</span></span>
