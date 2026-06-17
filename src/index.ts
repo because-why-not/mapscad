@@ -28,21 +28,7 @@ const PREVIEW_EXAGGERATION = 1;
 let appInstance: any = null;
 let previewDem: ManifestMap | undefined;
 let preview: TerrainPreview | null = null;
-let previewRoot: HTMLElement;
-let splitEl: HTMLElement;
-
-/** Width-bigger => split left/right (vertical), height-bigger => split top/bottom. */
-function updateSplitOrientation(): void {
-    const vertical = window.innerWidth >= window.innerHeight;
-    splitEl.classList.toggle('vertical', vertical);
-    splitEl.classList.toggle('horizontal', !vertical);
-}
-
-/** Nudge the active map + preview to re-measure after the split layout changes. */
-function refreshSizes(): void {
-    window.dispatchEvent(new Event('resize')); // OL/MapLibre/deck observe this / their container
-    preview?.resize();
-}
+let previewRoot: HTMLElement | null = null;
 
 function gridResolution(corners: LonLat[]): { cols: number; rows: number } {
     const { widthMeters, heightMeters } = rectExtent(corners);
@@ -52,15 +38,12 @@ function gridResolution(corners: LonLat[]): { cols: number; rows: number } {
     return { cols: Math.max(2, Math.round(PREVIEW_GRID_LONG * widthMeters / heightMeters)), rows: PREVIEW_GRID_LONG };
 }
 
-function showPreview(corners: LonLat[]): void {
-    if (!previewDem) return;
-    splitEl.classList.add('split');
-    updateSplitOrientation();
+function buildPreview(corners: LonLat[]): void {
+    if (!previewDem || !previewRoot) return;
     if (!preview) preview = new TerrainPreview(previewRoot);
-    // Let the split layout flush before sizing the renderer / framing the camera.
+    // Let Svelte reveal the preview pane before sizing the renderer / framing the camera.
     requestAnimationFrame(async () => {
         preview!.resize();
-        refreshSizes();
         try {
             const { cols, rows } = gridResolution(corners);
             const grid = await sampleSelectionHeights(corners, previewDem!, cols, rows);
@@ -69,18 +52,12 @@ function showPreview(corners: LonLat[]): void {
     });
 }
 
-function hidePreview(): void {
-    splitEl.classList.remove('split');
-    preview?.clear();
-    requestAnimationFrame(refreshSizes);
-}
-
-/** Single place the selection state fans out: persistence, UI, and the 3D preview. */
+/** Single place the selection state fans out: persistence, panel visibility, preview. */
 function onSelectionChange(corners: LonLat[] | null): void {
     saveSelectionCorners(corners);
-    appInstance?.setHasSelection(!!corners);
-    if (corners) showPreview(corners);
-    else hidePreview();
+    appInstance?.setPreviewVisible(!!corners); // App shows/hides the 3D panel
+    if (corners) buildPreview(corners);
+    else preview?.clear();
 }
 
 function loadView(): GeoView {
@@ -141,55 +118,13 @@ function saveSelectionCorners(corners: LonLat[] | null): void {
 }
 
 async function init(): Promise<void> {
-    const root = document.getElementById('map-root')!;
-
     const maps = await fetchTileMapManifest();
     if (maps.length === 0) {
         Env.warn('No maps returned by manifest — check tile server / network.');
     }
     const mapsById: Record<string, ManifestMap> = Object.fromEntries(maps.map(m => [m.name, m]));
     const customSpecs = availableCustomMaps(mapsById);
-
     previewDem = mapsById[PREVIEW_DEM];
-    splitEl = document.getElementById('app-split')!;
-    previewRoot = document.getElementById('preview-root')!;
-    updateSplitOrientation();
-    window.addEventListener('resize', () => { updateSplitOrientation(); preview?.resize(); });
-
-    // Composition root: choose concrete engines here; nothing else knows about them.
-    // Split the custom maps by which renderer claims them.
-    const deckSpecs = customSpecs.filter(s => s.surface.type === 'shaded-relief');
-    const mapLibreSpecs = customSpecs.filter(s => s.surface.type !== 'shaded-relief');
-
-    // The region-selection tool lives on the OpenLayers 2D map; it's created once the
-    // OL map is ready, then restored from any previously saved selection.
-    let selection: SelectionArea | null = null;
-    const olEngine = new OpenLayersEngine(maps, olMap => {
-        if (selection) return; // already created on an earlier mount
-        selection = new SelectionArea(olMap, { onChange: onSelectionChange });
-        const savedCorners = loadSelectionCorners();
-        if (savedCorners) {
-            selection.restore(savedCorners);
-            appInstance?.setSelectActive(true);
-            onSelectionChange(savedCorners); // restore() doesn't emit — fan out manually
-        }
-    });
-    const engines: MapEngine[] = [olEngine];
-    if (mapLibreSpecs.length) engines.push(new MapLibreTerrainEngine(mapLibreSpecs, mapsById));
-    if (deckSpecs.length) engines.push(new DeckTerrainEngine(deckSpecs, mapsById));
-
-    const initialSunDate = loadSunDate();
-    const initialShadows = loadShadows();
-    const controller = new MapController({
-        engines,
-        container: root,
-        initialView: loadView(),
-        initialSunDate,
-        initialShadows,
-        onActiveChange: id => appInstance?.setActiveProvider(id),
-        onViewPersist: saveView,
-        onActivePersist: saveActive,
-    });
 
     const tileProviders = maps.map(m => ({
         id: m.name,
@@ -204,13 +139,21 @@ async function init(): Promise<void> {
         shadows: s.surface.type === 'shaded-relief',
     }));
 
+    const allIds = [...tileProviders.map(p => p.id), ...customMaps.map(c => c.id)];
     const saved = localStorage.getItem('activeProvider');
-    const initialId = (saved && controller.sourceIds.includes(saved))
-        ? saved
-        : (tileProviders[0]?.id ?? customMaps[0]?.id ?? '');
+    const initialId = (saved && allIds.includes(saved)) ? saved : (allIds[0] ?? '');
+    const initialSunDate = loadSunDate();
+    const initialShadows = loadShadows();
 
+    // These are assigned just below; the App callbacks (user-triggered later) close over
+    // them, so it's fine that they reference values not set until after mount.
+    let controller: MapController;
+    let selection: SelectionArea | null = null;
+
+    // Mount the Svelte UI first — it owns the split layout and provides the DOM nodes the
+    // map engines and 3D preview mount into.
     appInstance = mount(App, {
-        target: document.getElementById('svelte-app')!,
+        target: document.getElementById('app')!,
         props: {
             tileProviders,
             customMaps,
@@ -223,13 +166,46 @@ async function init(): Promise<void> {
             onSelectToggle: (active: boolean) => {
                 if (!selection) return;
                 if (active) selection.activate();
-                else { selection.deactivate(); appInstance?.setHasSelection(false); }
+                else selection.deactivate(); // emits onChange(null) -> hides preview
             },
-            onSelectionSave: () => {
-                const corners = selection?.getCorners();
-                if (corners) Env.log('[selection] corners', JSON.stringify(corners));
-            },
+            onLayoutChange: () => preview?.resize(),
         },
+    });
+
+    // Read the Svelte-rendered mount nodes from the DOM (mount() inserts synchronously);
+    // more reliable than threading bind:this through nested components.
+    const mapMount = document.getElementById('map-mount')!;
+    previewRoot = document.getElementById('preview-mount')!;
+
+    // Composition root: choose concrete engines here; nothing else knows about them.
+    const deckSpecs = customSpecs.filter(s => s.surface.type === 'shaded-relief');
+    const mapLibreSpecs = customSpecs.filter(s => s.surface.type !== 'shaded-relief');
+
+    // The region-selection tool lives on the OpenLayers 2D map; created when the OL map
+    // is ready, then restored from any previously saved selection.
+    const olEngine = new OpenLayersEngine(maps, olMap => {
+        if (selection) return;
+        selection = new SelectionArea(olMap, { onChange: onSelectionChange });
+        const savedCorners = loadSelectionCorners();
+        if (savedCorners) {
+            selection.restore(savedCorners);
+            appInstance?.setSelectActive(true);
+            onSelectionChange(savedCorners); // restore() doesn't emit — fan out manually
+        }
+    });
+    const engines: MapEngine[] = [olEngine];
+    if (mapLibreSpecs.length) engines.push(new MapLibreTerrainEngine(mapLibreSpecs, mapsById));
+    if (deckSpecs.length) engines.push(new DeckTerrainEngine(deckSpecs, mapsById));
+
+    controller = new MapController({
+        engines,
+        container: mapMount,
+        initialView: loadView(),
+        initialSunDate,
+        initialShadows,
+        onActiveChange: id => appInstance?.setActiveProvider(id),
+        onViewPersist: saveView,
+        onActivePersist: saveActive,
     });
 
     if (initialId) controller.select(initialId);

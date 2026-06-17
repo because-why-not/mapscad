@@ -2,45 +2,64 @@
 @tailwind components;
 @tailwind utilities;
 
-/* Split container: the map pane (#map-root) and the optional 3D preview pane
-   (#preview-root) sit side by side or stacked, depending on the viewport aspect. */
-#app-split {
+/* Split layout is owned by App.svelte. The container fills the viewport; each panel
+   is a flex child whose size is set inline (App). Orientation flips by aspect ratio. */
+.split {
     position: absolute;
-    top: 0;
-    left: 0;
-    width: 100%;
-    height: 100%;
+    inset: 0;
     display: flex;
     z-index: 1;
 }
-#app-split.vertical { flex-direction: row; }      /* wider than tall -> split left/right */
-#app-split.horizontal { flex-direction: column; } /* taller than wide -> split top/bottom */
+.split.vertical { flex-direction: row; }      /* wider than tall -> left/right */
+.split.horizontal { flex-direction: column; } /* taller than wide -> top/bottom */
 
-#map-root,
-#preview-root {
+.panel {
     position: relative;
-    flex: 1 1 0;
-    min-width: 0;
-    min-height: 0;
+    overflow: hidden;
 }
 
-/* The preview pane only exists while a selection is active. */
-#preview-root { display: none; }
-#app-split.split #preview-root { display: block; }
+/* Map engines / the 3D preview mount their canvas(es) into this fill element; Svelte
+   never touches its children. */
+.panel-mount {
+    position: absolute;
+    inset: 0;
+}
 
-#preview-root canvas {
+.map-surface {
+    position: absolute;
+    inset: 0;
+}
+
+#preview-root canvas,
+.panel-preview canvas {
     display: block;
     width: 100%;
     height: 100%;
 }
 
-.map-surface {
-    position: absolute;
-    top: 0;
-    left: 0;
-    width: 100%;
-    height: 100%;
+/* Draggable divider between the two panels. */
+.gutter {
+    flex: 0 0 6px;
+    background: rgba(255, 255, 255, 0.15);
+    z-index: 1100;
 }
+.gutter:hover { background: rgba(255, 255, 255, 0.3); }
+.split.vertical .gutter { cursor: col-resize; }
+.split.horizontal .gutter { cursor: row-resize; }
+
+/* Per-panel collapse button sits on the panel edge nearest the divider. */
+.collapse-btn { position: absolute; z-index: 1100; }
+.split.vertical .panel-map .collapse-btn   { top: 50%; right: 6px; transform: translateY(-50%); }
+.split.vertical .panel-preview .collapse-btn { top: 50%; left: 6px; transform: translateY(-50%); }
+.split.horizontal .panel-map .collapse-btn   { left: 50%; bottom: 6px; transform: translateX(-50%); }
+.split.horizontal .panel-preview .collapse-btn { left: 50%; top: 6px; transform: translateX(-50%); }
+
+/* Thin tab to restore a collapsed panel, on the edge where it was hidden. */
+.restore-tab { position: absolute; z-index: 1100; padding: 0.5rem 0.25rem; line-height: 1; }
+.restore-map-vertical     { left: 0;   top: 50%; transform: translateY(-50%); }
+.restore-preview-vertical { right: 0;  top: 50%; transform: translateY(-50%); }
+.restore-map-horizontal     { top: 0;    left: 50%; transform: translateX(-50%); }
+.restore-preview-horizontal { bottom: 0; left: 50%; transform: translateX(-50%); }
 
 /* Crosshair while the region-selection tool is active. */
 .map-crosshair,
