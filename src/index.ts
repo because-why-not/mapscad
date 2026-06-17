@@ -10,6 +10,8 @@ import { OpenLayersEngine } from './engine/OpenLayersEngine';
 import { MapLibreTerrainEngine } from './engine/MapLibreTerrainEngine';
 import { DeckTerrainEngine } from './engine/DeckTerrainEngine';
 import { SelectionArea, LonLat } from './SelectionArea';
+import { sampleSelectionHeights, rectExtent } from './HeightSampler';
+import { TerrainPreview } from './TerrainPreview';
 import type { GeoView, MapEngine } from './engine/MapEngine';
 
 // This file is the composition root: the only place that names concrete engines.
@@ -17,7 +19,69 @@ import type { GeoView, MapEngine } from './engine/MapEngine';
 
 const DEFAULT_VIEW: GeoView = { lng: 170.5028, lat: -45.8788, zoom: 13 }; // Dunedin
 
+// Elevation source for the 3D preview, and the preview's grid detail (samples on the
+// longer side) — independent of map zoom; will become user-controllable later.
+const PREVIEW_DEM = 'dunedin_elevation_raw';
+const PREVIEW_GRID_LONG = 256;
+const PREVIEW_EXAGGERATION = 1;
+
 let appInstance: any = null;
+let previewDem: ManifestMap | undefined;
+let preview: TerrainPreview | null = null;
+let previewRoot: HTMLElement;
+let splitEl: HTMLElement;
+
+/** Width-bigger => split left/right (vertical), height-bigger => split top/bottom. */
+function updateSplitOrientation(): void {
+    const vertical = window.innerWidth >= window.innerHeight;
+    splitEl.classList.toggle('vertical', vertical);
+    splitEl.classList.toggle('horizontal', !vertical);
+}
+
+/** Nudge the active map + preview to re-measure after the split layout changes. */
+function refreshSizes(): void {
+    window.dispatchEvent(new Event('resize')); // OL/MapLibre/deck observe this / their container
+    preview?.resize();
+}
+
+function gridResolution(corners: LonLat[]): { cols: number; rows: number } {
+    const { widthMeters, heightMeters } = rectExtent(corners);
+    if (widthMeters >= heightMeters) {
+        return { cols: PREVIEW_GRID_LONG, rows: Math.max(2, Math.round(PREVIEW_GRID_LONG * heightMeters / widthMeters)) };
+    }
+    return { cols: Math.max(2, Math.round(PREVIEW_GRID_LONG * widthMeters / heightMeters)), rows: PREVIEW_GRID_LONG };
+}
+
+function showPreview(corners: LonLat[]): void {
+    if (!previewDem) return;
+    splitEl.classList.add('split');
+    updateSplitOrientation();
+    if (!preview) preview = new TerrainPreview(previewRoot);
+    // Let the split layout flush before sizing the renderer / framing the camera.
+    requestAnimationFrame(async () => {
+        preview!.resize();
+        refreshSizes();
+        try {
+            const { cols, rows } = gridResolution(corners);
+            const grid = await sampleSelectionHeights(corners, previewDem!, cols, rows);
+            preview!.setHeightGrid(grid, PREVIEW_EXAGGERATION);
+        } catch (e) { Env.error('build preview', e); }
+    });
+}
+
+function hidePreview(): void {
+    splitEl.classList.remove('split');
+    preview?.clear();
+    requestAnimationFrame(refreshSizes);
+}
+
+/** Single place the selection state fans out: persistence, UI, and the 3D preview. */
+function onSelectionChange(corners: LonLat[] | null): void {
+    saveSelectionCorners(corners);
+    appInstance?.setHasSelection(!!corners);
+    if (corners) showPreview(corners);
+    else hidePreview();
+}
 
 function loadView(): GeoView {
     try {
@@ -86,6 +150,12 @@ async function init(): Promise<void> {
     const mapsById: Record<string, ManifestMap> = Object.fromEntries(maps.map(m => [m.name, m]));
     const customSpecs = availableCustomMaps(mapsById);
 
+    previewDem = mapsById[PREVIEW_DEM];
+    splitEl = document.getElementById('app-split')!;
+    previewRoot = document.getElementById('preview-root')!;
+    updateSplitOrientation();
+    window.addEventListener('resize', () => { updateSplitOrientation(); preview?.resize(); });
+
     // Composition root: choose concrete engines here; nothing else knows about them.
     // Split the custom maps by which renderer claims them.
     const deckSpecs = customSpecs.filter(s => s.surface.type === 'shaded-relief');
@@ -96,17 +166,12 @@ async function init(): Promise<void> {
     let selection: SelectionArea | null = null;
     const olEngine = new OpenLayersEngine(maps, olMap => {
         if (selection) return; // already created on an earlier mount
-        selection = new SelectionArea(olMap, {
-            onChange: corners => {
-                saveSelectionCorners(corners);
-                appInstance?.setHasSelection(!!corners);
-            },
-        });
+        selection = new SelectionArea(olMap, { onChange: onSelectionChange });
         const savedCorners = loadSelectionCorners();
         if (savedCorners) {
             selection.restore(savedCorners);
             appInstance?.setSelectActive(true);
-            appInstance?.setHasSelection(true);
+            onSelectionChange(savedCorners); // restore() doesn't emit — fan out manually
         }
     });
     const engines: MapEngine[] = [olEngine];

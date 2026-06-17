@@ -85,8 +85,8 @@
     }
 </script>
 
-<!-- Selection toolbar (top-left) -->
-<div class="fixed top-4 left-4 z-[1000] flex flex-col gap-2">
+<!-- Selection toolbar (top-left, below the map's zoom +/- control) -->
+<div class="fixed top-20 left-4 z-[1000] flex flex-col gap-2">
     <button
         class="btn btn-square shadow-md border-0 {selectActive ? 'btn-primary' : 'bg-base-100'}"
         aria-label="Select area"

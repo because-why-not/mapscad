@@ -2,14 +2,36 @@
 @tailwind components;
 @tailwind utilities;
 
-/* The active map engine renders its surface(s) into #map-root, full viewport. */
-#map-root {
+/* Split container: the map pane (#map-root) and the optional 3D preview pane
+   (#preview-root) sit side by side or stacked, depending on the viewport aspect. */
+#app-split {
     position: absolute;
     top: 0;
     left: 0;
     width: 100%;
     height: 100%;
+    display: flex;
     z-index: 1;
+}
+#app-split.vertical { flex-direction: row; }      /* wider than tall -> split left/right */
+#app-split.horizontal { flex-direction: column; } /* taller than wide -> split top/bottom */
+
+#map-root,
+#preview-root {
+    position: relative;
+    flex: 1 1 0;
+    min-width: 0;
+    min-height: 0;
+}
+
+/* The preview pane only exists while a selection is active. */
+#preview-root { display: none; }
+#app-split.split #preview-root { display: block; }
+
+#preview-root canvas {
+    display: block;
+    width: 100%;
+    height: 100%;
 }
 
 .map-surface {
