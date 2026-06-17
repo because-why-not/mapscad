@@ -135,6 +135,16 @@ export async function sampleSelectionHeights(
     const originX = tx0 * TILE, originY = ty0 * TILE;
     const { data } = ctx.getImageData(0, 0, canvas.width, canvas.height);
 
+    const W = canvas.width, H = canvas.height;
+    // Terrarium-decode a single pixel (clamped to the canvas), NaN for no-data.
+    const decode = (px: number, py: number): number => {
+        const x = px < 0 ? 0 : px > W - 1 ? W - 1 : px;
+        const y = py < 0 ? 0 : py > H - 1 ? H - 1 : py;
+        const i = (y * W + x) * 4;
+        if (data[i + 3] === 0) return NO_DATA;       // alpha 0 => no tile / no data
+        return data[i] * 256 + data[i + 1] + data[i + 2] / 256 - 32768;
+    };
+
     const heights = new Float32Array(cols * rows);
     let minHeight = Infinity, maxHeight = -Infinity;
     for (let r = 0; r < rows; r++) {
@@ -143,13 +153,19 @@ export async function sampleSelectionHeights(
             const u = (c + 0.5) / cols;
             const [lon, lat] = rectPoint(corners, u, v);
             const [gx, gy] = lonLatToWorldPx(lon, lat, z);
-            const px = Math.min(canvas.width - 1, Math.max(0, Math.round(gx - originX)));
-            const py = Math.min(canvas.height - 1, Math.max(0, Math.round(gy - originY)));
-            const i = (py * canvas.width + px) * 4;
-            let h = NO_DATA;
-            if (data[i + 3] !== 0) {                 // alpha 0 => no tile / no data
-                h = data[i] * 256 + data[i + 1] + data[i + 2] / 256 - 32768; // terrarium decode
-            }
+            // Bilinear sample: decode the 4 surrounding pixels, blend by the fractional
+            // position. Avoids the stair-step grid of nearest-neighbour at high detail.
+            const fx = gx - originX - 0.5, fy = gy - originY - 0.5; // pixel centres at .5
+            const x0 = Math.floor(fx), y0 = Math.floor(fy);
+            const tx = fx - x0, ty = fy - y0;
+            const h00 = decode(x0, y0), h10 = decode(x0 + 1, y0);
+            const h01 = decode(x0, y0 + 1), h11 = decode(x0 + 1, y0 + 1);
+            // Weighted blend, skipping any no-data corners so edges stay graceful.
+            let sum = 0, wsum = 0;
+            const add = (hv: number, w: number) => { if (!Number.isNaN(hv)) { sum += hv * w; wsum += w; } };
+            add(h00, (1 - tx) * (1 - ty)); add(h10, tx * (1 - ty));
+            add(h01, (1 - tx) * ty); add(h11, tx * ty);
+            const h = wsum > 0 ? sum / wsum : NO_DATA;
             heights[r * cols + c] = h;
             if (!Number.isNaN(h)) {
                 if (h < minHeight) minHeight = h;
