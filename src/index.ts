@@ -196,7 +196,7 @@ async function init(): Promise<void> {
     const previewZoomMin = previewDem ? (previewDem.mmapsrv.minStoredZoom ?? previewDem.minzoom) : 0;
     const previewZoomMax = previewDem ? previewDem.maxzoom : 17;
     // Default the heightmap zoom to the DEM's finest stored level; saved settings win.
-    const initialPreviewSettings = { heightZoom: previewZoomMax, ...loadPreviewSettings() };
+    const initialPreviewSettings: Record<string, any> = { heightZoom: previewZoomMax, ...loadPreviewSettings() };
     model.applySettings(initialPreviewSettings);
 
     const tileProviders = maps.map(m => ({
@@ -248,6 +248,7 @@ async function init(): Promise<void> {
                 const prev = model.getSettings();
                 savePreviewSettings(s);
                 model.applySettings(s); // rebuilds geometry from the current grid
+                preview?.setSmoothShading(s.smoothShading ?? true); // display-only
                 // Zoom / resolution change the sampling itself, so re-fetch the heights.
                 if (s.heightZoom !== prev.heightZoom || s.resolutionLimit !== prev.resolutionLimit) {
                     scheduleResample();
@@ -267,6 +268,7 @@ async function init(): Promise<void> {
     // The preview is a pure consumer of the model: one subscription keeps both the 3D
     // view and the stats overlay in sync with whatever the model currently holds.
     preview = new TerrainPreview(previewRoot);
+    preview.setSmoothShading(initialPreviewSettings.smoothShading ?? true);
     model.onChange(onModelChange);
 
     // Composition root: choose concrete engines here; nothing else knows about them.

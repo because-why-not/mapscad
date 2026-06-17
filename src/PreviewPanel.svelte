@@ -33,9 +33,10 @@
     let tilesEnabled = $state(untrack(() => initialSettings.tilesEnabled ?? false));
     let tilesX = $state(untrack(() => initialSettings.tilesX ?? 1));
     let tilesY = $state(untrack(() => initialSettings.tilesY ?? 1));
+    let smoothShading = $state(untrack(() => initialSettings.smoothShading ?? true));
 
     function settings() {
-        return { heightZoom, resolutionLimit, heightScale, socketEnabled, socketSize, tilesEnabled, tilesX, tilesY };
+        return { heightZoom, resolutionLimit, heightScale, socketEnabled, socketSize, tilesEnabled, tilesX, tilesY, smoothShading };
     }
     function emit() { onSettingsChange(settings()); }
     function selectAll(e) { e.target.select(); }
@@ -129,6 +130,15 @@
                         <input type="number" min="1" step="1" class="input input-sm input-bordered w-16 text-center" bind:value={tilesY} onfocus={selectAll} oninput={emit} />
                     </div>
                 {/if}
+            </div>
+
+            <!-- Preview (display only; does not affect the exported model) -->
+            <div class="px-4 py-1 mt-2 text-xs font-bold uppercase tracking-wider opacity-50">Preview</div>
+            <div class="px-4 py-2">
+                <label class="flex items-center gap-2 cursor-pointer">
+                    <input type="checkbox" class="checkbox checkbox-sm" bind:checked={smoothShading} onchange={emit} />
+                    <span class="text-sm">Smooth shading</span>
+                </label>
             </div>
 
             <!-- Actions -->

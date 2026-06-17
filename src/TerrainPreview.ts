@@ -108,6 +108,12 @@ export class TerrainPreview {
         this.group.clear();
     }
 
+    /** Preview-only: smooth (interpolated vertex normals) vs flat (per-face) shading. */
+    setSmoothShading(enabled: boolean): void {
+        this.material.flatShading = !enabled;
+        this.material.needsUpdate = true;
+    }
+
     // --- right-drag rotation around the cursor --------------------------------
 
     private onContextMenu = (e: Event): void => e.preventDefault();
