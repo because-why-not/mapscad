@@ -132,6 +132,18 @@ function saveSelectionCorners(corners: LonLat[] | null): void {
     } catch (e) { Env.error('save selectionCorners', e); }
 }
 
+function loadPreviewSettings(): Record<string, any> {
+    try {
+        const s = localStorage.getItem('previewSettings');
+        if (s) return JSON.parse(s);
+    } catch (e) { Env.error('load previewSettings', e); }
+    return {};
+}
+
+function savePreviewSettings(settings: Record<string, any>): void {
+    try { localStorage.setItem('previewSettings', JSON.stringify(settings)); } catch (e) { Env.error('save previewSettings', e); }
+}
+
 async function init(): Promise<void> {
     const maps = await fetchTileMapManifest();
     if (maps.length === 0) {
@@ -140,6 +152,10 @@ async function init(): Promise<void> {
     const mapsById: Record<string, ManifestMap> = Object.fromEntries(maps.map(m => [m.name, m]));
     const customSpecs = availableCustomMaps(mapsById);
     previewDem = mapsById[PREVIEW_DEM];
+
+    const previewZoomMin = previewDem ? (previewDem.mmapsrv.minStoredZoom ?? previewDem.minzoom) : 0;
+    const previewZoomMax = previewDem ? previewDem.maxzoom : 17;
+    const initialPreviewSettings = loadPreviewSettings();
 
     const tileProviders = maps.map(m => ({
         id: m.name,
@@ -183,6 +199,12 @@ async function init(): Promise<void> {
                 if (active) selection.activate();
                 else selection.deactivate(); // emits onChange(null) -> hides preview
             },
+            previewZoomMin,
+            previewZoomMax,
+            initialPreviewSettings,
+            onPreviewSettingsChange: (s: Record<string, any>) => savePreviewSettings(s),
+            onPreviewGenerate: (s: Record<string, any>) => Env.log('[3d] generate', JSON.stringify(s)),
+            onPreviewSave: (s: Record<string, any>) => Env.log('[3d] save', JSON.stringify(s)),
             onLayoutChange: () => preview?.resize(),
         },
     });

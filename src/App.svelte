@@ -13,6 +13,13 @@
         onSunChange = () => {},
         onShadowsChange = () => {},
         onSelectToggle = () => {},
+        // 3D-view menu (forwarded to PreviewPanel)
+        previewZoomMin = 0,
+        previewZoomMax = 17,
+        initialPreviewSettings = {},
+        onPreviewSettingsChange = () => {},
+        onPreviewGenerate = () => {},
+        onPreviewSave = () => {},
         // Fired whenever the split layout changes, so index.ts can resize the renderers.
         onLayoutChange = () => {},
     } = $props();
@@ -132,6 +139,12 @@
         style={previewStyle}
         canCollapse={showBoth}
         onCollapse={collapsePreview}
+        zoomMin={previewZoomMin}
+        zoomMax={previewZoomMax}
+        initialSettings={initialPreviewSettings}
+        onSettingsChange={onPreviewSettingsChange}
+        onGenerate={onPreviewGenerate}
+        onSave={onPreviewSave}
     />
 
     {#if collapsed !== 'none'}
