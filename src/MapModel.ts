@@ -172,7 +172,9 @@ export class MapModel {
         }
 
         if (this.settings.socketEnabled) {
-            const baseY = (minHeight - this.settings.socketSize - SOCKET_FLOOR_OFFSET) * scale;
+            // The socket is a print/handling feature, so its thickness is literal metres
+            // and is NOT affected by heightScale — only the terrain itself is exaggerated.
+            const baseY = minHeight * scale - this.settings.socketSize - SOCKET_FLOOR_OFFSET;
             this.addSocket(positions, indices, tcols, trows, baseY);
         }
 
