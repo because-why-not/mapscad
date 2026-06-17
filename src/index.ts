@@ -256,6 +256,7 @@ async function init(): Promise<void> {
             },
             onPreviewGenerate: (s: Record<string, any>) => { model.applySettings(s); resample(); },
             onPreviewSave: (s: Record<string, any>) => { savePreviewSettings(s); model.applySettings(s); exportModelStl(model); },
+            onPreviewResetCamera: () => preview?.resetCamera(),
             onLayoutChange: () => preview?.resize(),
         },
     });

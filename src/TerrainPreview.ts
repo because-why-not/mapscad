@@ -17,6 +17,8 @@ export class TerrainPreview {
     private group: THREE.Group;
     private material: THREE.MeshStandardMaterial;
     private framed = false; // only auto-frame the first model after the view was empty
+    private lastW = 0;       // extent of the current model, for the reset-camera button
+    private lastH = 0;
     private raf = 0;
 
     // Custom right-drag rotation that orbits around the point under the cursor.
@@ -84,6 +86,9 @@ export class TerrainPreview {
             return;
         }
 
+        this.lastW = geo.widthMeters;
+        this.lastH = geo.heightMeters;
+
         for (const tile of geo.tiles) {
             const buf = new THREE.BufferGeometry();
             buf.setAttribute('position', new THREE.BufferAttribute(tile.positions, 3));
@@ -106,6 +111,11 @@ export class TerrainPreview {
             (child as THREE.Mesh).geometry.dispose();
         }
         this.group.clear();
+    }
+
+    /** Re-frame the camera to the default south-looking view of the current model. */
+    resetCamera(): void {
+        if (this.lastW > 0 || this.lastH > 0) this.frameCamera(this.lastW, this.lastH);
     }
 
     /** Preview-only: smooth (interpolated vertex normals) vs flat (per-face) shading. */

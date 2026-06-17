@@ -20,6 +20,7 @@
         onPreviewSettingsChange = () => {},
         onPreviewGenerate = () => {},
         onPreviewSave = () => {},
+        onPreviewResetCamera = () => {},
         // Fired whenever the split layout changes, so index.ts can resize the renderers.
         onLayoutChange = () => {},
     } = $props();
@@ -145,6 +146,7 @@
         onSettingsChange={onPreviewSettingsChange}
         onGenerate={onPreviewGenerate}
         onSave={onPreviewSave}
+        onResetCamera={onPreviewResetCamera}
     />
 
     {#if collapsed !== 'none'}

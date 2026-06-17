@@ -11,6 +11,7 @@
         onSettingsChange = () => {},
         onGenerate = () => {},
         onSave = () => {},
+        onResetCamera = () => {},
     } = $props();
 
     let mountEl;
@@ -66,6 +67,19 @@
             <line x1="3" y1="6" x2="21" y2="6"></line>
             <line x1="3" y1="12" x2="21" y2="12"></line>
             <line x1="3" y1="18" x2="21" y2="18"></line>
+        </svg>
+    </button>
+
+    <!-- Reset camera to the default view -->
+    <button
+        class="btn btn-square bg-base-100 shadow-md absolute top-20 right-4 z-[1000] border-0"
+        aria-label="Reset camera"
+        title="Reset camera"
+        onclick={onResetCamera}
+    >
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M3 12a9 9 0 1 1 3 6.7"></path>
+            <polyline points="3 21 3 15 9 15"></polyline>
         </svg>
     </button>
 
