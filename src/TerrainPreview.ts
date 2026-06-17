@@ -19,6 +19,17 @@ export class TerrainPreview {
     private framed = false; // only auto-frame the first model after the view was empty
     private raf = 0;
 
+    // Custom right-drag rotation that orbits around the point under the cursor.
+    private raycaster = new THREE.Raycaster();
+    private pointer = new THREE.Vector2();
+    private pivot = new THREE.Vector3();
+    private lastX = 0;
+    private lastY = 0;
+
+    private static readonly ROT_SPEED = 0.005; // radians per pixel
+    private static readonly MIN_POLAR = 0.12;  // keep the camera off the poles / below ground
+    private static readonly MAX_POLAR = 1.52;
+
     constructor(container: HTMLElement) {
         this.container = container;
 
@@ -34,12 +45,16 @@ export class TerrainPreview {
         this.controls = new OrbitControls(this.camera, this.renderer.domElement);
         this.controls.enableDamping = false;          // no inertia/acceleration
         this.controls.screenSpacePanning = false;     // pan along the ground, map-like
-        // Match the 3D maps: left drag = pan, right drag = rotate.
+        // Left drag = pan, wheel/middle = zoom. Right drag is handled by us below so it
+        // can orbit around the terrain under the cursor instead of OrbitControls' target.
         this.controls.mouseButtons = {
             LEFT: THREE.MOUSE.PAN,
             MIDDLE: THREE.MOUSE.DOLLY,
-            RIGHT: THREE.MOUSE.ROTATE,
-        };
+            RIGHT: undefined,
+        } as any;
+        const el = this.renderer.domElement;
+        el.addEventListener('pointerdown', this.onPointerDown);
+        el.addEventListener('contextmenu', this.onContextMenu);
 
         this.scene.add(new THREE.AmbientLight(0xffffff, 0.7));
         const sun = new THREE.DirectionalLight(0xfff6e8, 1.4);
@@ -93,6 +108,68 @@ export class TerrainPreview {
         this.group.clear();
     }
 
+    // --- right-drag rotation around the cursor --------------------------------
+
+    private onContextMenu = (e: Event): void => e.preventDefault();
+
+    private onPointerDown = (e: PointerEvent): void => {
+        if (e.button !== 2) return; // right button only
+        e.preventDefault();
+        // Pivot = the terrain point under the cursor at drag start (fall back to target).
+        const hit = this.pickPoint(e);
+        this.pivot.copy(hit ?? this.controls.target);
+        this.lastX = e.clientX;
+        this.lastY = e.clientY;
+        window.addEventListener('pointermove', this.onPointerMove);
+        window.addEventListener('pointerup', this.onPointerUp);
+    };
+
+    private onPointerMove = (e: PointerEvent): void => {
+        const dx = e.clientX - this.lastX;
+        const dy = e.clientY - this.lastY;
+        this.lastX = e.clientX;
+        this.lastY = e.clientY;
+        this.rotateAroundPivot(dx, dy);
+    };
+
+    private onPointerUp = (): void => {
+        window.removeEventListener('pointermove', this.onPointerMove);
+        window.removeEventListener('pointerup', this.onPointerUp);
+    };
+
+    /** World-space point of the front-most mesh under the cursor, or null. */
+    private pickPoint(e: PointerEvent): THREE.Vector3 | null {
+        const rect = this.renderer.domElement.getBoundingClientRect();
+        this.pointer.set(
+            ((e.clientX - rect.left) / rect.width) * 2 - 1,
+            -((e.clientY - rect.top) / rect.height) * 2 + 1,
+        );
+        this.raycaster.setFromCamera(this.pointer, this.camera);
+        const hits = this.raycaster.intersectObjects(this.group.children, false);
+        return hits.length ? hits[0].point.clone() : null;
+    }
+
+    /** Orbit camera and target rigidly around the pivot, preserving the view offset. */
+    private rotateAroundPivot(dx: number, dy: number): void {
+        this.camera.updateMatrixWorld();
+        const up = new THREE.Vector3(0, 1, 0);
+        const right = new THREE.Vector3().setFromMatrixColumn(this.camera.matrixWorld, 0).normalize();
+        const yaw = new THREE.Quaternion().setFromAxisAngle(up, -dx * TerrainPreview.ROT_SPEED);
+        const pitch = new THREE.Quaternion().setFromAxisAngle(right, -dy * TerrainPreview.ROT_SPEED);
+        const full = yaw.clone().multiply(pitch);
+
+        // Reject pitch that would push the camera past the poles / under the ground.
+        const camOff = this.camera.position.clone().sub(this.pivot);
+        const candidate = camOff.clone().applyQuaternion(full);
+        const polar = Math.acos(THREE.MathUtils.clamp(candidate.y / candidate.length(), -1, 1));
+        const q = polar > TerrainPreview.MIN_POLAR && polar < TerrainPreview.MAX_POLAR ? full : yaw;
+
+        const tarOff = this.controls.target.clone().sub(this.pivot);
+        this.camera.position.copy(this.pivot).add(camOff.applyQuaternion(q));
+        this.controls.target.copy(this.pivot).add(tarOff.applyQuaternion(q));
+        this.controls.update();
+    }
+
     resize(): void {
         const w = this.container.clientWidth || 1;
         const h = this.container.clientHeight || 1;
@@ -103,11 +180,16 @@ export class TerrainPreview {
 
     dispose(): void {
         cancelAnimationFrame(this.raf);
+        const el = this.renderer.domElement;
+        el.removeEventListener('pointerdown', this.onPointerDown);
+        el.removeEventListener('contextmenu', this.onContextMenu);
+        window.removeEventListener('pointermove', this.onPointerMove);
+        window.removeEventListener('pointerup', this.onPointerUp);
         this.clear();
         this.material.dispose();
         this.controls.dispose();
         this.renderer.dispose();
-        this.renderer.domElement.remove();
+        el.remove();
     }
 
     private frameCamera(w: number, h: number): void {
