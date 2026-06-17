@@ -18,6 +18,9 @@ export interface HeightGrid {
     heightMeters: number;    // real-world height of the rectangle (TL→BL edge)
     minHeight: number;
     maxHeight: number;
+    zoom: number;            // DEM tile zoom the heights were sampled from
+    tilesX: number;          // DEM tiles fetched across / down (for memory accounting)
+    tilesY: number;
 }
 
 const TILE = 256;
@@ -147,5 +150,8 @@ export async function sampleSelectionHeights(
         if (Number.isNaN(heights[i])) heights[i] = minHeight;
     }
 
-    return { heights, cols, rows, widthMeters, heightMeters, minHeight, maxHeight };
+    return {
+        heights, cols, rows, widthMeters, heightMeters, minHeight, maxHeight,
+        zoom: z, tilesX: tx1 - tx0 + 1, tilesY: ty1 - ty0 + 1,
+    };
 }

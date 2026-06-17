@@ -48,6 +48,7 @@
     export function setTileProviders(p) { mapPanel?.setTileProviders(p); }
     export function setCustomMaps(m) { mapPanel?.setCustomMaps(m); }
     export function setSelectActive(active) { mapPanel?.setSelectActive(active); }
+    export function setPreviewStats(stats) { previewPanel?.setPreviewStats(stats); }
     export function setPreviewVisible(visible) {
         previewVisible = visible;
         if (!visible) collapsed = 'none';
