@@ -1,12 +1,12 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
-import type { HeightGrid } from './HeightSampler';
+import type { ModelGeometry } from './MapModel';
 
 /**
- * Custom 3D terrain preview (not one of the map engines). Renders a heightmap grid —
- * the clipped selection region — as a Three.js mesh with orbit controls. The mesh is
- * built purely from the supplied grid, so its detail is the grid resolution, fully
- * independent of any map's zoom.
+ * Custom 3D terrain preview (not one of the map engines). It is a pure consumer of the
+ * MapModel's neutral geometry: feed it a ModelGeometry (metre-space vertices + indices,
+ * one solid per tile) and it renders it. All surface/socket/tile/exaggeration decisions
+ * live in MapModel, so the preview and the exported STL show the identical solid.
  */
 export class TerrainPreview {
     private container: HTMLElement;
@@ -14,12 +14,10 @@ export class TerrainPreview {
     private scene: THREE.Scene;
     private camera: THREE.PerspectiveCamera;
     private controls: OrbitControls;
-    private mesh: THREE.Mesh | null = null;
+    private group: THREE.Group;
+    private material: THREE.MeshStandardMaterial;
+    private framed = false; // only auto-frame the first model after the view was empty
     private raf = 0;
-
-    // Normalize the largest horizontal extent to this many world units, so the camera
-    // framing is consistent regardless of the real-world size of the selection.
-    private static readonly TARGET_SIZE = 100;
 
     constructor(container: HTMLElement) {
         this.container = container;
@@ -48,6 +46,12 @@ export class TerrainPreview {
         sun.position.set(1, 2, 1.5);
         this.scene.add(sun);
 
+        // FrontSide (the default) culls back faces. Relies on MapModel emitting outward
+        // winding — top surface +Y, socket walls/base oriented away from the model.
+        this.material = new THREE.MeshStandardMaterial({ color: 0xc9c3b2, side: THREE.FrontSide });
+        this.group = new THREE.Group();
+        this.scene.add(this.group);
+
         this.resize();
         const loop = () => {
             this.raf = requestAnimationFrame(loop);
@@ -57,39 +61,36 @@ export class TerrainPreview {
         loop();
     }
 
-    /** Build (or rebuild) the terrain mesh from a height grid. */
-    setHeightGrid(grid: HeightGrid, exaggeration = 1): void {
-        this.disposeMesh();
-
-        const { heights, cols, rows, widthMeters, heightMeters } = grid;
-        const scale = TerrainPreview.TARGET_SIZE / Math.max(widthMeters, heightMeters);
-
-        // PlaneGeometry lays out vertices bottom-to-top (iy=0 is the bottom row), while
-        // our height grid is top-to-bottom (row 0 = north edge), so flip the row index.
-        const geo = new THREE.PlaneGeometry(widthMeters * scale, heightMeters * scale, cols - 1, rows - 1);
-        const pos = geo.attributes.position;
-        const zScale = scale * exaggeration;
-        for (let iy = 0; iy < rows; iy++) {
-            for (let ix = 0; ix < cols; ix++) {
-                const vi = iy * cols + ix;
-                const hi = (rows - 1 - iy) * cols + ix;
-                pos.setZ(vi, heights[hi] * zScale);
-            }
+    /** Render a MapModel geometry (or null to clear). One Three mesh per tile. */
+    setGeometry(geo: ModelGeometry | null): void {
+        this.clear();
+        if (!geo || geo.tiles.length === 0) {
+            this.framed = false; // next model after an empty view gets re-framed
+            return;
         }
-        pos.needsUpdate = true;
-        geo.computeVertexNormals();
 
-        const material = new THREE.MeshStandardMaterial({ color: 0xc9c3b2, side: THREE.DoubleSide });
-        const mesh = new THREE.Mesh(geo, material);
-        mesh.rotation.x = -Math.PI / 2; // lay the XY plane flat, heights become +Y (up)
-        this.scene.add(mesh);
-        this.mesh = mesh;
+        for (const tile of geo.tiles) {
+            const buf = new THREE.BufferGeometry();
+            buf.setAttribute('position', new THREE.BufferAttribute(tile.positions, 3));
+            buf.setIndex(new THREE.BufferAttribute(tile.indices, 1));
+            buf.computeVertexNormals();
+            const mesh = new THREE.Mesh(buf, this.material);
+            this.group.add(mesh);
+        }
 
-        this.frameCamera(widthMeters * scale, heightMeters * scale);
+        // Frame only the first model after the view was empty; leave the user's camera
+        // alone on rebuilds (e.g. tweaking height scale, socket, tiles).
+        if (!this.framed) {
+            this.frameCamera(geo.widthMeters, geo.heightMeters);
+            this.framed = true;
+        }
     }
 
     clear(): void {
-        this.disposeMesh();
+        for (const child of this.group.children) {
+            (child as THREE.Mesh).geometry.dispose();
+        }
+        this.group.clear();
     }
 
     resize(): void {
@@ -102,7 +103,8 @@ export class TerrainPreview {
 
     dispose(): void {
         cancelAnimationFrame(this.raf);
-        this.disposeMesh();
+        this.clear();
+        this.material.dispose();
         this.controls.dispose();
         this.renderer.dispose();
         this.renderer.domElement.remove();
@@ -114,13 +116,5 @@ export class TerrainPreview {
         this.camera.lookAt(0, 0, 0);
         this.controls.target.set(0, 0, 0);
         this.controls.update();
-    }
-
-    private disposeMesh(): void {
-        if (!this.mesh) return;
-        this.scene.remove(this.mesh);
-        this.mesh.geometry.dispose();
-        (this.mesh.material as THREE.Material).dispose();
-        this.mesh = null;
     }
 }

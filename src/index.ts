@@ -12,6 +12,8 @@ import { DeckTerrainEngine } from './engine/DeckTerrainEngine';
 import { SelectionArea, LonLat } from './SelectionArea';
 import { sampleSelectionHeights, rectExtent } from './HeightSampler';
 import { TerrainPreview } from './TerrainPreview';
+import { MapModel } from './MapModel';
+import { exportModelStl } from './StlMaker';
 import { estimateMemory, formatBytes, memoryLevel } from './memory';
 import type { GeoView, MapEngine } from './engine/MapEngine';
 
@@ -24,12 +26,15 @@ const DEFAULT_VIEW: GeoView = { lng: 170.5028, lat: -45.8788, zoom: 13 }; // Dun
 // longer side) — independent of map zoom; will become user-controllable later.
 const PREVIEW_DEM = 'dunedin_elevation_raw';
 const PREVIEW_GRID_LONG = 256;
-const PREVIEW_EXAGGERATION = 1;
 
 let appInstance: any = null;
 let previewDem: ManifestMap | undefined;
 let preview: TerrainPreview | null = null;
 let previewRoot: HTMLElement | null = null;
+
+// The canonical 3D model: settings mutate it, the preview and STL export read it.
+const model = new MapModel();
+let currentCorners: LonLat[] | null = null;
 
 function gridResolution(corners: LonLat[]): { cols: number; rows: number } {
     const { widthMeters, heightMeters } = rectExtent(corners);
@@ -39,40 +44,41 @@ function gridResolution(corners: LonLat[]): { cols: number; rows: number } {
     return { cols: Math.max(2, Math.round(PREVIEW_GRID_LONG * widthMeters / heightMeters)), rows: PREVIEW_GRID_LONG };
 }
 
-function buildPreview(corners: LonLat[]): void {
-    if (!previewDem || !previewRoot) return;
-    if (!preview) preview = new TerrainPreview(previewRoot);
-    // Let Svelte reveal the preview pane before sizing the renderer / framing the camera.
-    requestAnimationFrame(async () => {
-        preview!.resize();
-        try {
-            const { cols, rows } = gridResolution(corners);
-            const grid = await sampleSelectionHeights(corners, previewDem!, cols, rows);
-            const mem = estimateMemory(grid);
-            appInstance?.setPreviewStats({
-                vertices: grid.cols * grid.rows,
-                triangles: Math.max(0, grid.cols - 1) * Math.max(0, grid.rows - 1) * 2,
-                zoom: grid.zoom,
-                widthMeters: Math.round(grid.widthMeters),
-                heightMeters: Math.round(grid.heightMeters),
-                memoryText: formatBytes(mem.totalBytes),
-                memoryLevel: memoryLevel(mem.totalBytes),
-            });
-            preview!.setHeightGrid(grid, PREVIEW_EXAGGERATION);
-        } catch (e) { Env.error('build preview', e); }
+/** Re-sample the DEM over the current selection and feed the heights into the model. */
+async function resample(): Promise<void> {
+    if (!previewDem || !currentCorners) return;
+    try {
+        const { cols, rows } = gridResolution(currentCorners);
+        const grid = await sampleSelectionHeights(currentCorners, previewDem, cols, rows);
+        model.setGrid(grid); // notifies -> preview + stats rebuild from the model
+    } catch (e) { Env.error('resample', e); }
+}
+
+/** The model changed (new heights or new settings): rebuild the preview and the stats. */
+function onModelChange(): void {
+    const geo = model.buildGeometry();
+    preview?.setGeometry(geo);
+    const grid = model.getGrid();
+    if (!grid || !geo) { appInstance?.setPreviewStats(null); return; }
+    const mem = estimateMemory(grid);
+    appInstance?.setPreviewStats({
+        vertices: geo.vertexCount,
+        triangles: geo.triangleCount,
+        zoom: grid.zoom,
+        widthMeters: Math.round(grid.widthMeters),
+        heightMeters: Math.round(grid.heightMeters),
+        memoryText: formatBytes(mem.totalBytes),
+        memoryLevel: memoryLevel(mem.totalBytes),
     });
 }
 
-/** Single place the selection state fans out: persistence, panel visibility, preview. */
+/** Single place the selection state fans out: persistence, panel visibility, model. */
 function onSelectionChange(corners: LonLat[] | null): void {
     saveSelectionCorners(corners);
     appInstance?.setPreviewVisible(!!corners); // App shows/hides the 3D panel
-    if (corners) {
-        buildPreview(corners);
-    } else {
-        preview?.clear();
-        appInstance?.setPreviewStats(null);
-    }
+    currentCorners = corners;
+    if (corners) resample();
+    else model.setGrid(null); // notifies -> preview clears, stats null
 }
 
 function loadView(): GeoView {
@@ -156,6 +162,7 @@ async function init(): Promise<void> {
     const previewZoomMin = previewDem ? (previewDem.mmapsrv.minStoredZoom ?? previewDem.minzoom) : 0;
     const previewZoomMax = previewDem ? previewDem.maxzoom : 17;
     const initialPreviewSettings = loadPreviewSettings();
+    model.applySettings(initialPreviewSettings);
 
     const tileProviders = maps.map(m => ({
         id: m.name,
@@ -202,9 +209,9 @@ async function init(): Promise<void> {
             previewZoomMin,
             previewZoomMax,
             initialPreviewSettings,
-            onPreviewSettingsChange: (s: Record<string, any>) => savePreviewSettings(s),
-            onPreviewGenerate: (s: Record<string, any>) => Env.log('[3d] generate', JSON.stringify(s)),
-            onPreviewSave: (s: Record<string, any>) => Env.log('[3d] save', JSON.stringify(s)),
+            onPreviewSettingsChange: (s: Record<string, any>) => { savePreviewSettings(s); model.applySettings(s); },
+            onPreviewGenerate: (s: Record<string, any>) => { model.applySettings(s); Env.log('[3d] generate', JSON.stringify(s)); },
+            onPreviewSave: (s: Record<string, any>) => { savePreviewSettings(s); model.applySettings(s); exportModelStl(model); },
             onLayoutChange: () => preview?.resize(),
         },
     });
@@ -213,6 +220,11 @@ async function init(): Promise<void> {
     // more reliable than threading bind:this through nested components.
     const mapMount = document.getElementById('map-mount')!;
     previewRoot = document.getElementById('preview-mount')!;
+
+    // The preview is a pure consumer of the model: one subscription keeps both the 3D
+    // view and the stats overlay in sync with whatever the model currently holds.
+    preview = new TerrainPreview(previewRoot);
+    model.onChange(onModelChange);
 
     // Composition root: choose concrete engines here; nothing else knows about them.
     const deckSpecs = customSpecs.filter(s => s.surface.type === 'shaded-relief');
