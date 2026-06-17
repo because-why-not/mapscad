@@ -25,9 +25,15 @@
     inset: 0;
 }
 
+/* Each engine mounts its map into a .map-surface inside .panel-mount. Size it with
+   width/height:100% (NOT inset:0): MapLibre adds the .maplibregl-map class, whose CSS
+   sets `position: relative`, which overrides our `position: absolute` and so silently
+   disables `inset`. width/height:100% resolves against .panel-mount regardless of the
+   position type, so the surface keeps full size whichever engine claims it. */
 .map-surface {
     position: absolute;
-    inset: 0;
+    width: 100%;
+    height: 100%;
 }
 
 #preview-root canvas,
