@@ -79,12 +79,15 @@ function safeZoom(corners: LonLat[], desired: number, limit: number): number {
 /** Re-sample the DEM over the current selection and feed the heights into the model. */
 async function resample(): Promise<void> {
     if (!previewDem || !currentCorners) return;
+    Env.log('[3d] regenerating terrain…');
+    const t0 = performance.now();
     try {
         const { heightZoom, resolutionLimit } = model.getSettings();
         const zoom = safeZoom(currentCorners, heightZoom, resolutionLimit);
         const { cols, rows } = gridResolution(currentCorners, zoom, resolutionLimit);
         const grid = await sampleSelectionHeights(currentCorners, previewDem, cols, rows, zoom);
         model.setGrid(grid); // notifies -> preview + stats rebuild from the model
+        Env.log(`[3d] terrain regenerated in ${Math.round(performance.now() - t0)} ms`);
     } catch (e) { Env.error('resample', e); }
 }
 
