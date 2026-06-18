@@ -36,6 +36,17 @@ let previewRoot: HTMLElement | null = null;
 const model = new MapModel();
 let currentCorners: LonLat[] | null = null;
 
+/** Compact toggle label for an elevation source name (drops the _elevation[_raw] tail). */
+function demLabel(name: string): string {
+    return prettifyMapName(name.replace(/_elevation(_raw)?$/i, ''));
+}
+
+/** Heightmap zoom range a DEM supports: lowest stored level to its native max. */
+function demZoomRange(dem: ManifestMap | undefined): { min: number; max: number } {
+    if (!dem) return { min: 0, max: 17 };
+    return { min: dem.mmapsrv.minStoredZoom ?? dem.minzoom, max: dem.maxzoom };
+}
+
 /** Grid size at a zoom: one sample per DEM pixel, capped to the resolution limit. */
 function gridResolution(corners: LonLat[], zoom: number, limit: number): { cols: number; rows: number } {
     const { widthMeters, heightMeters } = rectExtent(corners);
@@ -180,6 +191,14 @@ function loadPreviewSettings(): Record<string, any> {
     return {};
 }
 
+function loadPreviewDem(): string | null {
+    try { return localStorage.getItem('previewDem'); } catch (e) { Env.error('load previewDem', e); return null; }
+}
+
+function savePreviewDem(id: string): void {
+    try { localStorage.setItem('previewDem', id); } catch (e) { Env.error('save previewDem', e); }
+}
+
 function savePreviewSettings(settings: Record<string, any>): void {
     try { localStorage.setItem('previewSettings', JSON.stringify(settings)); } catch (e) { Env.error('save previewSettings', e); }
 }
@@ -191,10 +210,19 @@ async function init(): Promise<void> {
     }
     const mapsById: Record<string, ManifestMap> = Object.fromEntries(maps.map(m => [m.name, m]));
     const customSpecs = availableCustomMaps(mapsById);
-    previewDem = mapsById[PREVIEW_DEM];
+    // The 3D preview can be built from any elevation DEM the server advertises (the
+    // manifest tags those with mmapsrv.type === 'elevation'). Expose them all as a source
+    // toggle; each DEM has its own zoom range, so switching also moves the zoom.
+    const previewDems = maps
+        .filter(m => m.mmapsrv.type === 'elevation')
+        .map(m => ({ id: m.name, name: demLabel(m.name) }));
+    const savedDem = loadPreviewDem();
+    const initialDemId = (savedDem && mapsById[savedDem]?.mmapsrv.type === 'elevation')
+        ? savedDem
+        : (mapsById[PREVIEW_DEM] ? PREVIEW_DEM : (previewDems[0]?.id ?? ''));
+    previewDem = mapsById[initialDemId];
 
-    const previewZoomMin = previewDem ? (previewDem.mmapsrv.minStoredZoom ?? previewDem.minzoom) : 0;
-    const previewZoomMax = previewDem ? previewDem.maxzoom : 17;
+    const { min: previewZoomMin, max: previewZoomMax } = demZoomRange(previewDem);
     // Default the heightmap zoom to the DEM's finest stored level; saved settings win.
     const initialPreviewSettings: Record<string, any> = { heightZoom: previewZoomMax, ...loadPreviewSettings() };
     model.applySettings(initialPreviewSettings);
@@ -241,9 +269,23 @@ async function init(): Promise<void> {
                 if (active) selection.activate();
                 else selection.deactivate(); // emits onChange(null) -> hides preview
             },
+            previewDems,
+            initialPreviewDemId: initialDemId,
             previewZoomMin,
             previewZoomMax,
             initialPreviewSettings,
+            onPreviewDemChange: (id: string) => {
+                if (!mapsById[id]) return;
+                previewDem = mapsById[id];
+                savePreviewDem(id);
+                // Each DEM has its own zoom range; jump to the new source's finest level
+                // (safeZoom still trims it down to the memory budget on resample).
+                const { min, max } = demZoomRange(previewDem);
+                model.applySettings({ heightZoom: max });
+                savePreviewSettings({ ...loadPreviewSettings(), heightZoom: max });
+                appInstance?.setPreviewZoomRange(min, max, max); // move the slider's range + value
+                resample();
+            },
             onPreviewSettingsChange: (s: Record<string, any>) => {
                 const prev = model.getSettings();
                 savePreviewSettings(s);

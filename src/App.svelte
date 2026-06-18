@@ -14,9 +14,12 @@
         onShadowsChange = () => {},
         onSelectToggle = () => {},
         // 3D-view menu (forwarded to PreviewPanel)
+        previewDems = [],
+        initialPreviewDemId = '',
         previewZoomMin = 0,
         previewZoomMax = 17,
         initialPreviewSettings = {},
+        onPreviewDemChange = () => {},
         onPreviewSettingsChange = () => {},
         onPreviewGenerate = () => {},
         onPreviewSave = () => {},
@@ -57,6 +60,7 @@
     export function setCustomMaps(m) { mapPanel?.setCustomMaps(m); }
     export function setSelectActive(active) { mapPanel?.setSelectActive(active); }
     export function setPreviewStats(stats) { previewPanel?.setPreviewStats(stats); }
+    export function setPreviewZoomRange(min, max, heightZoom) { previewPanel?.setZoomRange(min, max, heightZoom); }
     export function setPreviewVisible(visible) {
         previewVisible = visible;
         if (!visible) collapsed = 'none';
@@ -140,6 +144,9 @@
         style={previewStyle}
         canCollapse={showBoth}
         onCollapse={collapsePreview}
+        dems={previewDems}
+        initialDemId={initialPreviewDemId}
+        onDemChange={onPreviewDemChange}
         zoomMin={previewZoomMin}
         zoomMax={previewZoomMax}
         initialSettings={initialPreviewSettings}

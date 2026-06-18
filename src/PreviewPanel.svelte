@@ -5,6 +5,9 @@
         style = '',
         canCollapse = false,
         onCollapse = () => {},
+        dems = [],
+        initialDemId = '',
+        onDemChange = () => {},
         zoomMin = 0,
         zoomMax = 17,
         initialSettings = {},
@@ -20,6 +23,23 @@
     let menuOpen = $state(false);
     let previewStats = $state(null);
     export function setPreviewStats(stats) { previewStats = stats; }
+
+    // The active elevation source, plus the zoom slider's range. Both can change at runtime
+    // (switching DEMs moves the range), so they're local state, seeded from the props.
+    let demId = $state(untrack(() => initialDemId));
+    let zMin = $state(untrack(() => zoomMin));
+    let zMax = $state(untrack(() => zoomMax));
+    export function setZoomRange(min, max, hz) {
+        zMin = min;
+        zMax = max;
+        if (hz != null) heightZoom = hz;
+    }
+
+    function selectDem(id) {
+        if (id === demId) return;
+        demId = id;
+        onDemChange(id);
+    }
 
     const memColor = { ok: '', warn: 'text-warning', high: 'text-error' };
     const fmt = n => n.toLocaleString();
@@ -101,9 +121,22 @@
             <!-- Heightmap detail -->
             <div class="px-4 py-1 text-xs font-bold uppercase tracking-wider opacity-50">Heightmap</div>
             <div class="px-4 py-2 flex flex-col gap-3">
+                {#if dems.length > 1}
+                    <div class="flex flex-col gap-1">
+                        <span class="text-sm">Source</span>
+                        <div class="join w-full">
+                            {#each dems as d (d.id)}
+                                <button
+                                    class="btn btn-sm join-item flex-1 {d.id === demId ? 'btn-primary' : 'bg-base-100'}"
+                                    onclick={() => selectDem(d.id)}
+                                >{d.name}</button>
+                            {/each}
+                        </div>
+                    </div>
+                {/if}
                 <div class="flex flex-col gap-1">
                     <span class="text-sm flex items-center justify-between">Zoom <span class="font-mono">z{heightZoom}</span></span>
-                    <input type="range" min={zoomMin} max={zoomMax} step="1" class="range range-sm" bind:value={heightZoom} oninput={emit} />
+                    <input type="range" min={zMin} max={zMax} step="1" class="range range-sm" bind:value={heightZoom} oninput={emit} />
                 </div>
                 <div class="flex items-center gap-2">
                     <span class="text-sm flex-1">Resolution limit</span>
