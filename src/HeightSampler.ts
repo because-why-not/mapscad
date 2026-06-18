@@ -136,19 +136,12 @@ export async function sampleSelectionHeights(
     const { data } = ctx.getImageData(0, 0, canvas.width, canvas.height);
 
     const W = canvas.width, H = canvas.height;
-    let loggedNoData = false; // diagnostic: report the first transparent pixel hit
     // Terrarium-decode a single pixel (clamped to the canvas), NaN for no-data.
     const decode = (px: number, py: number): number => {
         const x = px < 0 ? 0 : px > W - 1 ? W - 1 : px;
         const y = py < 0 ? 0 : py > H - 1 ? H - 1 : py;
         const i = (y * W + x) * 4;
-        if (data[i + 3] === 0) {                      // alpha 0 => no tile / no data
-            if (!loggedNoData) {
-                loggedNoData = true;
-                console.error(`[HeightSampler] no-data pixel (alpha 0) at canvas ${x},${y} of ${W}×${H} (z${z}, tiles ${tx1 - tx0 + 1}×${ty1 - ty0 + 1})`);
-            }
-            return NO_DATA;
-        }
+        if (data[i + 3] === 0) return NO_DATA;         // alpha 0 => no tile / no data
         return data[i] * 256 + data[i + 1] + data[i + 2] / 256 - 32768;
     };
 
