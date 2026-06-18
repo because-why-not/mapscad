@@ -174,6 +174,12 @@ function saveShadows(enabled: boolean): void {
 }
 
 async function init(): Promise<void> {
+    // One-off cleanup: these were folded into the single `previewConfig` key (PreviewConfig)
+    // and are no longer read. Drop the orphans so they don't linger in users' storage.
+    for (const k of ['previewSettings', 'previewDem', 'selectionCorners']) {
+        try { localStorage.removeItem(k); } catch { /* ignore */ }
+    }
+
     const maps = await fetchTileMapManifest();
     if (maps.length === 0) {
         Env.warn('No maps returned by manifest — check tile server / network.');
