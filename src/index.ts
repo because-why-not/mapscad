@@ -117,6 +117,7 @@ function onModelChange(): void {
         zoom: grid.zoom,
         widthMeters: Math.round(grid.widthMeters),
         heightMeters: Math.round(grid.heightMeters),
+        modelHeight: geo.maxY - geo.minY, // vertical extent of the actual mesh, metres
         gridCols: grid.cols,
         gridRows: grid.rows,
         metersPerVertex: (grid.widthMeters * grid.heightMeters) / surfaceVerts,

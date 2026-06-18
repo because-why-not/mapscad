@@ -40,6 +40,8 @@ export interface ModelGeometry {
     heightMeters: number;
     vertexCount: number;
     triangleCount: number;
+    minY: number;             // lowest / highest vertex Y (model metres, incl. socket + water)
+    maxY: number;
 }
 
 export const DEFAULT_MODEL_SETTINGS: ModelSettings = {
@@ -128,12 +130,13 @@ export class MapModel {
         const nx = s.tilesEnabled ? Math.min(s.tilesX, cols - 1) : 1;
         const ny = s.tilesEnabled ? Math.min(s.tilesY, rows - 1) : 1;
 
-        // Lowest surface height after the water cutoff, so the socket floor sits below the
+        // Lowest model-space surface (incl. water), so the socket floor sits below the
         // water too. Shared across tiles, so a multi-tile print stays level.
-        const minHeight = this.effectiveMinHeight(grid);
+        const minY = this.effectiveMinY(grid);
 
         const tiles: ModelTile[] = [];
         let vertexCount = 0, triangleCount = 0;
+        let lowY = Infinity, highY = -Infinity;
         for (let ty = 0; ty < ny; ty++) {
             const r0 = Math.round(ty * (rows - 1) / ny);
             const r1 = Math.round((ty + 1) * (rows - 1) / ny);
@@ -142,22 +145,27 @@ export class MapModel {
                 const c0 = Math.round(tx * (cols - 1) / nx);
                 const c1 = Math.round((tx + 1) * (cols - 1) / nx);
                 if (c1 <= c0) continue;
-                const tile = this.buildTile(grid, c0, c1, r0, r1, tx, ty, minHeight);
+                const tile = this.buildTile(grid, c0, c1, r0, r1, tx, ty, minY);
                 tiles.push(tile);
                 vertexCount += tile.positions.length / 3;
                 triangleCount += tile.indices.length / 3;
+                for (let i = 1; i < tile.positions.length; i += 3) {
+                    const y = tile.positions[i];
+                    if (y < lowY) lowY = y;
+                    if (y > highY) highY = y;
+                }
             }
         }
-        return { tiles, widthMeters, heightMeters, vertexCount, triangleCount };
+        if (!Number.isFinite(lowY)) { lowY = 0; highY = 0; }
+        return { tiles, widthMeters, heightMeters, vertexCount, triangleCount, minY: lowY, maxY: highY };
     }
 
     /** Build one independent solid spanning grid columns c0..c1 and rows r0..r1. */
     private buildTile(
         grid: HeightGrid, c0: number, c1: number, r0: number, r1: number, ix0: number, iy0: number,
-        minHeight: number,
+        minY: number,
     ): ModelTile {
         const { heights, cols, rows, widthMeters, heightMeters } = grid;
-        const scale = this.settings.heightScale;
         const tcols = c1 - c0 + 1, trows = r1 - r0 + 1;
 
         // Model-centred metre coordinates. The sampler walks west→east (c) and
@@ -166,7 +174,7 @@ export class MapModel {
         // mesh and exported STL are not mirrored.
         const X = (c: number) => -widthMeters / 2 + (c / (cols - 1)) * widthMeters;
         const Z = (r: number) => heightMeters / 2 - (r / (rows - 1)) * heightMeters;
-        const Y = (c: number, r: number) => this.waterHeight(heights[r * cols + c]) * scale;
+        const Y = (c: number, r: number) => this.surfaceY(heights[r * cols + c]);
 
         const positions: number[] = [];
         const indices: number[] = [];
@@ -185,7 +193,7 @@ export class MapModel {
         if (this.settings.socketEnabled) {
             // The socket is a print/handling feature, so its thickness is literal metres
             // and is NOT affected by heightScale — only the terrain itself is exaggerated.
-            const baseY = minHeight * scale - this.settings.socketSize - SOCKET_FLOOR_OFFSET;
+            const baseY = minY - this.settings.socketSize - SOCKET_FLOOR_OFFSET;
             this.addSocket(positions, indices, tcols, trows, baseY);
         }
 
@@ -196,21 +204,27 @@ export class MapModel {
         };
     }
 
-    /** Apply the water cutoff: anything below the cutoff is flattened to the water level. */
-    private waterHeight(h: number): number {
+    /**
+     * Model-space height (Y, metres) for a raw sample. Terrain is exaggerated by
+     * heightScale; water is a fixed plane at the literal waterLevel — exaggeration must
+     * not move the waterline (same rule as the socket thickness).
+     */
+    private surfaceY(h: number): number {
         const s = this.settings;
-        return s.waterEnabled && h < s.waterCutoff ? s.waterLevel : h;
+        if (s.waterEnabled && h < s.waterCutoff) return s.waterLevel; // literal metres
+        return h * s.heightScale;
     }
 
-    /** Lowest surface height once the water cutoff is applied (drives the socket floor). */
-    private effectiveMinHeight(grid: HeightGrid): number {
-        if (!this.settings.waterEnabled) return grid.minHeight;
+    /** Lowest model-space surface Y once the water cutoff applies (drives the socket floor). */
+    private effectiveMinY(grid: HeightGrid): number {
+        const s = this.settings;
+        if (!s.waterEnabled) return grid.minHeight * s.heightScale;
         let min = Infinity;
         for (let i = 0; i < grid.heights.length; i++) {
-            const v = this.waterHeight(grid.heights[i]);
+            const v = this.surfaceY(grid.heights[i]);
             if (v < min) min = v;
         }
-        return Number.isFinite(min) ? min : grid.minHeight;
+        return Number.isFinite(min) ? min : grid.minHeight * s.heightScale;
     }
 
     /** Skirt + base that closes the open top surface into a watertight solid. */

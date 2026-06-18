@@ -86,6 +86,7 @@
     {#if previewStats}
         <div class="absolute top-4 left-4 z-[1000] bg-base-100/80 backdrop-blur rounded shadow-md px-3 py-2 text-xs font-mono leading-5 pointer-events-none">
             <div>Selection: {fmt(previewStats.widthMeters)} × {fmt(previewStats.heightMeters)} m</div>
+            <div>Height: {fmtArea(previewStats.modelHeight)} m</div>
             <div>Detail: {fmt(previewStats.gridCols)} × {fmt(previewStats.gridRows)} vtx ({fmtArea(previewStats.metersPerVertex)} m²/vtx)</div>
             <div>Heightmap zoom: z{previewStats.zoom}</div>
             <div>Vertices: {fmt(previewStats.vertices)}</div>
