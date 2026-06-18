@@ -58,7 +58,7 @@ export const DEFAULT_MODEL_SETTINGS: ModelSettings = {
     waterLevel: 0,
 };
 
-// Always leave a sliver of socket so a "size 0" model is still a handleable solid.
+// Minimum socket thickness, so a "size 0" socket is still a handleable solid.
 const SOCKET_FLOOR_OFFSET = 0.1;
 
 export class MapModel {
@@ -193,7 +193,8 @@ export class MapModel {
         if (this.settings.socketEnabled) {
             // The socket is a print/handling feature, so its thickness is literal metres
             // and is NOT affected by heightScale — only the terrain itself is exaggerated.
-            const baseY = minY - this.settings.socketSize - SOCKET_FLOOR_OFFSET;
+            // Keep at least a sliver so a "size 0" socket is still a handleable solid.
+            const baseY = minY - Math.max(this.settings.socketSize, SOCKET_FLOOR_OFFSET);
             this.addSocket(positions, indices, tcols, trows, baseY);
         }
 
