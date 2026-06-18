@@ -42,6 +42,7 @@ export interface ModelGeometry {
     triangleCount: number;
     minY: number;             // lowest / highest vertex Y (model metres, incl. socket + water)
     maxY: number;
+    socketStartY: number | null; // Y where the socket begins (lowest surface), null if no socket
 }
 
 export const DEFAULT_MODEL_SETTINGS: ModelSettings = {
@@ -157,7 +158,11 @@ export class MapModel {
             }
         }
         if (!Number.isFinite(lowY)) { lowY = 0; highY = 0; }
-        return { tiles, widthMeters, heightMeters, vertexCount, triangleCount, minY: lowY, maxY: highY };
+        return {
+            tiles, widthMeters, heightMeters, vertexCount, triangleCount,
+            minY: lowY, maxY: highY,
+            socketStartY: s.socketEnabled ? minY : null,
+        };
     }
 
     /** Build one independent solid spanning grid columns c0..c1 and rows r0..r1. */

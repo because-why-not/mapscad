@@ -16,6 +16,7 @@ export class TerrainPreview {
     private controls: OrbitControls;
     private group: THREE.Group;
     private material: THREE.MeshStandardMaterial;
+    private socketLineMaterial: THREE.LineBasicMaterial;
     private framed = false; // only auto-frame the first model after the view was empty
     private lastW = 0;       // extent of the current model, for the reset-camera button
     private lastH = 0;
@@ -66,6 +67,8 @@ export class TerrainPreview {
         // FrontSide (the default) culls back faces. Relies on MapModel emitting outward
         // winding — top surface +Y, socket walls/base oriented away from the model.
         this.material = new THREE.MeshStandardMaterial({ color: 0xc9c3b2, side: THREE.FrontSide });
+        // Outline marking where the socket begins (the lowest surface level).
+        this.socketLineMaterial = new THREE.LineBasicMaterial({ color: 0xff7043 });
         this.group = new THREE.Group();
         this.scene.add(this.group);
 
@@ -96,6 +99,22 @@ export class TerrainPreview {
             buf.computeVertexNormals();
             const mesh = new THREE.Mesh(buf, this.material);
             this.group.add(mesh);
+        }
+
+        // A rectangle at the socket-start level traces the model footprint, sitting on the
+        // socket's side walls so it reads as "terrain above, socket below".
+        if (geo.socketStartY != null) {
+            const y = geo.socketStartY;
+            const hw = geo.widthMeters / 2, hh = geo.heightMeters / 2;
+            const corners = [
+                new THREE.Vector3(-hw, y, -hh),
+                new THREE.Vector3(hw, y, -hh),
+                new THREE.Vector3(hw, y, hh),
+                new THREE.Vector3(-hw, y, hh),
+            ];
+            const buf = new THREE.BufferGeometry().setFromPoints(corners);
+            const line = new THREE.LineLoop(buf, this.socketLineMaterial);
+            this.group.add(line);
         }
 
         // Frame only the first model after the view was empty; leave the user's camera
@@ -203,6 +222,7 @@ export class TerrainPreview {
         window.removeEventListener('pointerup', this.onPointerUp);
         this.clear();
         this.material.dispose();
+        this.socketLineMaterial.dispose();
         this.controls.dispose();
         this.renderer.dispose();
         el.remove();
