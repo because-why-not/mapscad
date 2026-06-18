@@ -21,6 +21,9 @@ export interface ModelSettings {
     tilesEnabled: boolean;   // split into tilesX × tilesY separate printable solids
     tilesX: number;
     tilesY: number;
+    waterEnabled: boolean;   // flatten everything below waterCutoff to a single water level
+    waterCutoff: number;     // metres: terrain below this is treated as water (e.g. sea)
+    waterLevel: number;      // metres: height water is rendered at (e.g. -50 for a clear step)
 }
 
 /** One independent solid: a flat buffer of metre-space vertices + triangle indices. */
@@ -48,6 +51,9 @@ export const DEFAULT_MODEL_SETTINGS: ModelSettings = {
     tilesEnabled: false,
     tilesX: 1,
     tilesY: 1,
+    waterEnabled: false,
+    waterCutoff: 0,
+    waterLevel: 0,
 };
 
 // Always leave a sliver of socket so a "size 0" model is still a handleable solid.
@@ -122,6 +128,10 @@ export class MapModel {
         const nx = s.tilesEnabled ? Math.min(s.tilesX, cols - 1) : 1;
         const ny = s.tilesEnabled ? Math.min(s.tilesY, rows - 1) : 1;
 
+        // Lowest surface height after the water cutoff, so the socket floor sits below the
+        // water too. Shared across tiles, so a multi-tile print stays level.
+        const minHeight = this.effectiveMinHeight(grid);
+
         const tiles: ModelTile[] = [];
         let vertexCount = 0, triangleCount = 0;
         for (let ty = 0; ty < ny; ty++) {
@@ -132,7 +142,7 @@ export class MapModel {
                 const c0 = Math.round(tx * (cols - 1) / nx);
                 const c1 = Math.round((tx + 1) * (cols - 1) / nx);
                 if (c1 <= c0) continue;
-                const tile = this.buildTile(grid, c0, c1, r0, r1, tx, ty);
+                const tile = this.buildTile(grid, c0, c1, r0, r1, tx, ty, minHeight);
                 tiles.push(tile);
                 vertexCount += tile.positions.length / 3;
                 triangleCount += tile.indices.length / 3;
@@ -144,8 +154,9 @@ export class MapModel {
     /** Build one independent solid spanning grid columns c0..c1 and rows r0..r1. */
     private buildTile(
         grid: HeightGrid, c0: number, c1: number, r0: number, r1: number, ix0: number, iy0: number,
+        minHeight: number,
     ): ModelTile {
-        const { heights, cols, rows, widthMeters, heightMeters, minHeight } = grid;
+        const { heights, cols, rows, widthMeters, heightMeters } = grid;
         const scale = this.settings.heightScale;
         const tcols = c1 - c0 + 1, trows = r1 - r0 + 1;
 
@@ -155,7 +166,7 @@ export class MapModel {
         // mesh and exported STL are not mirrored.
         const X = (c: number) => -widthMeters / 2 + (c / (cols - 1)) * widthMeters;
         const Z = (r: number) => heightMeters / 2 - (r / (rows - 1)) * heightMeters;
-        const Y = (c: number, r: number) => heights[r * cols + c] * scale;
+        const Y = (c: number, r: number) => this.waterHeight(heights[r * cols + c]) * scale;
 
         const positions: number[] = [];
         const indices: number[] = [];
@@ -183,6 +194,23 @@ export class MapModel {
             indices: new Uint32Array(indices),
             ix0, iy0,
         };
+    }
+
+    /** Apply the water cutoff: anything below the cutoff is flattened to the water level. */
+    private waterHeight(h: number): number {
+        const s = this.settings;
+        return s.waterEnabled && h < s.waterCutoff ? s.waterLevel : h;
+    }
+
+    /** Lowest surface height once the water cutoff is applied (drives the socket floor). */
+    private effectiveMinHeight(grid: HeightGrid): number {
+        if (!this.settings.waterEnabled) return grid.minHeight;
+        let min = Infinity;
+        for (let i = 0; i < grid.heights.length; i++) {
+            const v = this.waterHeight(grid.heights[i]);
+            if (v < min) min = v;
+        }
+        return Number.isFinite(min) ? min : grid.minHeight;
     }
 
     /** Skirt + base that closes the open top surface into a watertight solid. */
@@ -243,6 +271,9 @@ function sanitize(s: ModelSettings): ModelSettings {
         tilesEnabled: !!s.tilesEnabled,
         tilesX: Math.max(1, Math.floor(num(s.tilesX, 1))),
         tilesY: Math.max(1, Math.floor(num(s.tilesY, 1))),
+        waterEnabled: !!s.waterEnabled,
+        waterCutoff: num(s.waterCutoff, 0),
+        waterLevel: num(s.waterLevel, 0),
     };
 }
 

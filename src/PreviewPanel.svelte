@@ -55,10 +55,13 @@
     let tilesEnabled = $state(untrack(() => initialSettings.tilesEnabled ?? false));
     let tilesX = $state(untrack(() => initialSettings.tilesX ?? 1));
     let tilesY = $state(untrack(() => initialSettings.tilesY ?? 1));
+    let waterEnabled = $state(untrack(() => initialSettings.waterEnabled ?? false));
+    let waterCutoff = $state(untrack(() => initialSettings.waterCutoff ?? 0));
+    let waterLevel = $state(untrack(() => initialSettings.waterLevel ?? 0));
     let smoothShading = $state(untrack(() => initialSettings.smoothShading ?? true));
 
     function settings() {
-        return { heightZoom, resolutionLimit, heightScale, socketEnabled, socketSize, tilesEnabled, tilesX, tilesY, smoothShading };
+        return { heightZoom, resolutionLimit, heightScale, socketEnabled, socketSize, tilesEnabled, tilesX, tilesY, waterEnabled, waterCutoff, waterLevel, smoothShading };
     }
     function emit() { onSettingsChange(settings()); }
     function selectAll(e) { e.target.select(); }
@@ -160,6 +163,24 @@
                 <div class="flex flex-col gap-1">
                     <span class="text-sm flex items-center justify-between">Height scale <span class="font-mono">{heightScale}×</span></span>
                     <input type="range" min="0.1" max="5" step="0.1" class="range range-sm" bind:value={heightScale} oninput={emit} />
+                </div>
+                <div class="flex flex-col gap-2">
+                    <label class="flex items-center gap-2 cursor-pointer">
+                        <input type="checkbox" class="checkbox checkbox-sm" bind:checked={waterEnabled} onchange={emit} />
+                        <span class="text-sm">Water cutoff</span>
+                    </label>
+                    {#if waterEnabled}
+                        <div class="flex items-center gap-2">
+                            <span class="text-sm flex-1">Below</span>
+                            <input type="number" step="1" class="input input-sm input-bordered w-24" bind:value={waterCutoff} onfocus={selectAll} oninput={emit} />
+                            <span class="text-sm opacity-60">m</span>
+                        </div>
+                        <div class="flex items-center gap-2">
+                            <span class="text-sm flex-1">Water at</span>
+                            <input type="number" step="1" class="input input-sm input-bordered w-24" bind:value={waterLevel} onfocus={selectAll} oninput={emit} />
+                            <span class="text-sm opacity-60">m</span>
+                        </div>
+                    {/if}
                 </div>
             </div>
 
