@@ -43,6 +43,8 @@ export interface ModelGeometry {
     minY: number;             // lowest / highest vertex Y (model metres, incl. socket + water)
     maxY: number;
     socketStartY: number | null; // Y where the socket begins (lowest surface), null if no socket
+    minThickness: number;     // thinnest / thickest solid column, export units (0 without socket)
+    maxThickness: number;
 }
 
 export const DEFAULT_MODEL_SETTINGS: ModelSettings = {
@@ -158,10 +160,22 @@ export class MapModel {
             }
         }
         if (!Number.isFinite(lowY)) { lowY = 0; highY = 0; }
+
+        // Solid thickness = top surface down to the flat base. Thinnest column sits at the
+        // lowest surface (= the socket depth); thickest reaches the highest surface. Without
+        // a socket the mesh is an open sheet, so there is no thickness.
+        let minThickness = 0, maxThickness = 0;
+        if (s.socketEnabled) {
+            const baseY = minY - Math.max(s.socketSize, SOCKET_FLOOR_OFFSET);
+            minThickness = minY - baseY;
+            maxThickness = highY - baseY;
+        }
+
         return {
             tiles, widthMeters, heightMeters, vertexCount, triangleCount,
             minY: lowY, maxY: highY,
             socketStartY: s.socketEnabled ? minY : null,
+            minThickness, maxThickness,
         };
     }
 
