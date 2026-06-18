@@ -15,6 +15,7 @@
         onGenerate = () => {},
         onSave = () => {},
         onResetCamera = () => {},
+        onShareLink = () => '',
     } = $props();
 
     let mountEl;
@@ -61,6 +62,19 @@
     }
     function emit() { onSettingsChange(settings()); }
     function selectAll(e) { e.target.select(); }
+
+    let shareLabel = $state('Share link');
+    async function shareLink() {
+        const url = onShareLink();
+        if (!url) return;
+        try {
+            await navigator.clipboard.writeText(url);
+            shareLabel = 'Copied!';
+        } catch {
+            shareLabel = 'Copy failed';
+        }
+        setTimeout(() => shareLabel = 'Share link', 1500);
+    }
 </script>
 
 <div class="panel panel-preview" {style}>
@@ -192,6 +206,7 @@
             <div class="px-4 py-3 flex flex-col gap-2">
                 <button class="btn btn-sm btn-primary" onclick={() => onGenerate(settings())}>Generate</button>
                 <button class="btn btn-sm btn-outline" onclick={() => onSave(settings())}>Save</button>
+                <button class="btn btn-sm btn-ghost bg-base-100" onclick={shareLink}>{shareLabel}</button>
             </div>
         </div>
     </div>

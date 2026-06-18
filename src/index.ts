@@ -13,6 +13,7 @@ import { SelectionArea, LonLat } from './SelectionArea';
 import { sampleSelectionHeights, rectExtent, groundResolution, tileCoverage } from './HeightSampler';
 import { TerrainPreview } from './TerrainPreview';
 import { MapModel } from './MapModel';
+import { PreviewConfigStore } from './PreviewConfig';
 import { exportModelStl } from './StlMaker';
 import { estimateMemory, formatBytes, memoryLevel, isOverBudget } from './memory';
 import type { GeoView, MapEngine } from './engine/MapEngine';
@@ -34,6 +35,10 @@ let previewRoot: HTMLElement | null = null;
 
 // The canonical 3D model: settings mutate it, the preview and STL export read it.
 const model = new MapModel();
+// Single source of truth for preview/export config (DEM, selection, model settings,
+// display flags) + its persistence and share-link codec. Reads any share link / saved
+// config at construction.
+const config = new PreviewConfigStore();
 let currentCorners: LonLat[] | null = null;
 
 /** Compact toggle label for an elevation source name (drops the _elevation[_raw] tail). */
@@ -122,7 +127,7 @@ function onModelChange(): void {
 
 /** Single place the selection state fans out: persistence, panel visibility, model. */
 function onSelectionChange(corners: LonLat[] | null): void {
-    saveSelectionCorners(corners);
+    config.update({ selection: corners });
     appInstance?.setPreviewVisible(!!corners); // App shows/hides the 3D panel
     currentCorners = corners;
     if (corners) resample();
@@ -168,44 +173,6 @@ function saveShadows(enabled: boolean): void {
     try { localStorage.setItem('shadows', enabled ? '1' : '0'); } catch (e) { Env.error('save shadows', e); }
 }
 
-function loadSelectionCorners(): LonLat[] | null {
-    try {
-        const s = localStorage.getItem('selectionCorners');
-        if (s) {
-            const c = JSON.parse(s);
-            if (Array.isArray(c) && c.length === 4) return c;
-        }
-    } catch (e) { Env.error('load selectionCorners', e); }
-    return null;
-}
-
-function saveSelectionCorners(corners: LonLat[] | null): void {
-    try {
-        if (corners) localStorage.setItem('selectionCorners', JSON.stringify(corners));
-        else localStorage.removeItem('selectionCorners');
-    } catch (e) { Env.error('save selectionCorners', e); }
-}
-
-function loadPreviewSettings(): Record<string, any> {
-    try {
-        const s = localStorage.getItem('previewSettings');
-        if (s) return JSON.parse(s);
-    } catch (e) { Env.error('load previewSettings', e); }
-    return {};
-}
-
-function loadPreviewDem(): string | null {
-    try { return localStorage.getItem('previewDem'); } catch (e) { Env.error('load previewDem', e); return null; }
-}
-
-function savePreviewDem(id: string): void {
-    try { localStorage.setItem('previewDem', id); } catch (e) { Env.error('save previewDem', e); }
-}
-
-function savePreviewSettings(settings: Record<string, any>): void {
-    try { localStorage.setItem('previewSettings', JSON.stringify(settings)); } catch (e) { Env.error('save previewSettings', e); }
-}
-
 async function init(): Promise<void> {
     const maps = await fetchTileMapManifest();
     if (maps.length === 0) {
@@ -219,16 +186,21 @@ async function init(): Promise<void> {
     const previewDems = maps
         .filter(m => m.mmapsrv.type === 'elevation')
         .map(m => ({ id: m.name, name: demLabel(m.name) }));
-    const savedDem = loadPreviewDem();
-    const initialDemId = (savedDem && mapsById[savedDem]?.mmapsrv.type === 'elevation')
-        ? savedDem
+    // Resolve the DEM from the saved/shared config, falling back to the default elevation
+    // source (or whatever the manifest offers).
+    const cfg = config.get();
+    const initialDemId = (cfg.demId && mapsById[cfg.demId]?.mmapsrv.type === 'elevation')
+        ? cfg.demId
         : (mapsById[PREVIEW_DEM] ? PREVIEW_DEM : (previewDems[0]?.id ?? ''));
     previewDem = mapsById[initialDemId];
 
     const { min: previewZoomMin, max: previewZoomMax } = demZoomRange(previewDem);
-    // Default the heightmap zoom to the DEM's finest stored level; saved settings win.
-    const initialPreviewSettings: Record<string, any> = { heightZoom: previewZoomMax, ...loadPreviewSettings() };
-    model.applySettings(initialPreviewSettings);
+    // heightZoom 0 means "unset" (no DEM zoom is that low) -> default to the finest level.
+    const heightZoom = cfg.model.heightZoom > 0 ? cfg.model.heightZoom : previewZoomMax;
+    model.applySettings({ ...cfg.model, heightZoom });
+    // Fold the resolved DEM + sanitized settings back into the config so it's consistent.
+    config.update({ demId: initialDemId, model: model.getSettings() });
+    const initialPreviewSettings: Record<string, any> = { ...model.getSettings(), smoothShading: cfg.display.smoothShading };
 
     const tileProviders = maps.map(m => ({
         id: m.name,
@@ -280,28 +252,28 @@ async function init(): Promise<void> {
             onPreviewDemChange: (id: string) => {
                 if (!mapsById[id]) return;
                 previewDem = mapsById[id];
-                savePreviewDem(id);
                 // Each DEM has its own zoom range; jump to the new source's finest level
                 // (safeZoom still trims it down to the memory budget on resample).
                 const { min, max } = demZoomRange(previewDem);
                 model.applySettings({ heightZoom: max });
-                savePreviewSettings({ ...loadPreviewSettings(), heightZoom: max });
+                config.update({ demId: id, model: model.getSettings() });
                 appInstance?.setPreviewZoomRange(min, max, max); // move the slider's range + value
                 resample();
             },
             onPreviewSettingsChange: (s: Record<string, any>) => {
                 const prev = model.getSettings();
-                savePreviewSettings(s);
                 model.applySettings(s); // rebuilds geometry from the current grid
+                config.update({ model: model.getSettings(), display: { smoothShading: s.smoothShading ?? true } });
                 preview?.setSmoothShading(s.smoothShading ?? true); // display-only
                 // Zoom / resolution change the sampling itself, so re-fetch the heights.
                 if (s.heightZoom !== prev.heightZoom || s.resolutionLimit !== prev.resolutionLimit) {
                     scheduleResample();
                 }
             },
-            onPreviewGenerate: (s: Record<string, any>) => { model.applySettings(s); resample(); },
-            onPreviewSave: (s: Record<string, any>) => { savePreviewSettings(s); model.applySettings(s); exportModelStl(model); },
+            onPreviewGenerate: (s: Record<string, any>) => { model.applySettings(s); config.update({ model: model.getSettings() }); resample(); },
+            onPreviewSave: (s: Record<string, any>) => { model.applySettings(s); config.update({ model: model.getSettings() }); exportModelStl(model); },
             onPreviewResetCamera: () => preview?.resetCamera(),
+            onPreviewShareLink: () => config.shareLink(),
             onLayoutChange: () => preview?.resize(),
         },
     });
@@ -326,7 +298,7 @@ async function init(): Promise<void> {
     const olEngine = new OpenLayersEngine(maps, olMap => {
         if (selection) return;
         selection = new SelectionArea(olMap, { onChange: onSelectionChange });
-        const savedCorners = loadSelectionCorners();
+        const savedCorners = config.get().selection;
         if (savedCorners) {
             selection.restore(savedCorners);
             appInstance?.setSelectActive(true);

@@ -39,7 +39,7 @@ export interface ModelGeometry {
     triangleCount: number;
 }
 
-const DEFAULTS: ModelSettings = {
+export const DEFAULT_MODEL_SETTINGS: ModelSettings = {
     heightZoom: 0,
     resolutionLimit: 256,
     heightScale: 1,
@@ -61,7 +61,7 @@ export class MapModel {
     private dirty = true;
 
     constructor(initial: Partial<ModelSettings> = {}) {
-        this.settings = sanitize({ ...DEFAULTS, ...initial });
+        this.settings = sanitize({ ...DEFAULT_MODEL_SETTINGS, ...initial });
     }
 
     // --- observation ---------------------------------------------------------
