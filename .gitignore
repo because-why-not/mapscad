@@ -5,6 +5,10 @@ node_modules/
 www/js/
 dist/
 
+# Playwright artifacts
+test-results/
+playwright-report/
+
 # Environment / secrets
 .env
 .env.local
