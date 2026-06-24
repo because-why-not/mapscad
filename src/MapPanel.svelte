@@ -12,6 +12,7 @@
         onSunChange = () => {},
         onShadowsChange = () => {},
         onSelectToggle = () => {},
+        onAspectChange = () => {},
         canCollapse = false,
         onCollapse = () => {},
     } = $props();
@@ -28,6 +29,19 @@
     let shadowsOn = $state(untrack(() => initialShadows));
     // Which selection tool is active: 'none' | 'rectangle' | 'oval'.
     let activeTool = $state('none');
+    // Aspect-ratio lock for drawing/resizing (session-only). 'free' or a 'w:h' preset, or
+    // 'custom' with the two numbers below. Locked to width:height = halfX/halfY.
+    let aspectMode = $state('free');
+    let customW = $state(4);
+    let customH = $state(3);
+
+    function aspectRatio() {
+        if (aspectMode === 'free') return null;
+        if (aspectMode === 'custom') return customW > 0 && customH > 0 ? customW / customH : null;
+        const [w, h] = aspectMode.split(':').map(Number);
+        return h > 0 ? w / h : null;
+    }
+    function emitAspect() { onAspectChange(aspectRatio()); }
 
     let sunEnabled = $derived(!!customList.find(c => c.id === activeProviderId)?.sun);
     let shadowsCapable = $derived(!!customList.find(c => c.id === activeProviderId)?.shadows);
@@ -100,6 +114,33 @@
             aria-label="Select oval area"
             onclick={() => toggleTool('oval')}
         >◯</button>
+
+        {#if activeTool !== 'none'}
+            <!-- Aspect-ratio lock: snaps the selection to a frame ratio (1:1 = square/circle). -->
+            <select
+                class="select select-sm bg-base-100 shadow-md border-0 w-24"
+                title="Lock aspect ratio"
+                aria-label="Lock aspect ratio"
+                bind:value={aspectMode}
+                onchange={emitAspect}
+            >
+                <option value="free">Free</option>
+                <option value="1:1">1:1</option>
+                <option value="3:2">3:2</option>
+                <option value="4:3">4:3</option>
+                <option value="16:9">16:9</option>
+                <option value="custom">Custom</option>
+            </select>
+            {#if aspectMode === 'custom'}
+                <div class="flex items-center gap-1 bg-base-100 shadow-md rounded px-2 py-1">
+                    <input type="number" min="1" step="1" class="input input-xs input-bordered w-12 text-center"
+                        bind:value={customW} oninput={emitAspect} aria-label="Ratio width" />
+                    <span class="text-sm opacity-60">:</span>
+                    <input type="number" min="1" step="1" class="input input-xs input-bordered w-12 text-center"
+                        bind:value={customH} oninput={emitAspect} aria-label="Ratio height" />
+                </div>
+            {/if}
+        {/if}
     </div>
 
     <!-- Menu button -->

@@ -13,6 +13,7 @@
         onSunChange = () => {},
         onShadowsChange = () => {},
         onSelectToggle = () => {},
+        onAspectChange = () => {},
         // 3D-view menu (forwarded to PreviewPanel)
         previewDems = [],
         initialPreviewDemId = '',
@@ -127,6 +128,7 @@
         {onSunChange}
         {onShadowsChange}
         {onSelectToggle}
+        {onAspectChange}
         canCollapse={showBoth}
         onCollapse={collapseMap}
     />

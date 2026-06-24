@@ -260,6 +260,7 @@ async function init(): Promise<void> {
                     selection.deactivate(); // emits onChange(null) -> hides preview
                 }
             },
+            onAspectChange: (ratio: number | null) => selection?.setAspect(ratio),
             previewDems,
             initialPreviewDemId: initialDemId,
             previewZoomMin,

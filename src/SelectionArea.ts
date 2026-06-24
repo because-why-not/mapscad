@@ -5,7 +5,7 @@ import Point from 'ol/geom/Point';
 import VectorLayer from 'ol/layer/Vector';
 import VectorSource from 'ol/source/Vector';
 import PointerInteraction from 'ol/interaction/Pointer';
-import { Circle as CircleStyle, Fill, Stroke, Style } from 'ol/style';
+import { Circle as CircleStyle, Fill, Icon, Stroke, Style } from 'ol/style';
 import { fromLonLat, toLonLat } from 'ol/proj';
 import type { Coordinate } from 'ol/coordinate';
 import { SelectionShape } from './MapModel';
@@ -22,10 +22,24 @@ interface SelectionAreaOptions {
 }
 
 const HANDLE_HIT_PX = 12;   // pixel radius for grabbing a handle
+const MOVE_HIT_PX = 16;     // pixel radius for grabbing the (larger) move handle
 const MIN_HALF = 1;         // minimum half-extent (projection units) to avoid degenerate rects
 const ROTATE_PUSH = 1.25;   // how far past the top edge the rotation handle sits
 
-type Mode = 'none' | 'create' | 'resize' | 'rotate';
+type Mode = 'none' | 'create' | 'resize' | 'rotate' | 'move';
+
+// Centre handle: a four-way move arrow, so the whole selection can be dragged as one.
+const MOVE_ICON = 'data:image/svg+xml;utf8,' + encodeURIComponent(
+    `<svg xmlns="http://www.w3.org/2000/svg" width="30" height="30" viewBox="0 0 24 24">
+        <circle cx="12" cy="12" r="11" fill="#007bff" stroke="#ffffff" stroke-width="1.5"/>
+        <g stroke="#ffffff" stroke-width="1.6" fill="none" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 4.5 V19.5 M4.5 12 H19.5"/>
+            <path d="M12 4.5 l-2 2.2 M12 4.5 l2 2.2"/>
+            <path d="M12 19.5 l-2 -2.2 M12 19.5 l2 -2.2"/>
+            <path d="M4.5 12 l2.2 -2 M4.5 12 l2.2 2"/>
+            <path d="M19.5 12 l-2.2 -2 M19.5 12 l-2.2 2"/>
+        </g>
+    </svg>`);
 
 export class SelectionArea {
     private map: OlMap;
@@ -42,11 +56,16 @@ export class SelectionArea {
     // Oval draws the inscribed ellipse but keeps the same bounding box, handles and the
     // four emitted corners — the model masks the sampled rectangle to the ellipse.
     private shape: SelectionShape = SelectionShape.Rectangle;
+    // Locked width:height (halfX/halfY) for create + resize, or null for free aspect.
+    // Mercator is conformal, so a fixed projection-unit ratio is the same ratio on the
+    // ground locally — i.e. 1:1 really is a square / circle.
+    private aspect: number | null = null;
 
     private featuresAdded = false;
     private rectFeature = new Feature<Polygon>();
     private cornerFeatures = [0, 1, 2, 3].map(() => new Feature<Point>());
     private rotateFeature = new Feature<Point>();
+    private moveFeature = new Feature<Point>();
 
     // interaction state
     private mode: Mode = 'none';
@@ -54,6 +73,8 @@ export class SelectionArea {
     private resizeFixed: Coordinate | null = null;
     private rotateStartPointer = 0;
     private rotateStartRotation = 0;
+    private moveStartPointer: Coordinate | null = null;
+    private moveStartCenter: Coordinate | null = null;
 
     constructor(map: OlMap, options: SelectionAreaOptions = {}) {
         this.map = map;
@@ -62,6 +83,7 @@ export class SelectionArea {
         this.rectFeature.set('role', 'rect');
         this.cornerFeatures.forEach(f => f.set('role', 'corner'));
         this.rotateFeature.set('role', 'rotate');
+        this.moveFeature.set('role', 'move');
 
         this.layer = new VectorLayer({ source: this.source, style: styleForFeature, zIndex: 1000 });
         map.addLayer(this.layer);
@@ -111,6 +133,17 @@ export class SelectionArea {
         if (this.center) this.updateGeometry();
     }
 
+    /** Lock the width:height ratio (e.g. 1 for a square/circle), or null for free aspect.
+     *  An existing selection keeps its width and snaps its height to the new ratio. */
+    setAspect(aspect: number | null): void {
+        this.aspect = aspect && aspect > 0 ? aspect : null;
+        if (this.center && this.aspect) {
+            this.halfY = Math.max(this.halfX / this.aspect, MIN_HALF);
+            this.updateGeometry();
+            this.emitChange();
+        }
+    }
+
     /** Current selection as four lon/lat corners, or null if there is no selection. */
     getCorners(): LonLat[] | null {
         if (!this.center) return null;
@@ -133,6 +166,12 @@ export class SelectionArea {
                 this.rotateStartRotation = this.rotation;
                 return true;
             }
+            if (this.hitMove(e.pixel)) {
+                this.mode = 'move';
+                this.moveStartPointer = e.coordinate;
+                this.moveStartCenter = [...this.center];
+                return true;
+            }
             return false; // outside handles with an existing rect — let the map pan
         }
         this.mode = 'create';
@@ -149,6 +188,13 @@ export class SelectionArea {
             const a = Math.atan2(e.coordinate[1] - this.center[1], e.coordinate[0] - this.center[0]);
             this.rotation = this.rotateStartRotation + (a - this.rotateStartPointer);
             this.updateGeometry();
+        } else if (this.mode === 'move' && this.moveStartPointer && this.moveStartCenter) {
+            // Translate the whole selection: shift the centre by the pointer delta.
+            this.center = [
+                this.moveStartCenter[0] + (e.coordinate[0] - this.moveStartPointer[0]),
+                this.moveStartCenter[1] + (e.coordinate[1] - this.moveStartPointer[1]),
+            ];
+            this.updateGeometry();
         }
     }
 
@@ -157,29 +203,56 @@ export class SelectionArea {
         this.mode = 'none';
         this.createStart = null;
         this.resizeFixed = null;
+        this.moveStartPointer = null;
+        this.moveStartCenter = null;
         return false;
     }
 
     // --- geometry ---------------------------------------------------------
 
     private fromDrag(start: Coordinate, current: Coordinate): void {
-        this.center = [(start[0] + current[0]) / 2, (start[1] + current[1]) / 2];
-        this.halfX = Math.max(Math.abs(current[0] - start[0]) / 2, MIN_HALF);
-        this.halfY = Math.max(Math.abs(current[1] - start[1]) / 2, MIN_HALF);
+        const sx = Math.sign(current[0] - start[0]) || 1;
+        const sy = Math.sign(current[1] - start[1]) || 1;
+        let hx = Math.abs(current[0] - start[0]) / 2;
+        let hy = Math.abs(current[1] - start[1]) / 2;
+        [hx, hy] = this.applyAspect(hx, hy);
+        // Anchor the start corner (where the drag began) and fit the box toward the cursor.
+        this.center = [start[0] + sx * hx, start[1] + sy * hy];
+        this.halfX = hx;
+        this.halfY = hy;
         this.rotation = 0;
         this.updateGeometry();
     }
 
     private fromResize(fixed: Coordinate, dragged: Coordinate): void {
-        const center: Coordinate = [(fixed[0] + dragged[0]) / 2, (fixed[1] + dragged[1]) / 2];
-        const cos = Math.cos(-this.rotation);
-        const sin = Math.sin(-this.rotation);
-        const dx = dragged[0] - center[0];
-        const dy = dragged[1] - center[1];
-        this.halfX = Math.max(Math.abs(cos * dx - sin * dy), MIN_HALF);
-        this.halfY = Math.max(Math.abs(sin * dx + cos * dy), MIN_HALF);
-        this.center = center;
+        // Work in the rectangle's own (un-rotated) frame: the full fixed→dragged extent.
+        const cw = Math.cos(-this.rotation), sw = Math.sin(-this.rotation);
+        const dxw = dragged[0] - fixed[0], dyw = dragged[1] - fixed[1];
+        const lx = cw * dxw - sw * dyw;
+        const ly = sw * dxw + cw * dyw;
+        let [hx, hy] = this.applyAspect(Math.abs(lx) / 2, Math.abs(ly) / 2);
+        // Place the centre so the FIXED corner stays put, in the rotated direction of drag.
+        const sx = Math.sign(lx) || 1, sy = Math.sign(ly) || 1;
+        const cl = Math.cos(this.rotation), sl = Math.sin(this.rotation);
+        const ox = sx * hx, oy = sy * hy;
+        this.center = [fixed[0] + cl * ox - sl * oy, fixed[1] + sl * ox + cl * oy];
+        this.halfX = hx;
+        this.halfY = hy;
         this.updateGeometry();
+    }
+
+    /** Clamp half-extents to the minimum and, if locked, to the target width:height ratio. */
+    private applyAspect(hx: number, hy: number): [number, number] {
+        hx = Math.max(hx, MIN_HALF);
+        hy = Math.max(hy, MIN_HALF);
+        if (this.aspect) {
+            // Shrink the longer axis to honour the ratio so it fits within what was dragged.
+            if (hx > hy * this.aspect) hx = hy * this.aspect;
+            else hy = hx / this.aspect;
+            hx = Math.max(hx, MIN_HALF);
+            hy = Math.max(hy, MIN_HALF);
+        }
+        return [hx, hy];
     }
 
     /** Four rotated corners in projection coords: TL, TR, BR, BL. */
@@ -221,8 +294,9 @@ export class SelectionArea {
         this.rectFeature.setGeometry(new Polygon([this.outline(c)]));
         c.forEach((coord, i) => this.cornerFeatures[i].setGeometry(new Point(coord)));
         this.rotateFeature.setGeometry(new Point(this.rotateHandleCoord(c)));
+        this.moveFeature.setGeometry(new Point(this.center));
         if (!this.featuresAdded) {
-            this.source.addFeatures([this.rectFeature, ...this.cornerFeatures, this.rotateFeature]);
+            this.source.addFeatures([this.rectFeature, ...this.cornerFeatures, this.rotateFeature, this.moveFeature]);
             this.featuresAdded = true;
         }
     }
@@ -249,10 +323,14 @@ export class SelectionArea {
         return this.withinHandle(pixel, this.rotateHandleCoord(this.corners()));
     }
 
-    private withinHandle(pixel: number[], coord: Coordinate): boolean {
+    private hitMove(pixel: number[]): boolean {
+        return !!this.center && this.withinHandle(pixel, this.center, MOVE_HIT_PX);
+    }
+
+    private withinHandle(pixel: number[], coord: Coordinate, radius = HANDLE_HIT_PX): boolean {
         const hp = this.map.getPixelFromCoordinate(coord);
         if (!hp) return false;
-        return Math.hypot(pixel[0] - hp[0], pixel[1] - hp[1]) <= HANDLE_HIT_PX;
+        return Math.hypot(pixel[0] - hp[0], pixel[1] - hp[1]) <= radius;
     }
 
     private emitChange(): void {
@@ -279,6 +357,9 @@ function styleForFeature(feature: any): Style {
                 stroke: new Stroke({ color: '#007bff', width: 2 }),
             }),
         });
+    }
+    if (role === 'move') {
+        return new Style({ image: new Icon({ src: MOVE_ICON }) });
     }
     return new Style({
         stroke: new Stroke({ color: '#007bff', width: 2, lineDash: [5, 5] }),
