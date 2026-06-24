@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { MapModel, ModelSettings, ModelTile } from '../../src/MapModel';
+import { MapModel, ModelSettings, ModelTile, SelectionShape } from '../../src/MapModel';
 import type { HeightGrid } from '../../src/HeightSampler';
 
 // Build a HeightGrid from a 2D array. Row 0 is the SOUTH edge and column 0 the WEST edge,
@@ -141,6 +141,70 @@ describe('buildGeometry — a socketed solid is a closed manifold', () => {
         }
         const bad = [...counts.entries()].filter(([, n]) => n !== 2);
         expect(bad).toEqual([]); // watertight ⇒ printable STL
+    });
+});
+
+// Manifold check keyed by vertex POSITION (the oval mesh is triangle soup with per-cell
+// duplicated vertices, so an index-keyed check would see shared edges as separate).
+function maxEdgeSharingByPosition(tile: ModelTile): { counts: Map<string, number>; positions: Float32Array } {
+    const p = tile.positions, idx = tile.indices;
+    const key = (i: number) => `${p[i * 3].toFixed(4)},${p[i * 3 + 1].toFixed(4)},${p[i * 3 + 2].toFixed(4)}`;
+    const counts = new Map<string, number>();
+    for (let i = 0; i < idx.length; i += 3) {
+        const tri = [idx[i], idx[i + 1], idx[i + 2]];
+        for (let e = 0; e < 3; e++) {
+            const ka = key(tri[e]), kb = key(tri[(e + 1) % 3]);
+            const ek = ka < kb ? `${ka}|${kb}` : `${kb}|${ka}`;
+            counts.set(ek, (counts.get(ek) ?? 0) + 1);
+        }
+    }
+    return { counts, positions: p };
+}
+
+describe('buildGeometry — oval footprint', () => {
+    const bumpy = makeGrid([
+        [0, 1, 2, 1, 0], [1, 3, 5, 3, 1], [2, 5, 9, 5, 2], [1, 3, 5, 3, 1], [0, 1, 2, 1, 0],
+    ]);
+
+    it('defaults to rectangle; oval is opt-in', () => {
+        expect(new MapModel().getSettings().shape).toBe(SelectionShape.Rectangle);
+        // Raw string from JSON config/share links coerces to the enum member.
+        expect(new MapModel({ shape: 'oval' as any }).getSettings().shape).toBe(SelectionShape.Oval);
+    });
+
+    it('drops the corner cells but keeps the edge midpoints (inscribed ellipse)', () => {
+        const grid = makeGrid(Array.from({ length: 11 }, (_, r) => Array.from({ length: 11 }, (_, c) => r + c)));
+        const oval = build(grid, { shape: SelectionShape.Oval, socketEnabled: true, socketSize: 2 });
+        expect(oval.triangleCount).toBeGreaterThan(0);
+
+        const p = oval.tiles[0].positions;
+        const has = (x: number, z: number) => {
+            for (let i = 0; i < p.length; i += 3) {
+                if (Math.abs(p[i] - x) < 1e-6 && Math.abs(p[i + 2] - z) < 1e-6) return true;
+            }
+            return false;
+        };
+        // Extreme corner (-w/2, +h/2) is outside the ellipse → absent.
+        expect(has(-50, 50)).toBe(false);
+        // The west and south edge midpoints (where the ellipse touches the box) are present.
+        expect(has(-50, 0)).toBe(true);
+        expect(has(0, 50)).toBe(true);
+    });
+
+    it('a socketed oval is a closed manifold (every edge shared by exactly two faces)', () => {
+        const geo = build(bumpy, { shape: SelectionShape.Oval, socketEnabled: true, socketSize: 3 });
+        expect(geo.tiles).toHaveLength(1);
+        const { counts } = maxEdgeSharingByPosition(geo.tiles[0]);
+        const bad = [...counts.entries()].filter(([, n]) => n !== 2);
+        expect(bad).toEqual([]);
+    });
+
+    it('keeps water/socket semantics (literal-metre socket below the kept region)', () => {
+        const geo = build(bumpy, { shape: SelectionShape.Oval, socketEnabled: true, socketSize: 4, heightScale: 2 });
+        // Lowest kept surface is 1 (the corners at 0 are masked out) → ×2 = 2; base = 2 - 4.
+        expect(geo.socketStartY).toBeCloseTo(2);
+        expect(geo.minThickness).toBeCloseTo(4);
+        expect(geo.minY).toBeCloseTo(-2);
     });
 });
 

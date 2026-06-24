@@ -8,6 +8,7 @@ import PointerInteraction from 'ol/interaction/Pointer';
 import { Circle as CircleStyle, Fill, Stroke, Style } from 'ol/style';
 import { fromLonLat, toLonLat } from 'ol/proj';
 import type { Coordinate } from 'ol/coordinate';
+import { SelectionShape } from './MapModel';
 
 /** A rotatable rectangular selection drawn on the OpenLayers 2D map.
  *
@@ -38,6 +39,9 @@ export class SelectionArea {
     private halfX = 0;
     private halfY = 0;
     private rotation = 0; // radians
+    // Oval draws the inscribed ellipse but keeps the same bounding box, handles and the
+    // four emitted corners — the model masks the sampled rectangle to the ellipse.
+    private shape: SelectionShape = SelectionShape.Rectangle;
 
     private featuresAdded = false;
     private rectFeature = new Feature<Polygon>();
@@ -98,6 +102,13 @@ export class SelectionArea {
         this.halfY = Math.hypot(p3[0] - p0[0], p3[1] - p0[1]) / 2;
         this.updateGeometry();
         this.activate();
+    }
+
+    /** Switch the drawn footprint between a rectangle and its inscribed ellipse. */
+    setShape(shape: SelectionShape): void {
+        if (shape === this.shape) return;
+        this.shape = shape;
+        if (this.center) this.updateGeometry();
     }
 
     /** Current selection as four lon/lat corners, or null if there is no selection. */
@@ -189,10 +200,25 @@ export class SelectionArea {
         return [cx + (topMid[0] - cx) * ROTATE_PUSH, cy + (topMid[1] - cy) * ROTATE_PUSH];
     }
 
+    /** Outline ring for the current shape: the four corners, or an ellipse through them. */
+    private outline(c: Coordinate[]): Coordinate[] {
+        if (this.shape !== SelectionShape.Oval) return [...c, c[0]];
+        const [cx, cy] = this.center!;
+        const cos = Math.cos(this.rotation), sin = Math.sin(this.rotation);
+        const STEPS = 64;
+        const ring: Coordinate[] = [];
+        for (let i = 0; i <= STEPS; i++) {
+            const t = (i / STEPS) * 2 * Math.PI;
+            const lx = this.halfX * Math.cos(t), ly = this.halfY * Math.sin(t);
+            ring.push([cx + cos * lx - sin * ly, cy + sin * lx + cos * ly]);
+        }
+        return ring;
+    }
+
     private updateGeometry(): void {
         if (!this.center) return;
         const c = this.corners();
-        this.rectFeature.setGeometry(new Polygon([[...c, c[0]]]));
+        this.rectFeature.setGeometry(new Polygon([this.outline(c)]));
         c.forEach((coord, i) => this.cornerFeatures[i].setGeometry(new Point(coord)));
         this.rotateFeature.setGeometry(new Point(this.rotateHandleCoord(c)));
         if (!this.featuresAdded) {

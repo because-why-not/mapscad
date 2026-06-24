@@ -12,7 +12,7 @@ import { DeckTerrainEngine } from './engine/DeckTerrainEngine';
 import { SelectionArea, LonLat } from './SelectionArea';
 import { sampleSelectionHeights, rectExtent, groundResolution, tileCoverage } from './HeightSampler';
 import { TerrainPreview } from './TerrainPreview';
-import { MapModel } from './MapModel';
+import { MapModel, SelectionShape } from './MapModel';
 import { PreviewConfigStore } from './PreviewConfig';
 import { exportModelStl } from './StlMaker';
 import { estimateMemory, formatBytes, memoryLevel, isOverBudget } from './memory';
@@ -249,10 +249,16 @@ async function init(): Promise<void> {
             onLayerSwitch: (id: string) => controller.select(id),
             onSunChange: (date: Date) => { saveSunDate(date); controller.setSunDate(date); },
             onShadowsChange: (enabled: boolean) => { saveShadows(enabled); controller.setShadowsEnabled(enabled); },
-            onSelectToggle: (active: boolean) => {
+            onSelectToggle: (active: boolean, shape: SelectionShape = SelectionShape.Rectangle) => {
                 if (!selection) return;
-                if (active) selection.activate();
-                else selection.deactivate(); // emits onChange(null) -> hides preview
+                if (active) {
+                    selection.setShape(shape);              // redraw + (if a selection exists) keep it
+                    model.applySettings({ shape });         // mask is a model setting -> rebuilds geometry
+                    config.update({ model: model.getSettings() });
+                    selection.activate();
+                } else {
+                    selection.deactivate(); // emits onChange(null) -> hides preview
+                }
             },
             previewDems,
             initialPreviewDemId: initialDemId,
@@ -310,8 +316,10 @@ async function init(): Promise<void> {
         selection = new SelectionArea(olMap, { onChange: onSelectionChange });
         const savedCorners = config.get().selection;
         if (savedCorners) {
+            const shape = config.get().model.shape;
+            selection.setShape(shape);
             selection.restore(savedCorners);
-            appInstance?.setSelectActive(true);
+            appInstance?.setSelectTool(shape); // highlight the matching tool button
             onSelectionChange(savedCorners); // restore() doesn't emit — fan out manually
         }
     });

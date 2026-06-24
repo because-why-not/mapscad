@@ -26,7 +26,8 @@
     let dateValue = $state(untrack(() => toDateInput(initialSunDate)));
     let minutesOfDay = $state(untrack(() => initialSunDate.getHours() * 60 + initialSunDate.getMinutes()));
     let shadowsOn = $state(untrack(() => initialShadows));
-    let selectActive = $state(false);
+    // Which selection tool is active: 'none' | 'rectangle' | 'oval'.
+    let activeTool = $state('none');
 
     let sunEnabled = $derived(!!customList.find(c => c.id === activeProviderId)?.sun);
     let shadowsCapable = $derived(!!customList.find(c => c.id === activeProviderId)?.shadows);
@@ -36,11 +37,18 @@
     export function setTileProviders(providers) { providerList = providers; }
     export function setCustomMaps(maps) { customList = maps; }
     export function setActiveProvider(id) { activeProviderId = id; }
-    export function setSelectActive(active) { selectActive = active; }
+    export function setSelectActive(active) { activeTool = active ? 'rectangle' : 'none'; }
+    // Highlight the right tool when a saved selection is restored (rectangle | oval | null).
+    export function setSelectTool(tool) { activeTool = tool ?? 'none'; }
 
-    function toggleSelect() {
-        selectActive = !selectActive;
-        onSelectToggle(selectActive);
+    function toggleTool(tool) {
+        if (activeTool === tool) {
+            activeTool = 'none';
+            onSelectToggle(false, tool);
+        } else {
+            activeTool = tool;
+            onSelectToggle(true, tool);
+        }
     }
 
     function handleLayerSwitch(id) {
@@ -81,10 +89,17 @@
     <!-- Selection toolbar (below the map's zoom +/- control) -->
     <div class="absolute top-20 left-4 z-[1000] flex flex-col gap-2">
         <button
-            class="btn btn-square shadow-md border-0 {selectActive ? 'btn-primary' : 'bg-base-100'}"
-            title="Select area"
-            onclick={toggleSelect}
+            class="btn btn-square shadow-md border-0 {activeTool === 'rectangle' ? 'btn-primary' : 'bg-base-100'}"
+            title="Select rectangular area"
+            aria-label="Select rectangular area"
+            onclick={() => toggleTool('rectangle')}
         >⬚</button>
+        <button
+            class="btn btn-square shadow-md border-0 {activeTool === 'oval' ? 'btn-primary' : 'bg-base-100'}"
+            title="Select oval area"
+            aria-label="Select oval area"
+            onclick={() => toggleTool('oval')}
+        >◯</button>
     </div>
 
     <!-- Menu button -->

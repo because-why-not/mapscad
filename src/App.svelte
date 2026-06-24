@@ -60,6 +60,7 @@
     export function setTileProviders(p) { mapPanel?.setTileProviders(p); }
     export function setCustomMaps(m) { mapPanel?.setCustomMaps(m); }
     export function setSelectActive(active) { mapPanel?.setSelectActive(active); }
+    export function setSelectTool(tool) { mapPanel?.setSelectTool(tool); }
     export function setPreviewStats(stats) { previewPanel?.setPreviewStats(stats); }
     export function setPreviewZoomRange(min, max, heightZoom) { previewPanel?.setZoomRange(min, max, heightZoom); }
     export function setPreviewVisible(visible) {
