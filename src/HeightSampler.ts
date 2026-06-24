@@ -72,14 +72,23 @@ function rectPoint(c: LonLat[], u: number, v: number): LonLat {
     return [lerp(topLon, botLon, v), lerp(topLat, botLat, v)];
 }
 
-function loadTile(url: string): Promise<HTMLImageElement | null> {
+function loadTile(url: string, signal?: AbortSignal): Promise<HTMLImageElement | null> {
     return new Promise(resolve => {
+        if (signal?.aborted) { resolve(null); return; }
         const img = new Image();
         img.crossOrigin = 'anonymous';
-        img.onload = () => resolve(img);
-        img.onerror = () => resolve(null); // missing tile -> treat as no-data
+        const onAbort = () => { img.src = ''; resolve(null); }; // stop the in-flight request
+        img.onload = () => { signal?.removeEventListener('abort', onAbort); resolve(img); };
+        img.onerror = () => { signal?.removeEventListener('abort', onAbort); resolve(null); }; // missing tile -> no-data
+        signal?.addEventListener('abort', onAbort, { once: true });
         img.src = url;
     });
+}
+
+/** Hooks for a cancellable, progress-reporting sample (one tick per tile fetched). */
+export interface SampleOptions {
+    signal?: AbortSignal;
+    onProgress?: (loaded: number, total: number) => void;
 }
 
 /**
@@ -98,7 +107,9 @@ export function rectExtent(corners: LonLat[]): { widthMeters: number; heightMete
 
 export async function sampleSelectionHeights(
     corners: LonLat[], dem: ManifestMap, cols: number, rows: number, zoom: number,
+    opts: SampleOptions = {},
 ): Promise<HeightGrid> {
+    const { signal, onProgress } = opts;
     const { widthMeters, heightMeters } = rectExtent(corners);
 
     // Sample at the requested DEM zoom (which now drives detail), clamped to what the
@@ -120,17 +131,22 @@ export async function sampleSelectionHeights(
     canvas.height = (ty1 - ty0 + 1) * TILE;
     const ctx = canvas.getContext('2d', { willReadFrequently: true })!;
 
+    const total = (tx1 - tx0 + 1) * (ty1 - ty0 + 1);
+    let loaded = 0;
+    onProgress?.(0, total);
     const jobs: Promise<void>[] = [];
     for (let ty = ty0; ty <= ty1; ty++) {
         for (let tx = tx0; tx <= tx1; tx++) {
             const url = dem.tiles[0]
                 .replace('{z}', String(z)).replace('{x}', String(tx)).replace('{y}', String(ty));
-            jobs.push(loadTile(url).then(img => {
+            jobs.push(loadTile(url, signal).then(img => {
                 if (img) ctx.drawImage(img, (tx - tx0) * TILE, (ty - ty0) * TILE);
+                onProgress?.(++loaded, total);
             }));
         }
     }
     await Promise.all(jobs);
+    if (signal?.aborted) throw new DOMException('Sampling cancelled', 'AbortError');
 
     const originX = tx0 * TILE, originY = ty0 * TILE;
     const { data } = ctx.getImageData(0, 0, canvas.width, canvas.height);

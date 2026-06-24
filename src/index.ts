@@ -32,6 +32,7 @@ let appInstance: any = null;
 let previewDem: ManifestMap | undefined;
 let preview: TerrainPreview | null = null;
 let previewRoot: HTMLElement | null = null;
+let controller: MapController | null = null;
 
 // The canonical 3D model: settings mutate it, the preview and STL export read it.
 const model = new MapModel();
@@ -81,19 +82,40 @@ function safeZoom(corners: LonLat[], desired: number, limit: number): number {
     return z;
 }
 
+// In-flight DEM sampling, so a new build (or the user's Cancel) aborts the previous one.
+let resampleAbort: AbortController | null = null;
+
 /** Re-sample the DEM over the current selection and feed the heights into the model. */
 async function resample(): Promise<void> {
     if (!previewDem || !currentCorners) return;
+    resampleAbort?.abort();              // supersede any build still downloading
+    const abort = new AbortController();
+    resampleAbort = abort;
     Env.log('[3d] regenerating terrain…');
     const t0 = performance.now();
+    appInstance?.setPreviewLoading({ loaded: 0, total: 0 }); // show the bottom progress bar
     try {
         const { heightZoom, resolutionLimit } = model.getSettings();
         const zoom = safeZoom(currentCorners, heightZoom, resolutionLimit);
         const { cols, rows } = gridResolution(currentCorners, zoom, resolutionLimit);
-        const grid = await sampleSelectionHeights(currentCorners, previewDem, cols, rows, zoom);
+        const grid = await sampleSelectionHeights(currentCorners, previewDem, cols, rows, zoom, {
+            signal: abort.signal,
+            onProgress: (loaded, total) => appInstance?.setPreviewLoading({ loaded, total }),
+        });
+        if (abort.signal.aborted) return;
         model.setGrid(grid); // notifies -> preview + stats rebuild from the model
         Env.log(`[3d] terrain regenerated in ${Math.round(performance.now() - t0)} ms`);
-    } catch (e) { Env.error('resample', e); }
+    } catch (e) {
+        if ((e as { name?: string })?.name === 'AbortError') Env.log('[3d] terrain build cancelled');
+        else Env.error('resample', e);
+    } finally {
+        if (resampleAbort === abort) { resampleAbort = null; appInstance?.setPreviewLoading(null); }
+    }
+}
+
+/** User clicked Cancel on the loading bar — stop the in-flight build, keep the old preview. */
+function cancelResample(): void {
+    resampleAbort?.abort();
 }
 
 // Resampling hits the network, so changes to zoom / resolution limit are debounced.
@@ -136,6 +158,23 @@ function onSelectionChange(corners: LonLat[] | null): void {
     currentCorners = corners;
     if (corners) resample();
     else model.setGrid(null); // notifies -> preview clears, stats null
+}
+
+/** A selection the user just drew/edited. A brand-new one defaults its heightmap zoom to
+ *  what's currently visible on the map, so we don't fetch far more detail than they see. */
+function onUserSelectionChange(corners: LonLat[] | null): void {
+    // Only seed the default zoom for a *brand-new* selection: corners exist (one was just
+    // drawn), currentCorners is still empty (so it's new, not an edit of an existing one),
+    // and we have both a DEM and a live map to read the visible zoom from.
+    if (corners && !currentCorners && previewDem && controller) {
+        const { min, max } = demZoomRange(previewDem);
+        const visible = Math.round(controller.getView().zoom);
+        const heightZoom = Math.max(min, Math.min(max, visible));
+        model.applySettings({ heightZoom });
+        config.update({ model: model.getSettings() });
+        appInstance?.setPreviewZoomRange(min, max, heightZoom); // move the slider to match
+    }
+    onSelectionChange(corners);
 }
 
 function loadView(): GeoView {
@@ -233,7 +272,6 @@ async function init(): Promise<void> {
 
     // These are assigned just below; the App callbacks (user-triggered later) close over
     // them, so it's fine that they reference values not set until after mount.
-    let controller: MapController;
     let selection: SelectionArea | null = null;
 
     // Mount the Svelte UI first — it owns the split layout and provides the DOM nodes the
@@ -246,9 +284,9 @@ async function init(): Promise<void> {
             initialActiveProviderId: initialId,
             initialSunDate,
             initialShadows,
-            onLayerSwitch: (id: string) => controller.select(id),
-            onSunChange: (date: Date) => { saveSunDate(date); controller.setSunDate(date); },
-            onShadowsChange: (enabled: boolean) => { saveShadows(enabled); controller.setShadowsEnabled(enabled); },
+            onLayerSwitch: (id: string) => controller?.select(id),
+            onSunChange: (date: Date) => { saveSunDate(date); controller?.setSunDate(date); },
+            onShadowsChange: (enabled: boolean) => { saveShadows(enabled); controller?.setShadowsEnabled(enabled); },
             onSelectToggle: (active: boolean, shape: SelectionShape = SelectionShape.Rectangle) => {
                 if (!selection) return;
                 if (active) {
@@ -277,6 +315,8 @@ async function init(): Promise<void> {
                 appInstance?.setPreviewZoomRange(min, max, max); // move the slider's range + value
                 resample();
             },
+            //triggered when the user changes settings in the side menu
+            //(note this is not triggered when the selection changes)
             onPreviewSettingsChange: (s: Record<string, any>) => {
                 const prev = model.getSettings();
                 model.applySettings(s); // rebuilds geometry from the current grid
@@ -291,6 +331,7 @@ async function init(): Promise<void> {
             onPreviewSave: (s: Record<string, any>) => { model.applySettings(s); config.update({ model: model.getSettings() }); exportModelStl(model); },
             onPreviewResetCamera: () => preview?.resetCamera(),
             onPreviewShareLink: () => config.shareLink(),
+            onPreviewCancel: cancelResample,
             onLayoutChange: () => preview?.resize(),
         },
     });
@@ -314,7 +355,7 @@ async function init(): Promise<void> {
     // is ready, then restored from any previously saved selection.
     const olEngine = new OpenLayersEngine(maps, olMap => {
         if (selection) return;
-        selection = new SelectionArea(olMap, { onChange: onSelectionChange });
+        selection = new SelectionArea(olMap, { onChange: onUserSelectionChange });
         const savedCorners = config.get().selection;
         if (savedCorners) {
             const shape = config.get().model.shape;

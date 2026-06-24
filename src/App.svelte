@@ -26,6 +26,7 @@
         onPreviewSave = () => {},
         onPreviewResetCamera = () => {},
         onPreviewShareLink = () => '',
+        onPreviewCancel = () => {},
         // Fired whenever the split layout changes, so index.ts can resize the renderers.
         onLayoutChange = () => {},
     } = $props();
@@ -63,6 +64,7 @@
     export function setSelectActive(active) { mapPanel?.setSelectActive(active); }
     export function setSelectTool(tool) { mapPanel?.setSelectTool(tool); }
     export function setPreviewStats(stats) { previewPanel?.setPreviewStats(stats); }
+    export function setPreviewLoading(state) { previewPanel?.setPreviewLoading(state); }
     export function setPreviewZoomRange(min, max, heightZoom) { previewPanel?.setZoomRange(min, max, heightZoom); }
     export function setPreviewVisible(visible) {
         previewVisible = visible;
@@ -159,6 +161,7 @@
         onSave={onPreviewSave}
         onResetCamera={onPreviewResetCamera}
         onShareLink={onPreviewShareLink}
+        onCancel={onPreviewCancel}
     />
 
     {#if collapsed !== 'none'}

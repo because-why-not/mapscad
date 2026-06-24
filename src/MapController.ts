@@ -40,6 +40,11 @@ export class MapController {
         return [...this.bySource.keys()];
     }
 
+    /** The live map view (centre + zoom) of the active engine, or the last known one. */
+    getView(): GeoView {
+        return this.active ? this.active.getView() : this.view;
+    }
+
     async select(id: string): Promise<void> {
         const engine = this.bySource.get(id);
         if (!engine) return;

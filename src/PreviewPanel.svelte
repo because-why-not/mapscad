@@ -16,6 +16,7 @@
         onSave = () => {},
         onResetCamera = () => {},
         onShareLink = () => '',
+        onCancel = () => {},
     } = $props();
 
     let mountEl;
@@ -24,6 +25,10 @@
     let menuOpen = $state(false);
     let previewStats = $state(null);
     export function setPreviewStats(stats) { previewStats = stats; }
+
+    // Build progress for the bottom loading bar: null = hidden, else { loaded, total }.
+    let previewLoading = $state(null);
+    export function setPreviewLoading(state) { previewLoading = state; }
 
     // The active elevation source, plus the zoom slider's range. Both can change at runtime
     // (switching DEMs moves the range), so they're local state, seeded from the props.
@@ -95,6 +100,19 @@
             <div>Triangles: {fmt(previewStats.triangles)}</div>
             <div class={memColor[previewStats.memoryLevel]}>Memory: ~{previewStats.memoryText}</div>
             <div>Min / Max thickness: {fmtH(previewStats.minThickness)} / {fmtH(previewStats.maxThickness)} units</div>
+        </div>
+    {/if}
+
+    {#if previewLoading}
+        <div class="absolute bottom-0 left-0 right-0 z-[2100] bg-base-100/95 backdrop-blur border-t border-base-300 px-4 py-2 flex items-center gap-3">
+            <span class="text-sm whitespace-nowrap">Building preview…</span>
+            {#if previewLoading.total > 0}
+                <progress class="progress progress-primary flex-1" value={previewLoading.loaded} max={previewLoading.total}></progress>
+                <span class="text-xs font-mono tabular-nums whitespace-nowrap">{previewLoading.loaded} / {previewLoading.total} tiles</span>
+            {:else}
+                <progress class="progress progress-primary flex-1"></progress>
+            {/if}
+            <button class="btn btn-sm btn-error" onclick={onCancel}>Cancel</button>
         </div>
     {/if}
 
