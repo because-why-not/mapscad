@@ -65,11 +65,12 @@
         const result = [];
         const looseProviders = providers.filter(p => !p.category);
         if (looseProviders.length) result.push({ title: 'Map Source', items: looseProviders });
+        const rank = (name) => name === 'Raw' ? 0 : name === '2D Hillshade' ? 1 : name === '3D Hillshade' ? 2 : 3;
         for (const cat of order) {
             const items = [
                 ...providers.filter(p => p.category === cat),
                 ...customs.filter(c => c.category === cat),
-            ];
+            ].sort((a, b) => rank(a.name) - rank(b.name));
             result.push({ title: cat, items });
         }
         const looseCustoms = customs.filter(c => !c.category);

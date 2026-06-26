@@ -88,6 +88,26 @@ const CUSTOM_MAPS: CustomMapSpec[] = [
         exaggeration: 1.4,
         category: 'AWS Terrain',
     },
+    // NZ server DEMs: 3D hillshade to sit beside the server's raw + pre-rendered 2D
+    // hillshade tile layers (those two are plain tile providers, see mapCategories.ts).
+    {
+        id: 'north_island_3d_hillshade',
+        name: '3D Hillshade',
+        icon: '⛰️',
+        surface: { type: 'hillshade' },
+        demSource: 'north_island_elevation_raw',
+        exaggeration: 1.4,
+        category: 'North Island',
+    },
+    {
+        id: 'south_island_3d_hillshade',
+        name: '3D Hillshade',
+        icon: '⛰️',
+        surface: { type: 'hillshade' },
+        demSource: 'south_island_elevation_raw',
+        exaggeration: 1.4,
+        category: 'South Island',
+    },
 ];
 
 /** Only expose custom maps whose underlying manifest sources actually exist today. */

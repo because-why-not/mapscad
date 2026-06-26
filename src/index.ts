@@ -3,7 +3,8 @@ import App from './App.svelte';
 import './app.css';
 import { Env } from './Env';
 import { fetchTileMapManifest, ManifestMap } from './TileMapManifest';
-import { EXTERNAL_DEMS, EXTERNAL_DEM_CATEGORY } from './externalDems';
+import { EXTERNAL_DEMS } from './externalDems';
+import { PROVIDER_CATEGORY } from './mapCategories';
 import { prettifyMapName, iconForMapType } from './mapMeta';
 import { availableCustomMaps, isSunCapable } from './customMaps';
 import { MapController } from './MapController';
@@ -256,14 +257,14 @@ async function init(): Promise<void> {
     const initialPreviewSettings: Record<string, any> = { ...model.getSettings(), smoothShading: cfg.display.smoothShading };
 
     const tileProviders = maps.map(m => {
-        const category = EXTERNAL_DEM_CATEGORY[m.name]; // undefined for ordinary server maps
+        const cat = PROVIDER_CATEGORY[m.name]; // undefined for ordinary, ungrouped maps
         return {
             id: m.name,
-            // Inside a source category the header already names the source, so the raw tile
-            // layer is just "Raw"; ordinary maps keep their prettified manifest name.
-            name: category ? 'Raw' : prettifyMapName(m.name),
-            icon: iconForMapType(m.mmapsrv.type),
-            category,
+            // Inside a source category the header already names the source, so entries use a
+            // short label (Raw / 2D Hillshade); ungrouped maps keep their prettified name.
+            name: cat ? cat.label : prettifyMapName(m.name),
+            icon: cat?.icon ?? iconForMapType(m.mmapsrv.type),
+            category: cat?.category,
         };
     });
     const customMaps = customSpecs.map(s => ({
