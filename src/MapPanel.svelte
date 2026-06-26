@@ -78,6 +78,18 @@
         return result;
     }
 
+    // Accordion: one section open at a time, so a long source list stays manageable. The
+    // section holding the active layer auto-opens; clicking a header toggles it.
+    let openSection = $state(null);
+    let activeSectionTitle = $derived(sections.find(s => s.items.some(i => i.id === activeProviderId))?.title ?? null);
+    // Keep the active layer's section open (until the user manually opens another). untrack
+    // openSection so this only re-fires when the *active section* changes, not on every toggle.
+    $effect(() => {
+        const title = activeSectionTitle;
+        untrack(() => { if (title && openSection !== title) openSection = title; });
+    });
+    function toggleSection(title) { openSection = openSection === title ? null : title; }
+
     // Pushed in from index.ts.
     export function setTileProviders(providers) { providerList = providers; }
     export function setCustomMaps(maps) { customList = maps; }
@@ -207,17 +219,29 @@
         </div>
         <div class="overflow-y-auto flex-1 py-2">
             {#each sections as section (section.title)}
-                <div class="px-4 py-1 mt-2 first:mt-0 text-xs font-bold uppercase tracking-wider opacity-50">{section.title}</div>
-                <ul class="menu px-2">
-                    {#each section.items as item (item.id)}
-                        <li>
-                            <button class={item.id === activeProviderId ? 'active' : ''} onclick={() => handleLayerSwitch(item.id)}>
-                                <span>{item.icon}</span>
-                                {item.name}
-                            </button>
-                        </li>
-                    {/each}
-                </ul>
+                {@const isOpen = openSection === section.title}
+                {@const hasActive = section.items.some(i => i.id === activeProviderId)}
+                <button
+                    class="w-full flex items-center gap-2 px-4 py-2 text-xs font-bold uppercase tracking-wider hover:bg-base-300 {hasActive ? 'opacity-90' : 'opacity-60'}"
+                    onclick={() => toggleSection(section.title)}
+                >
+                    <span class="text-[0.6rem] transition-transform duration-150 {isOpen ? 'rotate-90' : ''}">▶</span>
+                    <span class="flex-1 text-left">{section.title}</span>
+                    {#if hasActive && !isOpen}<span class="badge badge-primary badge-xs"></span>{/if}
+                    <span class="opacity-50 font-normal normal-case">{section.items.length}</span>
+                </button>
+                {#if isOpen}
+                    <ul class="menu px-2 pt-0">
+                        {#each section.items as item (item.id)}
+                            <li>
+                                <button class={item.id === activeProviderId ? 'active' : ''} onclick={() => handleLayerSwitch(item.id)}>
+                                    <span>{item.icon}</span>
+                                    {item.name}
+                                </button>
+                            </li>
+                        {/each}
+                    </ul>
+                {/if}
             {/each}
 
             {#if sunEnabled}

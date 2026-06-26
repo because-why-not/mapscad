@@ -10,6 +10,8 @@ export interface ProviderCategory {
     category: string;
     label: string;
     icon?: string;
+    dem?: string;   // elevation DEM this layer represents (so selecting an area on a server
+                    // hillshade can default the preview to its DEM); omit for raw DEM layers
 }
 
 export const PROVIDER_CATEGORY: Record<string, ProviderCategory> = {
@@ -20,7 +22,7 @@ export const PROVIDER_CATEGORY: Record<string, ProviderCategory> = {
     // NZ server DEMs — the server already ships a pre-rendered 8m hillshade tile layer, so
     // that IS the 2D hillshade (a plain raster layer); the raw DEM drives the 3D map.
     north_island_elevation_raw: { category: 'North Island', label: 'Raw' },
-    north_island_hillshade_8m: { category: 'North Island', label: '2D Hillshade', icon: '🗺️' },
+    north_island_hillshade_8m: { category: 'North Island', label: '2D Hillshade', icon: '🗺️', dem: 'north_island_elevation_raw' },
     south_island_elevation_raw: { category: 'South Island', label: 'Raw' },
-    south_island_hillshade_8m: { category: 'South Island', label: '2D Hillshade', icon: '🗺️' },
+    south_island_hillshade_8m: { category: 'South Island', label: '2D Hillshade', icon: '🗺️', dem: 'south_island_elevation_raw' },
 };

@@ -47,6 +47,9 @@
         onDemChange(id);
     }
 
+    // Set the active source without firing onDemChange (index.ts already switched the DEM).
+    export function setDem(id) { demId = id; }
+
     const memColor = { ok: '', warn: 'text-warning', high: 'text-error' };
     const fmt = n => n.toLocaleString();
     const fmtArea = n => n >= 100 ? Math.round(n).toLocaleString() : n.toFixed(n >= 10 ? 1 : 2);

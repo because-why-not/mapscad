@@ -35,6 +35,11 @@ let previewDem: ManifestMap | undefined;
 let preview: TerrainPreview | null = null;
 let previewRoot: HTMLElement | null = null;
 let controller: MapController | null = null;
+let mapsById: Record<string, ManifestMap> = {};
+// Active map-source id -> the elevation DEM it represents (raw DEM = itself, a hillshade/3D
+// map = its underlying DEM). Lets a brand-new selection default the preview to the source
+// the user is actually looking at.
+let demBySource: Record<string, string> = {};
 
 // The canonical 3D model: settings mutate it, the preview and STL export read it.
 const model = new MapModel();
@@ -165,16 +170,26 @@ function onSelectionChange(corners: LonLat[] | null): void {
 /** A selection the user just drew/edited. A brand-new one defaults its heightmap zoom to
  *  what's currently visible on the map, so we don't fetch far more detail than they see. */
 function onUserSelectionChange(corners: LonLat[] | null): void {
-    // Only seed the default zoom for a *brand-new* selection: corners exist (one was just
-    // drawn), currentCorners is still empty (so it's new, not an edit of an existing one),
-    // and we have both a DEM and a live map to read the visible zoom from.
-    if (corners && !currentCorners && previewDem && controller) {
-        const { min, max } = demZoomRange(previewDem);
-        const visible = Math.round(controller.getView().zoom);
-        const heightZoom = Math.max(min, Math.min(max, visible));
-        model.applySettings({ heightZoom });
-        config.update({ model: model.getSettings() });
-        appInstance?.setPreviewZoomRange(min, max, heightZoom); // move the slider to match
+    // Only seed defaults for a *brand-new* selection: corners exist (one was just drawn),
+    // currentCorners is still empty (so it's new, not an edit of an existing one), and we
+    // have a live map to read the active source / visible zoom from.
+    if (corners && !currentCorners && controller) {
+        // Default the preview source to the DEM behind the active map layer (e.g. drawing on
+        // North Island's hillshade/raw picks north_island_elevation_raw), if it differs.
+        const activeDem = demBySource[controller.activeId];
+        if (activeDem && mapsById[activeDem] && activeDem !== config.get().demId) {
+            previewDem = mapsById[activeDem];
+            config.update({ demId: activeDem });
+            appInstance?.setPreviewDem(activeDem); // sync the preview's Source toggle
+        }
+        if (previewDem) {
+            const { min, max } = demZoomRange(previewDem);
+            const visible = Math.round(controller.getView().zoom);
+            const heightZoom = Math.max(min, Math.min(max, visible));
+            model.applySettings({ heightZoom });
+            config.update({ model: model.getSettings() });
+            appInstance?.setPreviewZoomRange(min, max, heightZoom); // move the slider to match
+        }
     }
     onSelectionChange(corners);
 }
@@ -232,8 +247,14 @@ async function init(): Promise<void> {
     // Append the public internet-hosted DEMs (Mapterhorn, AWS) so they appear as ordinary
     // elevation sources alongside whatever the server advertises.
     const maps = [...serverMaps, ...EXTERNAL_DEMS];
-    const mapsById: Record<string, ManifestMap> = Object.fromEntries(maps.map(m => [m.name, m]));
+    mapsById = Object.fromEntries(maps.map(m => [m.name, m]));
     const customSpecs = availableCustomMaps(mapsById);
+    // Resolve any active map source to the DEM it represents (used to default the preview
+    // source when a brand-new selection is drawn). Raw DEM layers map to themselves; custom
+    // maps to their demSource; server hillshade layers via PROVIDER_CATEGORY.dem.
+    for (const m of maps) if (m.mmapsrv.type === 'elevation') demBySource[m.name] = m.name;
+    for (const s of customSpecs) demBySource[s.id] = s.demSource;
+    for (const [name, cat] of Object.entries(PROVIDER_CATEGORY)) if (cat.dem) demBySource[name] = cat.dem;
     // The 3D preview can be built from any elevation DEM the server advertises (the
     // manifest tags those with mmapsrv.type === 'elevation'). Expose them all as a source
     // toggle; each DEM has its own zoom range, so switching also moves the zoom.

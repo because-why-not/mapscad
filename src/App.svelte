@@ -68,6 +68,7 @@
     export function setPreviewStats(stats) { previewPanel?.setPreviewStats(stats); }
     export function setPreviewLoading(state) { previewPanel?.setPreviewLoading(state); }
     export function setPreviewZoomRange(min, max, heightZoom) { previewPanel?.setZoomRange(min, max, heightZoom); }
+    export function setPreviewDem(id) { previewPanel?.setDem(id); }
     export function setPreviewVisible(visible) {
         previewVisible = visible;
         if (!visible) collapsed = 'none';
