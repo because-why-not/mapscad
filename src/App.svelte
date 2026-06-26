@@ -14,6 +14,7 @@
         onShadowsChange = () => {},
         onSelectToggle = () => {},
         onAspectChange = () => {},
+        initialMapZoom = 0,
         // 3D-view menu (forwarded to PreviewPanel)
         previewDems = [],
         initialPreviewDemId = '',
@@ -63,6 +64,7 @@
     export function setCustomMaps(m) { mapPanel?.setCustomMaps(m); }
     export function setSelectActive(active) { mapPanel?.setSelectActive(active); }
     export function setSelectTool(tool) { mapPanel?.setSelectTool(tool); }
+    export function setMapZoom(z) { mapPanel?.setZoom(z); }
     export function setPreviewStats(stats) { previewPanel?.setPreviewStats(stats); }
     export function setPreviewLoading(state) { previewPanel?.setPreviewLoading(state); }
     export function setPreviewZoomRange(min, max, heightZoom) { previewPanel?.setZoomRange(min, max, heightZoom); }
@@ -131,6 +133,7 @@
         {onShadowsChange}
         {onSelectToggle}
         {onAspectChange}
+        {initialMapZoom}
         canCollapse={showBoth}
         onCollapse={collapseMap}
     />

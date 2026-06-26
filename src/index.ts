@@ -278,6 +278,9 @@ async function init(): Promise<void> {
     // them, so it's fine that they reference values not set until after mount.
     let selection: SelectionArea | null = null;
 
+    // Shared by the App (initial zoom badge) and the MapController (initial camera).
+    const initialView = loadView();
+
     // Mount the Svelte UI first — it owns the split layout and provides the DOM nodes the
     // map engines and 3D preview mount into.
     appInstance = mount(App, {
@@ -291,6 +294,7 @@ async function init(): Promise<void> {
             onLayerSwitch: (id: string) => controller?.select(id),
             onSunChange: (date: Date) => { saveSunDate(date); controller?.setSunDate(date); },
             onShadowsChange: (enabled: boolean) => { saveShadows(enabled); controller?.setShadowsEnabled(enabled); },
+            initialMapZoom: initialView.zoom,
             onSelectToggle: (active: boolean, shape: SelectionShape = SelectionShape.Rectangle) => {
                 if (!selection) return;
                 if (active) {
@@ -376,11 +380,11 @@ async function init(): Promise<void> {
     controller = new MapController({
         engines,
         container: mapMount,
-        initialView: loadView(),
+        initialView,
         initialSunDate,
         initialShadows,
         onActiveChange: id => appInstance?.setActiveProvider(id),
-        onViewPersist: saveView,
+        onViewPersist: v => { saveView(v); appInstance?.setMapZoom(v.zoom); },
         onActivePersist: saveActive,
     });
 

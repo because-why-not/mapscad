@@ -13,12 +13,17 @@
         onShadowsChange = () => {},
         onSelectToggle = () => {},
         onAspectChange = () => {},
+        initialZoom = 0,
         canCollapse = false,
         onCollapse = () => {},
     } = $props();
 
     let mountEl;
     export function getMount() { return mountEl; }
+
+    // Live map zoom readout; pushed in from index.ts on every view change.
+    let mapZoom = $state(untrack(() => initialZoom));
+    export function setZoom(z) { mapZoom = z; }
 
     let menuOpen = $state(false);
     let activeProviderId = $state(untrack(() => initialActiveProviderId));
@@ -155,6 +160,11 @@
             <line x1="3" y1="18" x2="21" y2="18"></line>
         </svg>
     </button>
+
+    <!-- Live zoom readout (sits above the OL scale line at the bottom-left) -->
+    <div class="absolute bottom-8 left-2 z-[1000] bg-base-100/90 shadow-md rounded px-2 py-0.5 text-xs font-mono tabular-nums pointer-events-none">
+        z{mapZoom.toFixed(1)}
+    </div>
 
     {#if canCollapse}
         <button class="collapse-btn btn btn-xs btn-circle bg-base-100 border-0 shadow" title="Hide map" onclick={onCollapse}>‹</button>
