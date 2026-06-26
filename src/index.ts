@@ -364,10 +364,14 @@ async function init(): Promise<void> {
 
     // Composition root: choose concrete engines here; nothing else knows about them.
     const deckSpecs = customSpecs.filter(s => s.surface.type === 'shaded-relief');
-    const mapLibreSpecs = customSpecs.filter(s => s.surface.type !== 'shaded-relief');
+    const ol2dSpecs = customSpecs.filter(s => s.surface.type === 'hillshade-2d');
+    const mapLibreSpecs = customSpecs.filter(s =>
+        s.surface.type !== 'shaded-relief' && s.surface.type !== 'hillshade-2d');
+    const hillshades = ol2dSpecs.map(s => ({ id: s.id, demSource: s.demSource }));
 
     // The region-selection tool lives on the OpenLayers 2D map; created when the OL map
-    // is ready, then restored from any previously saved selection.
+    // is ready, then restored from any previously saved selection. The 2D hillshades render
+    // here too, so the selection tool works over them.
     const olEngine = new OpenLayersEngine(maps, olMap => {
         if (selection) return;
         selection = new SelectionArea(olMap, { onChange: onUserSelectionChange });
@@ -379,7 +383,7 @@ async function init(): Promise<void> {
             appInstance?.setSelectTool(shape); // highlight the matching tool button
             onSelectionChange(savedCorners); // restore() doesn't emit — fan out manually
         }
-    });
+    }, hillshades);
     const engines: MapEngine[] = [olEngine];
     if (mapLibreSpecs.length) engines.push(new MapLibreTerrainEngine(mapLibreSpecs, mapsById));
     if (deckSpecs.length) engines.push(new DeckTerrainEngine(deckSpecs, mapsById));

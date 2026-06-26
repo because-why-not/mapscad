@@ -10,7 +10,8 @@ import type { ManifestMap } from './TileMapManifest';
 /** What gets painted onto the 3D terrain surface. */
 export type CustomSurface =
     | { type: 'imagery'; source: string }   // drape a raster source (e.g. aerial) over the terrain
-    | { type: 'hillshade' }                 // computed shaded relief from the DEM itself (MapLibre)
+    | { type: 'hillshade' }                 // 3D computed shaded relief from the DEM itself (MapLibre)
+    | { type: 'hillshade-2d' }              // flat shaded relief computed from the DEM (OpenLayers)
     | { type: 'shaded-relief' };            // solid-toned terrain lit by the sun w/ cast shadows (deck.gl)
 
 export interface CustomMapSpec {
@@ -48,8 +49,18 @@ const CUSTOM_MAPS: CustomMapSpec[] = [
         demSource: 'dunedin_elevation_raw',
         exaggeration: 1.4,
     },
-    // External global DEMs (see externalDems.ts): a 3D hillshade to sit beside each one's
-    // raw tile layer in its own map-menu category.
+    // External global DEMs (see externalDems.ts): a 2D + 3D hillshade beside each one's raw
+    // tile layer in its own map-menu category. The 2D hillshade is the useful one for
+    // picking an area — it renders on the OpenLayers map, which carries the selection tool.
+    {
+        id: 'mapterhorn_2d_hillshade',
+        name: '2D Hillshade',
+        icon: '🗺️',
+        surface: { type: 'hillshade-2d' },
+        demSource: 'mapterhorn_elevation',
+        exaggeration: 1.4,
+        category: 'Mapterhorn',
+    },
     {
         id: 'mapterhorn_3d_hillshade',
         name: '3D Hillshade',
@@ -58,6 +69,15 @@ const CUSTOM_MAPS: CustomMapSpec[] = [
         demSource: 'mapterhorn_elevation',
         exaggeration: 1.4,
         category: 'Mapterhorn',
+    },
+    {
+        id: 'aws_terrain_2d_hillshade',
+        name: '2D Hillshade',
+        icon: '🗺️',
+        surface: { type: 'hillshade-2d' },
+        demSource: 'aws_terrain_elevation',
+        exaggeration: 1.4,
+        category: 'AWS Terrain',
     },
     {
         id: 'aws_terrain_3d_hillshade',

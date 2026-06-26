@@ -1,12 +1,21 @@
 import OlMap from 'ol/Map';
 import View from 'ol/View';
 import TileLayer from 'ol/layer/Tile';
+import ImageLayer from 'ol/layer/Image';
+import type BaseLayer from 'ol/layer/Base';
 import XYZ from 'ol/source/XYZ';
 import { fromLonLat, toLonLat } from 'ol/proj';
 import { defaults as defaultControls, ScaleLine } from 'ol/control';
 import 'ol/ol.css';
 import type { ManifestMap } from '../TileMapManifest';
 import type { GeoView, MapEngine } from './MapEngine';
+import { buildHillshadeSource } from './hillshadeRaster';
+
+/** A 2D shaded-relief layer computed in-browser from a terrarium DEM (by manifest name). */
+export interface HillshadeSpec {
+    id: string;
+    demSource: string;
+}
 
 // Highest zoom the view allows; above a source's native maxzoom OpenLayers upscales
 // tiles (overzoom), matching Leaflet's old maxNativeZoom behaviour.
@@ -19,10 +28,14 @@ export class OpenLayersEngine implements MapEngine {
     private el!: HTMLDivElement;
     private map!: OlMap;
     private view!: View;
-    private layerById = new Map<string, TileLayer<XYZ>>();
+    private layerById = new Map<string, BaseLayer>();
 
-    constructor(private maps: ManifestMap[], private onReady?: (map: OlMap) => void) {
-        this.sourceIds = maps.map(m => m.name);
+    constructor(
+        private maps: ManifestMap[],
+        private onReady?: (map: OlMap) => void,
+        private hillshades: HillshadeSpec[] = [],
+    ) {
+        this.sourceIds = [...maps.map(m => m.name), ...hillshades.map(h => h.id)];
     }
 
     async mount(parent: HTMLElement, view: GeoView): Promise<void> {
@@ -39,7 +52,7 @@ export class OpenLayersEngine implements MapEngine {
         });
         this.view = olView;
 
-        const layers: TileLayer<XYZ>[] = [];
+        const layers: BaseLayer[] = [];
         for (const m of this.maps) {
             const source = new XYZ({
                 url: m.tiles[0],                       // template already contains {z}/{x}/{y}
@@ -50,6 +63,17 @@ export class OpenLayersEngine implements MapEngine {
             });
             const layer = new TileLayer({ source, visible: false });
             this.layerById.set(m.name, layer);
+            layers.push(layer);
+        }
+
+        // 2D hillshades: a shaded relief computed in-browser from a DEM already in `maps`.
+        const mapsByName = new Map(this.maps.map(m => [m.name, m]));
+        for (const h of this.hillshades) {
+            const dem = mapsByName.get(h.demSource);
+            if (!dem) continue;
+            const source = buildHillshadeSource(dem);
+            const layer = new ImageLayer({ source, visible: false });
+            this.layerById.set(h.id, layer);
             layers.push(layer);
         }
 
