@@ -3,6 +3,7 @@ import App from './App.svelte';
 import './app.css';
 import { Env } from './Env';
 import { fetchTileMapManifest, ManifestMap } from './TileMapManifest';
+import { EXTERNAL_DEMS } from './externalDems';
 import { prettifyMapName, iconForMapType } from './mapMeta';
 import { availableCustomMaps, isSunCapable } from './customMaps';
 import { MapController } from './MapController';
@@ -56,7 +57,7 @@ function demZoomRange(dem: ManifestMap | undefined): { min: number; max: number 
 /** Grid size at a zoom: one sample per DEM pixel, capped to the resolution limit. */
 function gridResolution(corners: LonLat[], zoom: number, limit: number): { cols: number; rows: number } {
     const { widthMeters, heightMeters } = rectExtent(corners);
-    const res = groundResolution(corners[0][1], zoom); // metres per DEM pixel at this zoom
+    const res = groundResolution(corners[0][1], zoom, previewDem?.mmapsrv.tileSize); // metres per DEM pixel at this zoom
     let cols = Math.max(2, Math.round(widthMeters / res) + 1);
     let rows = Math.max(2, Math.round(heightMeters / res) + 1);
     const long = Math.max(cols, rows);
@@ -223,10 +224,13 @@ async function init(): Promise<void> {
         try { localStorage.removeItem(k); } catch { /* ignore */ }
     }
 
-    const maps = await fetchTileMapManifest();
-    if (maps.length === 0) {
+    const serverMaps = await fetchTileMapManifest();
+    if (serverMaps.length === 0) {
         Env.warn('No maps returned by manifest — check tile server / network.');
     }
+    // Append the public internet-hosted DEMs (Mapterhorn, AWS) so they appear as ordinary
+    // elevation sources alongside whatever the server advertises.
+    const maps = [...serverMaps, ...EXTERNAL_DEMS];
     const mapsById: Record<string, ManifestMap> = Object.fromEntries(maps.map(m => [m.name, m]));
     const customSpecs = availableCustomMaps(mapsById);
     // The 3D preview can be built from any elevation DEM the server advertises (the

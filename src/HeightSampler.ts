@@ -38,26 +38,32 @@ function haversine([lon1, lat1]: LonLat, [lon2, lat2]: LonLat): number {
     return 2 * R * Math.asin(Math.sqrt(a));
 }
 
-/** Web Mercator ground resolution (metres per DEM pixel) at a zoom and latitude. */
-export function groundResolution(lat: number, zoom: number): number {
-    return EARTH_CIRCUMFERENCE * Math.cos(lat * Math.PI / 180) / (TILE * Math.pow(2, zoom));
+/**
+ * Web Mercator ground resolution (metres per DEM pixel) at a zoom and latitude.
+ * `tileSize` is the source's pixels-per-tile (256 for most, 512 for e.g. Mapterhorn):
+ * a 512px tile packs twice the pixels into the same geographic span, so it's twice as
+ * fine at the same zoom.
+ */
+export function groundResolution(lat: number, zoom: number, tileSize = TILE): number {
+    return EARTH_CIRCUMFERENCE * Math.cos(lat * Math.PI / 180) / (tileSize * Math.pow(2, zoom));
 }
 
 /** How many DEM tiles (across × down) the selection covers at a given zoom. */
 export function tileCoverage(corners: LonLat[], dem: ManifestMap, zoom: number): { z: number; tilesX: number; tilesY: number } {
+    const tileSize = dem.mmapsrv.tileSize ?? TILE;
     const minStored = dem.mmapsrv.minStoredZoom ?? dem.minzoom;
     const z = Math.max(minStored, Math.min(dem.maxzoom, Math.round(zoom)));
-    const cornerPx = corners.map(c => lonLatToWorldPx(c[0], c[1], z));
-    const tx0 = Math.floor(Math.min(...cornerPx.map(p => p[0])) / TILE);
-    const tx1 = Math.floor(Math.max(...cornerPx.map(p => p[0])) / TILE);
-    const ty0 = Math.floor(Math.min(...cornerPx.map(p => p[1])) / TILE);
-    const ty1 = Math.floor(Math.max(...cornerPx.map(p => p[1])) / TILE);
+    const cornerPx = corners.map(c => lonLatToWorldPx(c[0], c[1], z, tileSize));
+    const tx0 = Math.floor(Math.min(...cornerPx.map(p => p[0])) / tileSize);
+    const tx1 = Math.floor(Math.max(...cornerPx.map(p => p[0])) / tileSize);
+    const ty0 = Math.floor(Math.min(...cornerPx.map(p => p[1])) / tileSize);
+    const ty1 = Math.floor(Math.max(...cornerPx.map(p => p[1])) / tileSize);
     return { z, tilesX: tx1 - tx0 + 1, tilesY: ty1 - ty0 + 1 };
 }
 
-/** Lon/lat -> global pixel coordinate at a given zoom (Web Mercator, 256px tiles). */
-function lonLatToWorldPx(lon: number, lat: number, z: number): [number, number] {
-    const scale = TILE * Math.pow(2, z);
+/** Lon/lat -> global pixel coordinate at a given zoom (Web Mercator, `tileSize`px tiles). */
+function lonLatToWorldPx(lon: number, lat: number, z: number, tileSize: number): [number, number] {
+    const scale = tileSize * Math.pow(2, z);
     const x = (lon + 180) / 360 * scale;
     const s = Math.sin(lat * Math.PI / 180);
     const y = (0.5 - Math.log((1 + s) / (1 - s)) / (4 * Math.PI)) * scale;
@@ -111,6 +117,7 @@ export async function sampleSelectionHeights(
 ): Promise<HeightGrid> {
     const { signal, onProgress } = opts;
     const { widthMeters, heightMeters } = rectExtent(corners);
+    const tileSize = dem.mmapsrv.tileSize ?? TILE;
 
     // Sample at the requested DEM zoom (which now drives detail), clamped to what the
     // server actually stores.
@@ -118,17 +125,17 @@ export async function sampleSelectionHeights(
     const z = Math.max(minStored, Math.min(dem.maxzoom, Math.round(zoom)));
 
     // Pixel bbox of the rectangle at this zoom, then the covering tile range.
-    const cornerPx = corners.map(c => lonLatToWorldPx(c[0], c[1], z));
+    const cornerPx = corners.map(c => lonLatToWorldPx(c[0], c[1], z, tileSize));
     const minX = Math.min(...cornerPx.map(p => p[0]));
     const maxX = Math.max(...cornerPx.map(p => p[0]));
     const minY = Math.min(...cornerPx.map(p => p[1]));
     const maxY = Math.max(...cornerPx.map(p => p[1]));
-    const tx0 = Math.floor(minX / TILE), tx1 = Math.floor(maxX / TILE);
-    const ty0 = Math.floor(minY / TILE), ty1 = Math.floor(maxY / TILE);
+    const tx0 = Math.floor(minX / tileSize), tx1 = Math.floor(maxX / tileSize);
+    const ty0 = Math.floor(minY / tileSize), ty1 = Math.floor(maxY / tileSize);
 
     const canvas = document.createElement('canvas');
-    canvas.width = (tx1 - tx0 + 1) * TILE;
-    canvas.height = (ty1 - ty0 + 1) * TILE;
+    canvas.width = (tx1 - tx0 + 1) * tileSize;
+    canvas.height = (ty1 - ty0 + 1) * tileSize;
     const ctx = canvas.getContext('2d', { willReadFrequently: true })!;
 
     const total = (tx1 - tx0 + 1) * (ty1 - ty0 + 1);
@@ -140,7 +147,7 @@ export async function sampleSelectionHeights(
             const url = dem.tiles[0]
                 .replace('{z}', String(z)).replace('{x}', String(tx)).replace('{y}', String(ty));
             jobs.push(loadTile(url, signal).then(img => {
-                if (img) ctx.drawImage(img, (tx - tx0) * TILE, (ty - ty0) * TILE);
+                if (img) ctx.drawImage(img, (tx - tx0) * tileSize, (ty - ty0) * tileSize);
                 onProgress?.(++loaded, total);
             }));
         }
@@ -148,7 +155,7 @@ export async function sampleSelectionHeights(
     await Promise.all(jobs);
     if (signal?.aborted) throw new DOMException('Sampling cancelled', 'AbortError');
 
-    const originX = tx0 * TILE, originY = ty0 * TILE;
+    const originX = tx0 * tileSize, originY = ty0 * tileSize;
     const { data } = ctx.getImageData(0, 0, canvas.width, canvas.height);
 
     const W = canvas.width, H = canvas.height;
@@ -168,7 +175,7 @@ export async function sampleSelectionHeights(
         for (let c = 0; c < cols; c++) {
             const u = (c + 0.5) / cols;
             const [lon, lat] = rectPoint(corners, u, v);
-            const [gx, gy] = lonLatToWorldPx(lon, lat, z);
+            const [gx, gy] = lonLatToWorldPx(lon, lat, z, tileSize);
             // Bilinear sample: decode the 4 surrounding pixels, blend by the fractional
             // position. Avoids the stair-step grid of nearest-neighbour at high detail.
             const fx = gx - originX - 0.5, fy = gy - originY - 0.5; // pixel centres at .5
