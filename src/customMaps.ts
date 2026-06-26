@@ -20,6 +20,7 @@ export interface CustomMapSpec {
     surface: CustomSurface;
     demSource: string;       // terrarium-encoded elevation manifest name (drives the terrain)
     exaggeration: number;    // vertical terrain exaggeration
+    category?: string;       // map-menu group; undefined => the generic "Custom Maps" section
 }
 
 const CUSTOM_MAPS: CustomMapSpec[] = [
@@ -46,6 +47,26 @@ const CUSTOM_MAPS: CustomMapSpec[] = [
         surface: { type: 'shaded-relief' },
         demSource: 'dunedin_elevation_raw',
         exaggeration: 1.4,
+    },
+    // External global DEMs (see externalDems.ts): a 3D hillshade to sit beside each one's
+    // raw tile layer in its own map-menu category.
+    {
+        id: 'mapterhorn_3d_hillshade',
+        name: '3D Hillshade',
+        icon: '⛰️',
+        surface: { type: 'hillshade' },
+        demSource: 'mapterhorn_elevation',
+        exaggeration: 1.4,
+        category: 'Mapterhorn',
+    },
+    {
+        id: 'aws_terrain_3d_hillshade',
+        name: '3D Hillshade',
+        icon: '⛰️',
+        surface: { type: 'hillshade' },
+        demSource: 'aws_terrain_elevation',
+        exaggeration: 1.4,
+        category: 'AWS Terrain',
     },
 ];
 

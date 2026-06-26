@@ -3,7 +3,7 @@ import App from './App.svelte';
 import './app.css';
 import { Env } from './Env';
 import { fetchTileMapManifest, ManifestMap } from './TileMapManifest';
-import { EXTERNAL_DEMS } from './externalDems';
+import { EXTERNAL_DEMS, EXTERNAL_DEM_CATEGORY } from './externalDems';
 import { prettifyMapName, iconForMapType } from './mapMeta';
 import { availableCustomMaps, isSunCapable } from './customMaps';
 import { MapController } from './MapController';
@@ -255,17 +255,24 @@ async function init(): Promise<void> {
     config.update({ demId: initialDemId, model: model.getSettings() });
     const initialPreviewSettings: Record<string, any> = { ...model.getSettings(), smoothShading: cfg.display.smoothShading };
 
-    const tileProviders = maps.map(m => ({
-        id: m.name,
-        name: prettifyMapName(m.name),
-        icon: iconForMapType(m.mmapsrv.type),
-    }));
+    const tileProviders = maps.map(m => {
+        const category = EXTERNAL_DEM_CATEGORY[m.name]; // undefined for ordinary server maps
+        return {
+            id: m.name,
+            // Inside a source category the header already names the source, so the raw tile
+            // layer is just "Raw"; ordinary maps keep their prettified manifest name.
+            name: category ? 'Raw' : prettifyMapName(m.name),
+            icon: iconForMapType(m.mmapsrv.type),
+            category,
+        };
+    });
     const customMaps = customSpecs.map(s => ({
         id: s.id,
         name: s.name,
         icon: s.icon,
         sun: isSunCapable(s),
         shadows: s.surface.type === 'shaded-relief',
+        category: s.category,
     }));
 
     const allIds = [...tileProviders.map(p => p.id), ...customMaps.map(c => c.id)];

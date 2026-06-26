@@ -52,6 +52,31 @@
     let shadowsCapable = $derived(!!customList.find(c => c.id === activeProviderId)?.shadows);
     let timeLabel = $derived(formatTime(minutesOfDay));
 
+    // Group the menu into sections: ungrouped tile layers under "Map Source", then one
+    // section per named category (e.g. Mapterhorn, AWS Terrain) holding that source's raw
+    // layer + its 3D maps, then any ungrouped custom maps under "Custom Maps".
+    let sections = $derived(buildSections(providerList, customList));
+
+    function buildSections(providers, customs) {
+        const order = [];
+        for (const e of [...providers, ...customs]) {
+            if (e.category && !order.includes(e.category)) order.push(e.category);
+        }
+        const result = [];
+        const looseProviders = providers.filter(p => !p.category);
+        if (looseProviders.length) result.push({ title: 'Map Source', items: looseProviders });
+        for (const cat of order) {
+            const items = [
+                ...providers.filter(p => p.category === cat),
+                ...customs.filter(c => c.category === cat),
+            ];
+            result.push({ title: cat, items });
+        }
+        const looseCustoms = customs.filter(c => !c.category);
+        if (looseCustoms.length) result.push({ title: 'Custom Maps', items: looseCustoms });
+        return result;
+    }
+
     // Pushed in from index.ts.
     export function setTileProviders(providers) { providerList = providers; }
     export function setCustomMaps(maps) { customList = maps; }
@@ -180,31 +205,19 @@
             <button class="btn btn-ghost btn-sm btn-circle text-primary-content" onclick={() => menuOpen = false}>✕</button>
         </div>
         <div class="overflow-y-auto flex-1 py-2">
-            <div class="px-4 py-1 text-xs font-bold uppercase tracking-wider opacity-50">Map Source</div>
-            <ul class="menu px-2">
-                {#each providerList as provider (provider.id)}
-                    <li>
-                        <button class={provider.id === activeProviderId ? 'active' : ''} onclick={() => handleLayerSwitch(provider.id)}>
-                            <span>{provider.icon}</span>
-                            {provider.name}
-                        </button>
-                    </li>
-                {/each}
-            </ul>
-
-            {#if customList.length}
-                <div class="px-4 py-1 mt-2 text-xs font-bold uppercase tracking-wider opacity-50">Custom Maps</div>
+            {#each sections as section (section.title)}
+                <div class="px-4 py-1 mt-2 first:mt-0 text-xs font-bold uppercase tracking-wider opacity-50">{section.title}</div>
                 <ul class="menu px-2">
-                    {#each customList as custom (custom.id)}
+                    {#each section.items as item (item.id)}
                         <li>
-                            <button class={custom.id === activeProviderId ? 'active' : ''} onclick={() => handleLayerSwitch(custom.id)}>
-                                <span>{custom.icon}</span>
-                                {custom.name}
+                            <button class={item.id === activeProviderId ? 'active' : ''} onclick={() => handleLayerSwitch(item.id)}>
+                                <span>{item.icon}</span>
+                                {item.name}
                             </button>
                         </li>
                     {/each}
                 </ul>
-            {/if}
+            {/each}
 
             {#if sunEnabled}
                 <div class="px-4 py-1 mt-2 text-xs font-bold uppercase tracking-wider opacity-50">Sun</div>

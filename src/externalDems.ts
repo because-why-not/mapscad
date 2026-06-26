@@ -10,6 +10,16 @@ import type { ManifestMap } from './TileMapManifest';
  * Mapterhorn ships 512px WebP tiles; HeightSampler / OpenLayersEngine read
  * `mmapsrv.tileSize`, so the pixel↔zoom math stays correct for non-256 sources.
  */
+/**
+ * Menu category each external DEM gets grouped under (keyed by manifest name). The raw
+ * tile layer and the matching 3D hillshade custom map share the category so they appear
+ * together in the map menu instead of scattered across "Map Source" / "Custom Maps".
+ */
+export const EXTERNAL_DEM_CATEGORY: Record<string, string> = {
+    mapterhorn_elevation: 'Mapterhorn',
+    aws_terrain_elevation: 'AWS Terrain',
+};
+
 export const EXTERNAL_DEMS: ManifestMap[] = [
     {
         name: 'mapterhorn_elevation',
