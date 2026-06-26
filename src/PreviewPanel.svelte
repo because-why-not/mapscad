@@ -164,17 +164,18 @@
             <div class="px-4 py-1 text-xs font-bold uppercase tracking-wider opacity-50">Heightmap</div>
             <div class="px-4 py-2 flex flex-col gap-3">
                 {#if dems.length > 1}
-                    <div class="flex flex-col gap-1">
+                    <label class="flex flex-col gap-1">
                         <span class="text-sm">Source</span>
-                        <div class="join w-full">
+                        <select
+                            class="select select-sm select-bordered w-full"
+                            value={demId}
+                            onchange={(e) => selectDem(e.currentTarget.value)}
+                        >
                             {#each dems as d (d.id)}
-                                <button
-                                    class="btn btn-sm join-item flex-1 {d.id === demId ? 'btn-primary' : 'bg-base-100'}"
-                                    onclick={() => selectDem(d.id)}
-                                >{d.name}</button>
+                                <option value={d.id}>{d.name}</option>
                             {/each}
-                        </div>
-                    </div>
+                        </select>
+                    </label>
                 {/if}
                 <div class="flex flex-col gap-1">
                     <span class="text-sm flex items-center justify-between">Zoom <span class="font-mono">z{heightZoom}</span></span>
