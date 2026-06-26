@@ -71,6 +71,11 @@ export function buildHillshadeSource(dem: ManifestMap): RasterSource {
         tileSize: dem.mmapsrv.tileSize ?? 256,
         crossOrigin: 'anonymous',
         attributions: dem.attribution || undefined,
+        // Sample the DEM nearest-neighbour: bilinear smoothing of terrarium-ENCODED bytes
+        // is invalid (G wraps 255→0 with an R carry every 1m), and blending across those
+        // wraps produces elevation spikes that show up as contour-line artifacts — most
+        // visible while placeholder/overzoom tiles are being resampled during load.
+        interpolate: false,
     });
     const raster = new RasterSource({
         sources: [elevation],
