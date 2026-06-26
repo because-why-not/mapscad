@@ -65,7 +65,7 @@
         const result = [];
         const looseProviders = providers.filter(p => !p.category);
         if (looseProviders.length) result.push({ title: 'Map Source', items: looseProviders });
-        const rank = (name) => name === 'Raw' ? 0 : name === '2D Hillshade' ? 1 : name === '3D Hillshade' ? 2 : 3;
+        const rank = (name) => name === 'Raw' ? 0 : name.startsWith('2D Hillshade') ? 1 : name.startsWith('3D Hillshade') ? 2 : 3;
         for (const cat of order) {
             const items = [
                 ...providers.filter(p => p.category === cat),

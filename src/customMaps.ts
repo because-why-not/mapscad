@@ -90,6 +90,17 @@ const CUSTOM_MAPS: CustomMapSpec[] = [
     },
     // NZ server DEMs: 3D hillshade to sit beside the server's raw + pre-rendered 2D
     // hillshade tile layers (those two are plain tile providers, see mapCategories.ts).
+    // The "(computed)" entries render OUR in-browser hillshade from the same raw DEM, kept
+    // for now so we can eyeball it against the server's pre-rendered 8m hillshade.
+    {
+        id: 'north_island_2d_hillshade_computed',
+        name: '2D Hillshade (computed)',
+        icon: '🧪',
+        surface: { type: 'hillshade-2d' },
+        demSource: 'north_island_elevation_raw',
+        exaggeration: 1.4,
+        category: 'North Island',
+    },
     {
         id: 'north_island_3d_hillshade',
         name: '3D Hillshade',
@@ -98,6 +109,15 @@ const CUSTOM_MAPS: CustomMapSpec[] = [
         demSource: 'north_island_elevation_raw',
         exaggeration: 1.4,
         category: 'North Island',
+    },
+    {
+        id: 'south_island_2d_hillshade_computed',
+        name: '2D Hillshade (computed)',
+        icon: '🧪',
+        surface: { type: 'hillshade-2d' },
+        demSource: 'south_island_elevation_raw',
+        exaggeration: 1.4,
+        category: 'South Island',
     },
     {
         id: 'south_island_3d_hillshade',
