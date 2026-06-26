@@ -344,12 +344,14 @@ async function init(): Promise<void> {
             onPreviewDemChange: (id: string) => {
                 if (!mapsById[id]) return;
                 previewDem = mapsById[id];
-                // Each DEM has its own zoom range; jump to the new source's finest level
-                // (safeZoom still trims it down to the memory budget on resample).
+                // Keep the current detail level, just clamp it into the new source's range —
+                // don't snap to the new max (e.g. North Island z14 -> Mapterhorn would jump
+                // to z17, downloading far more than asked). safeZoom still trims on resample.
                 const { min, max } = demZoomRange(previewDem);
-                model.applySettings({ heightZoom: max });
+                const heightZoom = Math.max(min, Math.min(max, model.getSettings().heightZoom));
+                model.applySettings({ heightZoom });
                 config.update({ demId: id, model: model.getSettings() });
-                appInstance?.setPreviewZoomRange(min, max, max); // move the slider's range + value
+                appInstance?.setPreviewZoomRange(min, max, heightZoom); // move the slider's range + value
                 resample();
             },
             //triggered when the user changes settings in the side menu
