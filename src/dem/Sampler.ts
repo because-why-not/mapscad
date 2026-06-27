@@ -1,0 +1,91 @@
+import type { LonLat } from '../SelectionArea';
+import type { TerrariumMapData } from './TerrariumMapData';
+
+/**
+ * Samples a height field over a (possibly rotated) selection rectangle into a grid. Pure:
+ * it reads elevations from a TerrariumMapData and produces metre-space heights, with no
+ * notion of where the pixels came from. Bilinear interpolation, no-data aware.
+ */
+export interface HeightGrid {
+    heights: Float32Array;   // row-major, length cols*rows; metres
+    cols: number;
+    rows: number;
+    widthMeters: number;     // real-world width of the rectangle (TL→TR edge)
+    heightMeters: number;    // real-world height of the rectangle (TL→BL edge)
+    minHeight: number;
+    maxHeight: number;
+    zoom: number;            // DEM tile zoom the heights were sampled from
+    tilesX: number;          // DEM tiles fetched across / down (for memory accounting)
+    tilesY: number;
+}
+
+const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
+
+/** Lon/lat -> global pixel coordinate at a given zoom (Web Mercator, `tileSize`px tiles). */
+export function lonLatToWorldPx(lon: number, lat: number, z: number, tileSize: number): [number, number] {
+    const scale = tileSize * Math.pow(2, z);
+    const x = (lon + 180) / 360 * scale;
+    const s = Math.sin(lat * Math.PI / 180);
+    const y = (0.5 - Math.log((1 + s) / (1 - s)) / (4 * Math.PI)) * scale;
+    return [x, y];
+}
+
+/** Bilinear interpolation of a point inside the rectangle (u,v in [0,1]); corners TL,TR,BR,BL. */
+export function rectPoint(c: LonLat[], u: number, v: number): LonLat {
+    const [TL, TR, BR, BL] = c;
+    const topLon = lerp(TL[0], TR[0], u), topLat = lerp(TL[1], TR[1], u);
+    const botLon = lerp(BL[0], BR[0], u), botLat = lerp(BL[1], BR[1], u);
+    return [lerp(topLon, botLon, v), lerp(topLat, botLat, v)];
+}
+
+/**
+ * Walk a cols×rows grid over the rectangle, bilinear-sampling the DEM at each cell centre.
+ * No-data corners are skipped in the blend so edges stay graceful; any cell with no valid
+ * neighbour is filled with the lowest valid height so the mesh has a flat floor there.
+ */
+export function sampleHeights(
+    corners: LonLat[], data: TerrariumMapData, cols: number, rows: number,
+    widthMeters: number, heightMeters: number,
+): HeightGrid {
+    const z = data.zoom, tileSize = data.tileSize;
+    const heights = new Float32Array(cols * rows);
+    let minHeight = Infinity, maxHeight = -Infinity;
+
+    for (let r = 0; r < rows; r++) {
+        const v = (r + 0.5) / rows;
+        for (let c = 0; c < cols; c++) {
+            const u = (c + 0.5) / cols;
+            const [lon, lat] = rectPoint(corners, u, v);
+            const [gx, gy] = lonLatToWorldPx(lon, lat, z, tileSize);
+            // Pixel centres sit at .5; sample the 4 pixels surrounding the sample point.
+            const fx = gx - 0.5, fy = gy - 0.5;
+            const x0 = Math.floor(fx), y0 = Math.floor(fy);
+            const tx = fx - x0, ty = fy - y0;
+            const h00 = data.heightAtPixel(x0, y0), h10 = data.heightAtPixel(x0 + 1, y0);
+            const h01 = data.heightAtPixel(x0, y0 + 1), h11 = data.heightAtPixel(x0 + 1, y0 + 1);
+            // Weighted blend, skipping any no-data corners (no per-cell allocation).
+            let sum = 0, wsum = 0;
+            if (!Number.isNaN(h00)) { const w = (1 - tx) * (1 - ty); sum += h00 * w; wsum += w; }
+            if (!Number.isNaN(h10)) { const w = tx * (1 - ty); sum += h10 * w; wsum += w; }
+            if (!Number.isNaN(h01)) { const w = (1 - tx) * ty; sum += h01 * w; wsum += w; }
+            if (!Number.isNaN(h11)) { const w = tx * ty; sum += h11 * w; wsum += w; }
+            const h = wsum > 0 ? sum / wsum : NaN;
+            heights[r * cols + c] = h;
+            if (!Number.isNaN(h)) {
+                if (h < minHeight) minHeight = h;
+                if (h > maxHeight) maxHeight = h;
+            }
+        }
+    }
+
+    // Replace no-data with the lowest valid height so the mesh has a flat floor there.
+    if (!Number.isFinite(minHeight)) { minHeight = 0; maxHeight = 0; }
+    for (let i = 0; i < heights.length; i++) {
+        if (Number.isNaN(heights[i])) heights[i] = minHeight;
+    }
+
+    return {
+        heights, cols, rows, widthMeters, heightMeters, minHeight, maxHeight,
+        zoom: z, tilesX: data.tilesX, tilesY: data.tilesY,
+    };
+}
