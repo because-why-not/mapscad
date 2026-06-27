@@ -15,11 +15,14 @@ test('a map-only link applies map name + view, with no c= blob', async ({ page }
     // The z= param drove the initial zoom readout (the badge over the map).
     await expect(page.getByText(/^z8/)).toBeVisible();
 
-    // The map= param selected that source (proven by it round-tripping back into the live
-    // URL via the active id), and the view params are present…
+    // The link actually positioned the map: the live URL is rebuilt from the map's real
+    // centre/zoom (composeShareUrl reads getView()), so it must echo the exact coordinates
+    // we opened with — not the default Dunedin view. A broken link→view path would show
+    // different lat/lng here.
     await expect.poll(() => page.url()).toContain('map=opentopomap');
-    expect(page.url()).toContain('lat=');
-    expect(page.url()).toContain('z=');
+    expect(page.url()).toContain('lat=-41.27');
+    expect(page.url()).toContain('lng=174.78');
+    expect(page.url()).toContain('z=8.4');
 
     // …but with no selection, the opaque export blob must NOT appear.
     expect(page.url()).not.toContain('c=');
