@@ -1,6 +1,6 @@
 import { mount } from 'svelte';
-import App from './App.svelte';
-import './app.css';
+import App from './ui/App.svelte';
+import './ui/app.css';
 import { Env } from './Env';
 import { fetchTileMapManifest, ManifestMap } from './TileMapManifest';
 import { EXTERNAL_DEMS } from './externalDems';
