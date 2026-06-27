@@ -24,9 +24,10 @@ beforeEach(() => {
     window.location.hash = '';
 });
 
-// Apply the hash from a generated share URL, as if the page were opened with that link.
-function openWithLink(url: string): void {
-    window.location.hash = new URL(url).hash;
+// Open the page as if it carried this config slice in its URL hash (index.ts composes the
+// rest of the hash; the store only reads/writes the `c=` param).
+function openWithParam(param: string): void {
+    window.location.hash = 'c=' + param;
 }
 
 describe('localStorage persistence', () => {
@@ -47,10 +48,10 @@ describe('share-link codec', () => {
     it('round-trips through the URL hash, including non-ASCII (utf-8 path)', () => {
         const a = new PreviewConfigStore();
         a.update({ demId: 'tëst_é_DEM', selection: sel as any, model: { heightScale: 2.5 } });
-        const link = a.shareLink();
+        const param = a.encodeParam();
 
         localStorage.clear();          // prove the link alone carries the config
-        openWithLink(link);
+        openWithParam(param);
         const b = new PreviewConfigStore();
         expect(b.get().demId).toBe('tëst_é_DEM');
         expect(b.get().selection).toEqual(sel);
@@ -60,9 +61,9 @@ describe('share-link codec', () => {
     it('does NOT carry preview-only display flags', () => {
         const a = new PreviewConfigStore();
         a.update({ display: { smoothShading: false } });
-        const link = a.shareLink();
+        const param = a.encodeParam();
         localStorage.clear();
-        openWithLink(link);
+        openWithParam(param);
         const b = new PreviewConfigStore();
         // The shared slice omits `display`, so it falls back to the default (true).
         expect(b.get().display.smoothShading).toBe(true);
@@ -71,10 +72,10 @@ describe('share-link codec', () => {
     it('a share link wins over local storage', () => {
         const seed = new PreviewConfigStore();
         seed.update({ demId: 'shared_dem' });
-        const link = seed.shareLink();
+        const param = seed.encodeParam();
 
         localStorage.setItem('previewConfig', JSON.stringify({ version: 1, demId: 'local_dem' }));
-        openWithLink(link);
+        openWithParam(param);
         const store = new PreviewConfigStore();
         expect(store.get().demId).toBe('shared_dem');
     });

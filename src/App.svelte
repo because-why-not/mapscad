@@ -134,7 +134,7 @@
         {onShadowsChange}
         {onSelectToggle}
         {onAspectChange}
-        {initialMapZoom}
+        initialZoom={initialMapZoom}
         canCollapse={showBoth}
         onCollapse={collapseMap}
     />

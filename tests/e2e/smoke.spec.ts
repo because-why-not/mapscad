@@ -29,9 +29,22 @@ const MANIFEST = {
 
 // Smoke test: with a stubbed manifest the bundle loads and Svelte mounts. Deliberately
 // does not assert on real map/tile content.
+//
+// A 1×1 transparent PNG, used to fulfil tile requests so the manifest's fake tile URLs
+// don't 404-spam the console/trace (we don't assert on tile content).
+const BLANK_PNG = Buffer.from(
+    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M8AAAMBAQDJ/pLvAAAAAElFTkSuQmCC',
+    'base64',
+);
+
 test('app loads and mounts', async ({ page }) => {
     await page.route('**/maps', route =>
         route.fulfill({ contentType: 'application/json', body: JSON.stringify(MANIFEST) }),
+    );
+    // Stub every tile request (the manifest points at non-existent URLs) so the test stays
+    // hermetic and quiet instead of emitting a 404 per tile.
+    await page.route('**/tiles/**', route =>
+        route.fulfill({ contentType: 'image/png', body: BLANK_PNG }),
     );
 
     await page.goto('/');
