@@ -11,8 +11,7 @@ import type { ManifestMap } from './TileMapManifest';
 export type CustomSurface =
     | { type: 'imagery'; source: string }   // drape a raster source (e.g. aerial) over the terrain
     | { type: 'hillshade' }                 // 3D computed shaded relief from the DEM itself (MapLibre)
-    | { type: 'hillshade-2d' }              // flat shaded relief computed from the DEM (OpenLayers)
-    | { type: 'shaded-relief' };            // solid-toned terrain lit by the sun w/ cast shadows (deck.gl)
+    | { type: 'hillshade-2d' };             // flat shaded relief computed from the DEM (OpenLayers)
 
 export interface CustomMapSpec {
     id: string;
@@ -38,14 +37,6 @@ const CUSTOM_MAPS: CustomMapSpec[] = [
         name: 'Dunedin 3D Hillshade',
         icon: '⛰️',
         surface: { type: 'hillshade' },
-        demSource: 'dunedin_elevation_raw',
-        exaggeration: 1.4,
-    },
-    {
-        id: 'dunedin_3d_shadows',
-        name: 'Dunedin 3D Shadows',
-        icon: '🌄',
-        surface: { type: 'shaded-relief' },
         demSource: 'dunedin_elevation_raw',
         exaggeration: 1.4,
     },
@@ -141,5 +132,5 @@ export function availableCustomMaps(mapsById: Record<string, ManifestMap>): Cust
 
 /** Whether a custom map is lit by the sun (so the Sun date/time controls apply). */
 export function isSunCapable(spec: CustomMapSpec): boolean {
-    return spec.surface.type === 'hillshade' || spec.surface.type === 'shaded-relief';
+    return spec.surface.type === 'hillshade';
 }

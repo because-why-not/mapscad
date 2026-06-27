@@ -10,7 +10,6 @@ import { availableCustomMaps, isSunCapable } from './customMaps';
 import { MapController } from './MapController';
 import { OpenLayersEngine } from './engine/OpenLayersEngine';
 import { MapLibreTerrainEngine } from './engine/MapLibreTerrainEngine';
-import { DeckTerrainEngine } from './engine/DeckTerrainEngine';
 import { SelectionArea, LonLat } from './SelectionArea';
 import { sampleSelectionHeights, rectExtent, groundResolution, tileCoverage } from './HeightSampler';
 import { TerrainPreview } from './TerrainPreview';
@@ -334,7 +333,7 @@ async function init(): Promise<void> {
         name: s.name,
         icon: s.icon,
         sun: isSunCapable(s),
-        shadows: s.surface.type === 'shaded-relief',
+        shadows: false,
         category: s.category,
     }));
 
@@ -433,10 +432,8 @@ async function init(): Promise<void> {
     model.onChange(onModelChange);
 
     // Composition root: choose concrete engines here; nothing else knows about them.
-    const deckSpecs = customSpecs.filter(s => s.surface.type === 'shaded-relief');
     const ol2dSpecs = customSpecs.filter(s => s.surface.type === 'hillshade-2d');
-    const mapLibreSpecs = customSpecs.filter(s =>
-        s.surface.type !== 'shaded-relief' && s.surface.type !== 'hillshade-2d');
+    const mapLibreSpecs = customSpecs.filter(s => s.surface.type !== 'hillshade-2d');
     const hillshades = ol2dSpecs.map(s => ({ id: s.id, demSource: s.demSource }));
 
     // The region-selection tool lives on the OpenLayers 2D map; created when the OL map
@@ -456,7 +453,6 @@ async function init(): Promise<void> {
     }, hillshades);
     const engines: MapEngine[] = [olEngine];
     if (mapLibreSpecs.length) engines.push(new MapLibreTerrainEngine(mapLibreSpecs, mapsById));
-    if (deckSpecs.length) engines.push(new DeckTerrainEngine(deckSpecs, mapsById));
 
     controller = new MapController({
         engines,
