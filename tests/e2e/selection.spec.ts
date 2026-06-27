@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { stubServer, dragOnMap, configFromUrl } from './_stub';
+import { stubServer, dragOnMap, configFromUrl, haversineMeters } from './_stub';
 
 // Exercises the selection mechanisms themselves — drawing a rectangle, drawing an oval, and
 // moving an existing selection — WITHOUT any real download (tiles are stubbed blank). We
@@ -39,6 +39,25 @@ test('the oval tool records an oval-shaped selection', async ({ page }) => {
     await expect(page.getByRole('button', { name: 'Open 3D menu' })).toBeVisible();
     await expect.poll(() => configFromUrl(page.url())?.model.shape).toBe('oval');
     expect(configFromUrl(page.url()).selection).toHaveLength(4);
+});
+
+test('the 1:1 aspect lock squares up a wide drag', async ({ page }) => {
+    await stubServer(page);
+    await page.goto('/');
+    await waitForMap(page);
+
+    await page.getByRole('button', { name: 'Select rectangular area' }).click();
+    // Lock to 1:1 (the ratio dropdown appears once a selection tool is active).
+    await page.getByLabel('Lock aspect ratio').selectOption('1:1');
+    // Draw a deliberately wide box; the lock shrinks the long axis so it ends up square.
+    await dragOnMap(page, [-90, -40], [90, 40]);
+
+    await expect.poll(() => page.url()).toContain('c=');
+    const sel = configFromUrl(page.url()).selection;       // [TL, TR, BR, BL]
+    const width = haversineMeters(sel[0], sel[1]);          // TL→TR
+    const height = haversineMeters(sel[0], sel[3]);         // TL→BL
+    expect(width / height).toBeGreaterThan(0.9);
+    expect(width / height).toBeLessThan(1.1);
 });
 
 test('the move handle translates an existing selection', async ({ page }) => {

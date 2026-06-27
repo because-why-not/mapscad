@@ -56,6 +56,15 @@ export function configFromUrl(url: string): any | null {
     return JSON.parse(Buffer.from(c, 'base64url').toString('utf8'));
 }
 
+/** Great-circle distance in metres between two [lon, lat] points. */
+export function haversineMeters(a: [number, number], b: [number, number]): number {
+    const R = 6378137, toRad = (d: number) => (d * Math.PI) / 180;
+    const dLat = toRad(b[1] - a[1]), dLon = toRad(b[0] - a[0]);
+    const s = Math.sin(dLat / 2) ** 2
+        + Math.cos(toRad(a[1])) * Math.cos(toRad(b[1])) * Math.sin(dLon / 2) ** 2;
+    return 2 * R * Math.asin(Math.sqrt(s));
+}
+
 /** Drag a box on the 2D map, in pixels measured from its centre. Drives the OL pointer
  *  interaction the selection tool listens on. */
 export async function dragOnMap(
