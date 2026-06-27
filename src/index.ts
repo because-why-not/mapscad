@@ -210,6 +210,47 @@ function saveActive(id: string): void {
     try { localStorage.setItem('activeProvider', id); } catch (e) { Env.error('save activeProvider', e); }
 }
 
+// --- URL state ---------------------------------------------------------------
+// The hash carries the human-readable map state always (map name + lat/lng/zoom) and the
+// opaque export config (`c=`) ONLY once an area is selected, e.g.
+//   #map=north_island_hillshade_8m&lat=-41.27&lng=174.78&z=8.4
+//   …&c=<base64>            (added after a selection)
+
+/** Parse the human-readable map state from the URL hash (map name + view), if present. */
+function readUrlMapState(): { map?: string; view?: GeoView } {
+    try {
+        const params = new URLSearchParams(window.location.hash.replace(/^#/, ''));
+        const lat = parseFloat(params.get('lat') ?? '');
+        const lng = parseFloat(params.get('lng') ?? '');
+        const zoom = parseFloat(params.get('z') ?? '');
+        const view = [lat, lng, zoom].every(Number.isFinite) ? { lat, lng, zoom } : undefined;
+        return { map: params.get('map') || undefined, view };
+    } catch (e) { Env.error('read url map state', e); return {}; }
+}
+
+/** Compose the full hash URL: readable map state, plus `c=` only when a selection exists. */
+function composeShareUrl(): string {
+    const v = controller?.getView() ?? DEFAULT_VIEW;
+    const params: string[] = [];
+    if (controller?.activeId) params.push(`map=${encodeURIComponent(controller.activeId)}`);
+    params.push(`lat=${v.lat.toFixed(5)}`, `lng=${v.lng.toFixed(5)}`, `z=${v.zoom.toFixed(2)}`);
+    if (config.get().selection) params.push(`c=${config.encodeParam()}`);
+    const url = new URL(window.location.href);
+    url.hash = params.join('&');
+    return url.toString();
+}
+
+// Keep the address bar in sync with the live map + config, debounced so dragging the map or
+// a slider doesn't flood the history API.
+let urlSyncTimer = 0;
+function scheduleUrlSync(): void {
+    clearTimeout(urlSyncTimer);
+    urlSyncTimer = window.setTimeout(() => {
+        try { history.replaceState(null, '', composeShareUrl()); }
+        catch (e) { Env.error('sync url', e); }
+    }, 250);
+}
+
 function loadSunDate(): Date {
     try {
         const s = localStorage.getItem('sunDate');
@@ -297,9 +338,14 @@ async function init(): Promise<void> {
         category: s.category,
     }));
 
+    // Map name + view come from the URL hash if present (human-readable, shareable), else
+    // fall back to the last-used local values, else defaults.
+    const urlMapState = readUrlMapState();
     const allIds = [...tileProviders.map(p => p.id), ...customMaps.map(c => c.id)];
     const saved = localStorage.getItem('activeProvider');
-    const initialId = (saved && allIds.includes(saved)) ? saved : (allIds[0] ?? '');
+    const initialId = (urlMapState.map && allIds.includes(urlMapState.map)) ? urlMapState.map
+        : (saved && allIds.includes(saved)) ? saved
+        : (allIds[0] ?? '');
     const initialSunDate = loadSunDate();
     const initialShadows = loadShadows();
 
@@ -308,7 +354,7 @@ async function init(): Promise<void> {
     let selection: SelectionArea | null = null;
 
     // Shared by the App (initial zoom badge) and the MapController (initial camera).
-    const initialView = loadView();
+    const initialView = urlMapState.view ?? loadView();
 
     // Mount the Svelte UI first — it owns the split layout and provides the DOM nodes the
     // map engines and 3D preview mount into.
@@ -369,7 +415,7 @@ async function init(): Promise<void> {
             onPreviewGenerate: (s: Record<string, any>) => { model.applySettings(s); config.update({ model: model.getSettings() }); resample(); },
             onPreviewSave: (s: Record<string, any>) => { model.applySettings(s); config.update({ model: model.getSettings() }); exportModelStl(model); },
             onPreviewResetCamera: () => preview?.resetCamera(),
-            onPreviewShareLink: () => config.shareLink(),
+            onPreviewShareLink: () => composeShareUrl(),
             onPreviewCancel: cancelResample,
             onLayoutChange: () => preview?.resize(),
         },
@@ -419,9 +465,12 @@ async function init(): Promise<void> {
         initialSunDate,
         initialShadows,
         onActiveChange: id => appInstance?.setActiveProvider(id),
-        onViewPersist: v => { saveView(v); appInstance?.setMapZoom(v.zoom); },
-        onActivePersist: saveActive,
+        onViewPersist: v => { saveView(v); appInstance?.setMapZoom(v.zoom); scheduleUrlSync(); },
+        onActivePersist: id => { saveActive(id); scheduleUrlSync(); },
     });
+
+    // Selection / DEM / model changes alter the `c=` slice → keep the URL live.
+    config.subscribe(() => scheduleUrlSync());
 
     if (initialId) controller.select(initialId);
 }

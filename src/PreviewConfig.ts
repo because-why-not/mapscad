@@ -35,7 +35,6 @@ const LINK_PARAM = 'c'; // url hash: #c=<base64url-json>
 export class PreviewConfigStore {
     private cfg: PreviewConfig;
     private subs = new Set<(c: PreviewConfig) => void>();
-    private urlTimer = 0;
 
     // A share link (if the page was opened with one) wins over local storage, and is then
     // adopted as the local config. Otherwise restore the last local config, else defaults.
@@ -56,7 +55,6 @@ export class PreviewConfigStore {
             display: patch.display ? { ...this.cfg.display, ...patch.display } : this.cfg.display,
         };
         save(this.cfg);
-        this.syncUrl();
         for (const cb of this.subs) cb(this.cfg);
     }
 
@@ -65,22 +63,15 @@ export class PreviewConfigStore {
         return () => this.subs.delete(cb);
     }
 
-    /** A shareable absolute URL carrying the export-relevant slice (no display flags). */
-    shareLink(): string {
+    /**
+     * The export-relevant slice (DEM, selection, model — no display flags) encoded as the
+     * base64url value for the URL `c=` param. This is the opaque blob that only makes sense
+     * once an area is selected; index.ts owns the rest of the (human-readable) URL and only
+     * appends this when a selection exists.
+     */
+    encodeParam(): string {
         const slice = { v: VERSION, demId: this.cfg.demId, selection: this.cfg.selection, model: this.cfg.model };
-        const url = new URL(window.location.href);
-        url.hash = `${LINK_PARAM}=${base64UrlEncode(JSON.stringify(slice))}`;
-        return url.toString();
-    }
-
-    // Keep the address-bar URL in sync with the live config so copy-pasting it just works.
-    // Debounced + replaceState so dragging a slider doesn't flood the history API.
-    private syncUrl(): void {
-        clearTimeout(this.urlTimer);
-        this.urlTimer = window.setTimeout(() => {
-            try { history.replaceState(null, '', this.shareLink()); }
-            catch (e) { Env.error('sync url', e); }
-        }, 250);
+        return base64UrlEncode(JSON.stringify(slice));
     }
 }
 
@@ -99,7 +90,7 @@ function load(): PreviewConfig | null {
     } catch (e) { Env.error('load previewConfig', e); return null; }
 }
 
-/** Read a share link from the URL hash. The hash is kept live (syncUrl) once running. */
+/** Read the export config from the URL hash `c=` param (index.ts keeps the hash live). */
 function readLink(): PreviewConfig | null {
     try {
         const m = new RegExp(`(?:^|[#&])${LINK_PARAM}=([^&]+)`).exec(window.location.hash);
