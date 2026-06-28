@@ -208,6 +208,25 @@ describe('buildGeometry — oval footprint', () => {
     });
 });
 
+describe('buildGeometry — no-data carves holes', () => {
+    const N = NaN;
+
+    it('drops every cell touching a no-data corner and emits no NaN vertices', () => {
+        // 3×3 grid (2×2 = 4 cells); the SW corner is no-data → only the cell that uses it
+        // is dropped, leaving 3 kept cells (2 triangles each).
+        const grid = makeGrid([[N, 0, 0], [0, 0, 0], [0, 0, 0]]);
+        const geo = build(grid, { socketEnabled: false });
+        expect(geo.triangleCount).toBe(6);
+        expect([...geo.tiles[0].positions].some(v => Number.isNaN(v))).toBe(false);
+    });
+
+    it('emits nothing when the whole selection is no-data', () => {
+        const geo = build(makeGrid([[N, N], [N, N]]), { socketEnabled: true, socketSize: 5 });
+        expect(geo.tiles).toHaveLength(0);
+        expect(geo.vertexCount).toBe(0);
+    });
+});
+
 describe('MapModel.sanitize (via applySettings/getSettings)', () => {
     it('clamps out-of-range and non-finite settings', () => {
         const m = new MapModel({

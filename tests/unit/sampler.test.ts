@@ -64,10 +64,10 @@ describe('sampleHeights', () => {
         expect(g.zoom).toBe(14);
     });
 
-    it('fills all-no-data with a flat zero floor', () => {
+    it('leaves all-no-data cells as NaN (carved as holes later) with a zero reported range', () => {
         const data = new TerrariumMapData(flatRaster([0, 0, 0, 0])); // transparent
         const g = sampleHeights(CORNERS, data, 3, 3, 10, 10);
-        expect([...g.heights].every(h => h === 0)).toBe(true);
+        expect([...g.heights].every(h => Number.isNaN(h))).toBe(true);
         expect(g.minHeight).toBe(0);
         expect(g.maxHeight).toBe(0);
     });

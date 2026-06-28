@@ -148,12 +148,21 @@ export class MapModel {
         if (s.shape === SelectionShape.Oval) return this.buildOval(grid);
 
         const { cols, rows, widthMeters, heightMeters } = grid;
-        const nx = s.tilesEnabled ? Math.min(s.tilesX, cols - 1) : 1;
-        const ny = s.tilesEnabled ? Math.min(s.tilesY, rows - 1) : 1;
 
         // Elevation stage: run the per-cell processor chain (exaggeration, water, …) once,
         // up front, into a model-space height field both the surface and the socket read.
         const processed = this.applyElevation(grid);
+
+        // No-data carves holes: if any cell is missing, route through the masked builder
+        // (one solid with boundary walls, tiling ignored) so the model has no vertices over
+        // no-data. The fast shared-vertex grid path below stays byte-identical otherwise.
+        if (hasNoData(processed)) {
+            const keep = (cc: number, cr: number) => cellHasData(processed, cols, rows, cc, cr);
+            return this.buildKept(grid, processed, keep);
+        }
+
+        const nx = s.tilesEnabled ? Math.min(s.tilesX, cols - 1) : 1;
+        const ny = s.tilesEnabled ? Math.min(s.tilesY, rows - 1) : 1;
         // Lowest model-space surface (incl. water), so the socket floor sits below the
         // water too. Shared across tiles, so a multi-tile print stays level.
         const minY = minOf(processed);
@@ -284,11 +293,11 @@ export class MapModel {
      * is ignored for ovals (a single solid). The rectangle path is left exactly as-is.
      */
     private buildOval(grid: HeightGrid): ModelGeometry {
-        const { cols, rows, widthMeters, heightMeters } = grid;
-        const s = this.settings;
+        const { cols, rows } = grid;
 
         // A cell (cc,cr) spans grid columns cc..cc+1 and rows cr..cr+1; keep it if its
-        // centre is inside the unit ellipse mapped over the whole grid.
+        // centre is inside the unit ellipse AND all four corners carry data (no-data carves
+        // holes in the oval too).
         const inside = (cc: number, cr: number): boolean => {
             if (cc < 0 || cr < 0 || cc >= cols - 1 || cr >= rows - 1) return false;
             const du = 2 * ((cc + 0.5) / (cols - 1)) - 1;
@@ -297,13 +306,24 @@ export class MapModel {
         };
 
         const processed = this.applyElevation(grid);
+        const keep = (cc: number, cr: number) => inside(cc, cr) && cellHasData(processed, cols, rows, cc, cr);
+        return this.buildKept(grid, processed, keep);
+    }
+
+    /** Emit one masked solid over the cells kept by `keep`: top + (when socketed) base &
+     *  boundary walls. Shared by the oval and the no-data (hole-carving) rectangle path. */
+    private buildKept(
+        grid: HeightGrid, processed: Float32Array, keep: (cc: number, cr: number) => boolean,
+    ): ModelGeometry {
+        const { cols, rows, widthMeters, heightMeters } = grid;
+        const s = this.settings;
 
         // Lowest / highest surface over the KEPT region (so the socket floor and thickness
-        // reflect the oval, not the discarded corners).
+        // reflect the kept cells, not the discarded ones).
         let minSurf = Infinity, highY = -Infinity;
         for (let cr = 0; cr < rows - 1; cr++) {
             for (let cc = 0; cc < cols - 1; cc++) {
-                if (!inside(cc, cr)) continue;
+                if (!keep(cc, cr)) continue;
                 for (const [c, r] of [[cc, cr], [cc + 1, cr], [cc, cr + 1], [cc + 1, cr + 1]] as const) {
                     const y = processed[r * cols + c];
                     if (y < minSurf) minSurf = y;
@@ -318,7 +338,7 @@ export class MapModel {
             };
         }
 
-        const tile = this.buildMaskedTile(grid, processed, inside, minSurf);
+        const tile = this.buildMaskedTile(grid, processed, keep, minSurf);
         let minThickness = 0, maxThickness = 0, lowY = minSurf;
         if (s.socketEnabled) {
             const baseY = minSurf - Math.max(s.socketSize, SOCKET_FLOOR_OFFSET);
@@ -375,11 +395,26 @@ export class MapModel {
 
 }
 
-/** Smallest value in a float array (0 if empty / all non-finite). */
+/** Smallest value in a float array (0 if empty / all non-finite). NaN entries are skipped. */
 function minOf(a: Float32Array): number {
     let m = Infinity;
     for (let i = 0; i < a.length; i++) if (a[i] < m) m = a[i];
     return Number.isFinite(m) ? m : 0;
+}
+
+/** True if any cell is no-data (NaN) — the trigger to carve holes instead of a full sheet. */
+function hasNoData(a: Float32Array): boolean {
+    for (let i = 0; i < a.length; i++) if (Number.isNaN(a[i])) return true;
+    return false;
+}
+
+/** A cell (cc,cr) spans grid corners (cc..cc+1, cr..cr+1); printable only if all four carry
+ *  data. A single no-data corner drops the whole cell, so the hole follows the missing data. */
+function cellHasData(processed: Float32Array, cols: number, rows: number, cc: number, cr: number): boolean {
+    if (cc < 0 || cr < 0 || cc >= cols - 1 || cr >= rows - 1) return false;
+    const a = processed[cr * cols + cc], b = processed[cr * cols + cc + 1];
+    const c = processed[(cr + 1) * cols + cc], d = processed[(cr + 1) * cols + cc + 1];
+    return a === a && b === b && c === c && d === d; // NaN !== NaN
 }
 
 function sanitize(s: ModelSettings): ModelSettings {

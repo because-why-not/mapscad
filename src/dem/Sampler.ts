@@ -41,7 +41,7 @@ export function rectPoint(c: LonLat[], u: number, v: number): LonLat {
 /**
  * Walk a cols×rows grid over the rectangle, bilinear-sampling the DEM at each cell centre.
  * No-data corners are skipped in the blend so edges stay graceful; any cell with no valid
- * neighbour is filled with the lowest valid height so the mesh has a flat floor there.
+ * neighbour stays NaN so MapModel carves a hole there (no vertices over no-data).
  */
 export function sampleHeights(
     corners: LonLat[], data: TerrariumMapData, cols: number, rows: number,
@@ -78,11 +78,9 @@ export function sampleHeights(
         }
     }
 
-    // Replace no-data with the lowest valid height so the mesh has a flat floor there.
+    // No-data cells are left as NaN (MapModel skips them, carving a hole). Only the reported
+    // range collapses to 0 when the whole selection is no-data.
     if (!Number.isFinite(minHeight)) { minHeight = 0; maxHeight = 0; }
-    for (let i = 0; i < heights.length; i++) {
-        if (Number.isNaN(heights[i])) heights[i] = minHeight;
-    }
 
     return {
         heights, cols, rows, widthMeters, heightMeters, minHeight, maxHeight,
