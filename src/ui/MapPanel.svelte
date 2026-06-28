@@ -13,6 +13,7 @@
         onShadowsChange = () => {},
         onSelectToggle = () => {},
         onAspectChange = () => {},
+        onFetchTracks = () => {},
         initialZoom = 0,
         canCollapse = false,
         onCollapse = () => {},
@@ -34,6 +35,28 @@
     let shadowsOn = $state(untrack(() => initialShadows));
     // Which selection tool is active: 'none' | 'rectangle' | 'oval'.
     let activeTool = $state('none');
+    // True once a selection exists, so the "download tracks" button can appear. Pushed in
+    // from index.ts as the selection is drawn / cleared / restored.
+    let hasSelection = $state(false);
+    export function setHasSelection(has) { hasSelection = has; }
+    // Track-download button feedback: idle label, a busy flag, and a transient result note.
+    let tracksBusy = $state(false);
+    let tracksLabel = $state('Walking tracks');
+
+    async function fetchTracks() {
+        if (tracksBusy) return;
+        tracksBusy = true;
+        tracksLabel = 'Downloading…';
+        try {
+            const count = await onFetchTracks();
+            tracksLabel = count ? `${count} tracks` : 'No tracks found';
+        } catch {
+            tracksLabel = 'Download failed';
+        } finally {
+            tracksBusy = false;
+            setTimeout(() => tracksLabel = 'Walking tracks', 2500);
+        }
+    }
     // Aspect-ratio lock for drawing/resizing (session-only). 'free' or a 'w:h' preset, or
     // 'custom' with the two numbers below. Locked to width:height = halfX/halfY.
     let aspectMode = $state('free');
@@ -183,6 +206,19 @@
                         bind:value={customH} oninput={emitAspect} aria-label="Ratio height" />
                 </div>
             {/if}
+        {/if}
+
+        {#if hasSelection}
+            <!-- Download OSM walking tracks for the current selection and overlay them. -->
+            <button
+                class="btn btn-sm shadow-md border-0 bg-base-100 whitespace-nowrap"
+                title="Download walking tracks in the selected area"
+                onclick={fetchTracks}
+                disabled={tracksBusy}
+            >
+                {#if tracksBusy}<span class="loading loading-spinner loading-xs"></span>{/if}
+                {tracksLabel}
+            </button>
         {/if}
     </div>
 

@@ -11,6 +11,8 @@ import { MapController } from './MapController';
 import { OpenLayersEngine } from './engine/OpenLayersEngine';
 import { MapLibreTerrainEngine } from './engine/MapLibreTerrainEngine';
 import { SelectionArea, LonLat } from './SelectionArea';
+import { TrackOverlay } from './TrackOverlay';
+import { fetchWalkingTracks } from './osm/OverpassTracks';
 import { sampleSelectionHeights, rectExtent, groundResolution, tileCoverage } from './HeightSampler';
 import { TerrainPreview } from './TerrainPreview';
 import { MapModel, SelectionShape } from './MapModel';
@@ -47,6 +49,8 @@ const model = new MapModel();
 // config at construction.
 const config = new PreviewConfigStore();
 let currentCorners: LonLat[] | null = null;
+// OSM walking-track overlay on the OL 2D map; created once the OL map is ready.
+let trackOverlay: TrackOverlay | null = null;
 
 /** Compact toggle label for an elevation source name (drops the _elevation[_raw] tail). */
 function demLabel(name: string): string {
@@ -161,7 +165,9 @@ function onModelChange(): void {
 function onSelectionChange(corners: LonLat[] | null): void {
     config.update({ selection: corners });
     appInstance?.setPreviewVisible(!!corners); // App shows/hides the 3D panel
+    appInstance?.setHasSelection(!!corners);   // map panel shows/hides the track button
     currentCorners = corners;
+    trackOverlay?.clear();                      // any drawn tracks no longer match the area
     if (corners) resample();
     else model.setGrid(null); // notifies -> preview clears, stats null
 }
@@ -381,6 +387,14 @@ async function init(): Promise<void> {
                 }
             },
             onAspectChange: (ratio: number | null) => selection?.setAspect(ratio),
+            // Download OSM walking tracks for the current selection and overlay them on the
+            // map. Returns the count so the button can report it; throws bubble to the panel.
+            onFetchTracks: async () => {
+                if (!currentCorners) return 0;
+                const tracks = await fetchWalkingTracks(currentCorners);
+                trackOverlay?.setTracks(tracks);
+                return tracks.length;
+            },
             previewDems,
             initialPreviewDemId: initialDemId,
             previewZoomMin,
@@ -442,6 +456,7 @@ async function init(): Promise<void> {
     const olEngine = new OpenLayersEngine(maps, olMap => {
         if (selection) return;
         selection = new SelectionArea(olMap, { onChange: onUserSelectionChange });
+        trackOverlay = new TrackOverlay(olMap);
         const savedCorners = config.get().selection;
         if (savedCorners) {
             const shape = config.get().model.shape;
