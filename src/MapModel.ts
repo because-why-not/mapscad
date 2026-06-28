@@ -1,6 +1,7 @@
 import type { HeightGrid } from './HeightSampler';
 import {
-    type ElevationProcessor, type ElevationContext, HeightScaleProcessor, WaterProcessor,
+    type ElevationGridProcessor, TileDividerProcessor,
+    type ElevationValueProcessor, type ElevationContext, HeightScaleProcessor, WaterProcessor,
     type VertexProcessor, type VertexMesh, SocketProcessor,
 } from './model/processors';
 import { pushQuadOriented } from './model/geometry';
@@ -143,6 +144,9 @@ export class MapModel {
 
     private build(grid: HeightGrid): ModelGeometry {
         const s = this.settings;
+        // Grid stage: reshape the whole grid first (may change its dimensions), so both the
+        // oval and rectangle builders and the value chain see the result. Empty by default.
+        for (const gp of this.gridProcessors()) grid = gp.process(grid);
         // The oval footprint masks the sampled rectangle, so it gets its own builder
         // (per-cell solid with a boundary-following wall); the rectangle path is untouched.
         if (s.shape === SelectionShape.Oval) return this.buildOval(grid);
@@ -153,41 +157,23 @@ export class MapModel {
         // up front, into a model-space height field both the surface and the socket read.
         const processed = this.applyElevation(grid);
 
-        // No-data carves holes: if any cell is missing, route through the masked builder
-        // (one solid with boundary walls, tiling ignored) so the model has no vertices over
-        // no-data. The fast shared-vertex grid path below stays byte-identical otherwise.
+        // No-data carves holes: real gaps OR the tile dividers injected by gridProcessors().
+        // Route through the masked builder — one solid whose disconnected bodies ARE the tiles,
+        // each walled. The fast shared-vertex path below handles the un-tiled, gap-free case.
         if (hasNoData(processed)) {
             const keep = (cc: number, cr: number) => cellHasData(processed, cols, rows, cc, cr);
             return this.buildKept(grid, processed, keep);
         }
 
-        const nx = s.tilesEnabled ? Math.min(s.tilesX, cols - 1) : 1;
-        const ny = s.tilesEnabled ? Math.min(s.tilesY, rows - 1) : 1;
-        // Lowest model-space surface (incl. water), so the socket floor sits below the
-        // water too. Shared across tiles, so a multi-tile print stays level.
+        // Lowest model-space surface (incl. water), so the socket floor sits below the water.
         const minY = minOf(processed);
+        const tile = this.buildTile(grid, processed, 0, cols - 1, 0, rows - 1, 0, 0, minY);
 
-        const tiles: ModelTile[] = [];
-        let vertexCount = 0, triangleCount = 0;
         let lowY = Infinity, highY = -Infinity;
-        for (let ty = 0; ty < ny; ty++) {
-            const r0 = Math.round(ty * (rows - 1) / ny);
-            const r1 = Math.round((ty + 1) * (rows - 1) / ny);
-            if (r1 <= r0) continue;
-            for (let tx = 0; tx < nx; tx++) {
-                const c0 = Math.round(tx * (cols - 1) / nx);
-                const c1 = Math.round((tx + 1) * (cols - 1) / nx);
-                if (c1 <= c0) continue;
-                const tile = this.buildTile(grid, processed, c0, c1, r0, r1, tx, ty, minY);
-                tiles.push(tile);
-                vertexCount += tile.positions.length / 3;
-                triangleCount += tile.indices.length / 3;
-                for (let i = 1; i < tile.positions.length; i += 3) {
-                    const y = tile.positions[i];
-                    if (y < lowY) lowY = y;
-                    if (y > highY) highY = y;
-                }
-            }
+        for (let i = 1; i < tile.positions.length; i += 3) {
+            const y = tile.positions[i];
+            if (y < lowY) lowY = y;
+            if (y > highY) highY = y;
         }
         if (!Number.isFinite(lowY)) { lowY = 0; highY = 0; }
 
@@ -202,7 +188,9 @@ export class MapModel {
         }
 
         return {
-            tiles, widthMeters, heightMeters, vertexCount, triangleCount,
+            tiles: [tile], widthMeters, heightMeters,
+            vertexCount: tile.positions.length / 3,
+            triangleCount: tile.indices.length / 3,
             minY: lowY, maxY: highY,
             socketStartY: s.socketEnabled ? minY : null,
             minThickness, maxThickness,
@@ -253,11 +241,25 @@ export class MapModel {
 
     // --- processor chains ----------------------------------------------------
 
+    /** Grid-reshaping tools, applied to the whole grid before any value processing or
+     *  geometry (may change its dimensions: e.g. tile dividers, crop, resample). None are
+     *  wired to settings yet — TileDividerProcessor exists but isn't enabled here. */
+    private gridProcessors(): ElevationGridProcessor[] {
+        const s = this.settings;
+        // Tiling is expressed as a grid reshape: inject no-data divider lines so the hole
+        // path walls each block into its own body. Replaces the old per-block buildTile loop.
+        if (s.tilesEnabled && (s.tilesX > 1 || s.tilesY > 1)) {
+            const divider = new TileDividerProcessor(s.tilesX, s.tilesY);
+            return [divider];
+        }
+        return [];
+    }
+
     /** Elevation-domain tools, applied per cell to the height value (order matters: water
      *  runs after exaggeration so the waterline stays at its literal metres). */
-    private elevationProcessors(): ElevationProcessor[] {
+    private elevationValueProcessors(): ElevationValueProcessor[] {
         const s = this.settings;
-        const list: ElevationProcessor[] = [new HeightScaleProcessor(s.heightScale)];
+        const list: ElevationValueProcessor[] = [new HeightScaleProcessor(s.heightScale)];
         if (s.waterEnabled) list.push(new WaterProcessor(s.waterCutoff, s.waterLevel));
         return list;
     }
@@ -270,7 +272,7 @@ export class MapModel {
 
     /** Run the elevation chain over every cell to produce model-space heights (metres). */
     private applyElevation(grid: HeightGrid): Float32Array {
-        const procs = this.elevationProcessors();
+        const procs = this.elevationValueProcessors();
         const { heights, cols, rows } = grid;
         const out = new Float32Array(heights.length);
         for (let r = 0; r < rows; r++) {

@@ -1,8 +1,16 @@
 import { describe, it, expect } from 'vitest';
 import {
-    HeightScaleProcessor, WaterProcessor, SocketProcessor,
+    HeightScaleProcessor, WaterProcessor, SocketProcessor, TileDividerProcessor,
     type ElevationContext, type VertexMesh,
 } from '../../src/model/processors';
+import type { HeightGrid } from '../../src/HeightSampler';
+
+// A grid whose cell (r,c) encodes its coordinate as r*10+c, for easy identity checks.
+function coordGrid(cols: number, rows: number, w = 30, h = 30): HeightGrid {
+    const heights = new Float32Array(cols * rows);
+    for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) heights[r * cols + c] = r * 10 + c;
+    return { heights, cols, rows, widthMeters: w, heightMeters: h, minHeight: 0, maxHeight: 0, zoom: 14, tilesX: 1, tilesY: 1 };
+}
 
 // A throwaway elevation context; only `raw` matters to the built-in processors.
 const ctx = (raw: number): ElevationContext =>
@@ -37,6 +45,38 @@ describe('elevation chain reproduces surfaceY semantics', () => {
     });
     it('clamps below-cutoff to the literal water level (not scaled)', () => {
         expect(run(-5)).toBe(-50); // raw < 0 -> level, NOT -5*2
+    });
+});
+
+describe('TileDividerProcessor', () => {
+    it('injects a no-data divider with a duplicated seam and no lost values', () => {
+        // 4×4 grid, split into 2 column-blocks (1 row-block) → one vertical divider at col 2.
+        const out = new TileDividerProcessor(2, 1).process(coordGrid(4, 4));
+        // axisPlan(4,2) = [0,1,2,-1,2,3] → 6 cols; rows untouched → 4.
+        expect(out.cols).toBe(6);
+        expect(out.rows).toBe(4);
+        // The divider column (index 3) is all no-data…
+        for (let r = 0; r < out.rows; r++) expect(Number.isNaN(out.heights[r * out.cols + 3])).toBe(true);
+        // …and the seam (source col 2) survives on BOTH sides of it (cols 2 and 4), so no
+        // surface strip is lost at the cut.
+        for (let r = 0; r < out.rows; r++) {
+            expect(out.heights[r * out.cols + 2]).toBe(r * 10 + 2);
+            expect(out.heights[r * out.cols + 4]).toBe(r * 10 + 2);
+        }
+    });
+
+    it('grows the metre extents so per-cell spacing (terrain scale) is preserved', () => {
+        const out = new TileDividerProcessor(2, 1).process(coordGrid(4, 4, 30, 30));
+        expect(out.widthMeters).toBeCloseTo(30 * 5 / 3); // (6-1)/(4-1) more columns
+        expect(out.heightMeters).toBe(30);               // rows unchanged
+    });
+
+    it('is a no-op for a single block', () => {
+        const grid = coordGrid(4, 4);
+        const out = new TileDividerProcessor(1, 1).process(grid);
+        expect(out.cols).toBe(4);
+        expect(out.rows).toBe(4);
+        expect([...out.heights].some(Number.isNaN)).toBe(false);
     });
 });
 

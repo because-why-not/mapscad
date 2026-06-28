@@ -108,20 +108,50 @@ describe('buildGeometry — orientation is not mirrored', () => {
     });
 });
 
-describe('buildGeometry — tiling', () => {
-    it('splits into tilesX×tilesY independent solids sharing one base level', () => {
-        const grid = makeGrid([[0, 5, 0], [5, 9, 5], [0, 5, 0]]); // 3×3
-        const geo = build(grid, { tilesEnabled: true, tilesX: 2, tilesY: 2, socketEnabled: true, socketSize: 3 });
-        expect(geo.tiles).toHaveLength(4);
-        // Every tile's lowest vertex is the shared socket base — a multi-tile print stays level.
-        const bases = geo.tiles.map(t => Math.min(...ys(t)));
-        for (const b of bases) expect(b).toBeCloseTo(bases[0]);
+// Count disconnected bodies in a tile by welding vertices on rounded position (the mesh is
+// triangle soup, so index-keyed unioning would over-count).
+function connectedComponents(tile: ModelTile): number {
+    const p = tile.positions, idx = tile.indices;
+    const key = (i: number) => `${p[i * 3].toFixed(3)},${p[i * 3 + 1].toFixed(3)},${p[i * 3 + 2].toFixed(3)}`;
+    const id = new Map<string, number>();
+    const parent: number[] = [];
+    const find = (x: number): number => { while (parent[x] !== x) { parent[x] = parent[parent[x]]; x = parent[x]; } return x; };
+    const node = (i: number): number => {
+        const k = key(i);
+        let n = id.get(k);
+        if (n === undefined) { n = parent.length; parent.push(n); id.set(k, n); }
+        return n;
+    };
+    for (let i = 0; i < idx.length; i += 3) {
+        const a = node(idx[i]), b = node(idx[i + 1]), c = node(idx[i + 2]);
+        parent[find(a)] = find(b);
+        parent[find(b)] = find(c);
+    }
+    const roots = new Set<number>();
+    for (let i = 0; i < parent.length; i++) roots.add(find(i));
+    return roots.size;
+}
+
+describe('buildGeometry — tiling (no-data dividers → separate bodies in one solid)', () => {
+    // A 5×5 grid splits cleanly into 2×2 blocks (the divider falls at the midpoints).
+    const grid5 = makeGrid(Array.from({ length: 5 }, (_, r) => Array.from({ length: 5 }, (_, c) => r + c)));
+
+    it('emits ONE tile holding tilesX×tilesY disconnected bodies', () => {
+        const geo = build(grid5, { tilesEnabled: true, tilesX: 2, tilesY: 2, socketEnabled: true, socketSize: 3 });
+        expect(geo.tiles).toHaveLength(1);
+        expect(connectedComponents(geo.tiles[0])).toBe(4);
     });
 
-    it('clamps tile counts to the grid (cols-1 / rows-1)', () => {
-        const grid = makeGrid([[0, 1, 2], [3, 4, 5], [6, 7, 8]]); // 3×3 → max 2×2 tiles
-        const geo = build(grid, { tilesEnabled: true, tilesX: 10, tilesY: 10, socketEnabled: false });
-        expect(geo.tiles).toHaveLength(4);
+    it('all bodies share one socket base level — a multi-tile print stays level', () => {
+        const geo = build(grid5, { tilesEnabled: true, tilesX: 2, tilesY: 1, socketEnabled: true, socketSize: 3 });
+        expect(connectedComponents(geo.tiles[0])).toBe(2);
+        expect(Math.min(...ys(geo.tiles[0]))).toBeCloseTo(geo.minY); // shared floor
+    });
+
+    it('a single block is the fast un-divided path (one body)', () => {
+        const geo = build(grid5, { tilesEnabled: true, tilesX: 1, tilesY: 1 });
+        expect(geo.tiles).toHaveLength(1);
+        expect(connectedComponents(geo.tiles[0])).toBe(1);
     });
 });
 

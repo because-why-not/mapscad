@@ -1,21 +1,18 @@
 import type { MapModel, ModelGeometry, ModelTile } from './MapModel';
 
 /**
- * Serialises a MapModel's neutral geometry to binary STL. It does no geometry math of
- * its own — it consumes exactly the same buffers the preview renders, so what you see is
- * what you export. When the model is split into tiles, each tile is written as its own
- * file so it can be printed individually.
+ * Serialises a MapModel's neutral geometry to a single binary STL. It does no geometry math
+ * of its own — it consumes exactly the same buffers the preview renders, so what you see is
+ * what you export. Tiling now produces one solid whose blocks are disconnected bodies (the
+ * tile dividers separate them), so the whole model is written to one file; a slicer can
+ * "split to objects" to print/colour each body separately.
  */
 
 export function exportModelStl(model: MapModel, baseName = 'mapscad'): void {
     const geo = model.buildGeometry();
     if (!geo || geo.tiles.length === 0) return;
-    const multi = geo.tiles.length > 1;
-    for (const tile of geo.tiles) {
-        const blob = new Blob([tileToBinaryStl(tile)], { type: 'application/octet-stream' });
-        const suffix = multi ? `_${tile.ix0}_${tile.iy0}` : '';
-        download(blob, `${baseName}${suffix}.stl`);
-    }
+    const blob = new Blob([geometryToBinaryStl(geo.tiles)], { type: 'application/octet-stream' });
+    download(blob, `${baseName}.stl`);
 }
 
 /** Total triangles that would be written (handy for memory/UI checks before export). */
@@ -23,28 +20,35 @@ export function triangleCount(geo: ModelGeometry): number {
     return geo.triangleCount;
 }
 
-function tileToBinaryStl({ positions, indices }: ModelTile): ArrayBuffer {
-    const triCount = indices.length / 3;
+/** All tiles concatenated into one binary STL — each tile keeps its own (disconnected)
+ *  triangles, so distinct bodies survive as distinct components in the single file. */
+function geometryToBinaryStl(tiles: ModelTile[]): ArrayBuffer {
+    let triCount = 0;
+    for (const t of tiles) triCount += t.indices.length / 3;
+
     const buffer = new ArrayBuffer(80 + 4 + triCount * 50); // header + count + 50B/tri
     const view = new DataView(buffer);
     view.setUint32(80, triCount, true);
 
     let offset = 84;
-    for (let t = 0; t < triCount; t++) {
-        const ia = indices[t * 3], ib = indices[t * 3 + 1], ic = indices[t * 3 + 2];
-        const n = unitNormal(positions, ia, ib, ic);
-        view.setFloat32(offset, n.x, true);
-        view.setFloat32(offset + 4, n.y, true);
-        view.setFloat32(offset + 8, n.z, true);
-        offset += 12;
-        for (const idx of [ia, ib, ic]) {
-            view.setFloat32(offset, positions[idx * 3], true);
-            view.setFloat32(offset + 4, positions[idx * 3 + 1], true);
-            view.setFloat32(offset + 8, positions[idx * 3 + 2], true);
+    for (const { positions, indices } of tiles) {
+        const tris = indices.length / 3;
+        for (let t = 0; t < tris; t++) {
+            const ia = indices[t * 3], ib = indices[t * 3 + 1], ic = indices[t * 3 + 2];
+            const n = unitNormal(positions, ia, ib, ic);
+            view.setFloat32(offset, n.x, true);
+            view.setFloat32(offset + 4, n.y, true);
+            view.setFloat32(offset + 8, n.z, true);
             offset += 12;
+            for (const idx of [ia, ib, ic]) {
+                view.setFloat32(offset, positions[idx * 3], true);
+                view.setFloat32(offset + 4, positions[idx * 3 + 1], true);
+                view.setFloat32(offset + 8, positions[idx * 3 + 2], true);
+                offset += 12;
+            }
+            view.setUint16(offset, 0, true); // attribute byte count
+            offset += 2;
         }
-        view.setUint16(offset, 0, true); // attribute byte count
-        offset += 2;
     }
     return buffer;
 }
