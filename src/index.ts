@@ -12,7 +12,8 @@ import { OpenLayersEngine } from './engine/OpenLayersEngine';
 import { MapLibreTerrainEngine } from './engine/MapLibreTerrainEngine';
 import { SelectionArea, LonLat } from './SelectionArea';
 import { TrackOverlay } from './TrackOverlay';
-import { fetchWalkingTracks } from './osm/OverpassTracks';
+import { fetchWalkingTracks, type Track } from './osm/OverpassTracks';
+import { trackDistanceField } from './osm/trackRaster';
 import { sampleSelectionHeights, rectExtent, groundResolution, tileCoverage } from './HeightSampler';
 import { TerrainPreview } from './TerrainPreview';
 import { MapModel, SelectionShape } from './MapModel';
@@ -51,6 +52,9 @@ const config = new PreviewConfigStore();
 let currentCorners: LonLat[] | null = null;
 // OSM walking-track overlay on the OL 2D map; created once the OL map is ready.
 let trackOverlay: TrackOverlay | null = null;
+// The tracks last downloaded for the current selection (lon/lat polylines). Kept so they can
+// be re-rasterised into the model's distance field when added to the preview or on resample.
+let currentTracks: Track[] | null = null;
 
 /** Compact toggle label for an elevation source name (drops the _elevation[_raw] tail). */
 function demLabel(name: string): string {
@@ -114,6 +118,7 @@ async function resample(): Promise<void> {
         });
         if (abort.signal.aborted) return;
         model.setGrid(grid); // notifies -> preview + stats rebuild from the model
+        syncTrackField(); // re-rasterise tracks (if any) to the new grid dimensions
         Env.log(`[3d] terrain regenerated in ${Math.round(performance.now() - t0)} ms`);
     } catch (e) {
         if ((e as { name?: string })?.name === 'AbortError') Env.log('[3d] terrain build cancelled');
@@ -126,6 +131,17 @@ async function resample(): Promise<void> {
 /** User clicked Cancel on the loading bar — stop the in-flight build, keep the old preview. */
 function cancelResample(): void {
     resampleAbort?.abort();
+}
+
+/** Rasterise the current tracks into a per-cell distance field aligned to the model's grid and
+ *  hand it to the model (or clear it). Called whenever the tracks or the grid change. */
+function syncTrackField(): void {
+    const grid = model.getGrid();
+    if (!currentTracks || !currentCorners || !grid) { model.setTrackDistance(null); return; }
+    const field = trackDistanceField(
+        currentCorners, currentTracks, grid.cols, grid.rows, grid.widthMeters, grid.heightMeters,
+    );
+    model.setTrackDistance(field);
 }
 
 // Resampling hits the network, so changes to zoom / resolution limit are debounced.
@@ -167,7 +183,11 @@ function onSelectionChange(corners: LonLat[] | null): void {
     appInstance?.setPreviewVisible(!!corners); // App shows/hides the 3D panel
     appInstance?.setHasSelection(!!corners);   // map panel shows/hides the track button
     currentCorners = corners;
-    trackOverlay?.clear();                      // any drawn tracks no longer match the area
+    // Any downloaded tracks no longer match the new area: drop them + the preview section.
+    trackOverlay?.clear();
+    currentTracks = null;
+    model.setTrackDistance(null);
+    appInstance?.setTracksAvailable(false);
     if (corners) resample();
     else model.setGrid(null); // notifies -> preview clears, stats null
 }
@@ -392,8 +412,16 @@ async function init(): Promise<void> {
             onFetchTracks: async () => {
                 if (!currentCorners) return 0;
                 const tracks = await fetchWalkingTracks(currentCorners);
+                currentTracks = tracks;
                 trackOverlay?.setTracks(tracks);
                 return tracks.length;
+            },
+            // Push the downloaded tracks into the model: rasterise them to the grid and reveal
+            // the preview's Tracks section so the raise can be configured.
+            onAddTracksToPreview: () => {
+                if (!currentTracks?.length) return;
+                syncTrackField();
+                appInstance?.setTracksAvailable(true);
             },
             previewDems,
             initialPreviewDemId: initialDemId,

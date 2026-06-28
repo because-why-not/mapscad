@@ -81,6 +81,30 @@ export class TileDividerProcessor implements ElevationGridProcessor {
     }
 }
 
+/**
+ * Raises every cell within `radius` metres of an OSM track by `raise` metres, from a precomputed
+ * per-cell distance field (metres to the nearest track, see osm/trackRaster.ts). A GRID
+ * processor, so it runs on the freshly sampled grid — its dims match the field, and it runs
+ * before tiling and before the value chain, so the raised path then flows through water/scale
+ * like any other terrain. A no-op if the field doesn't match the grid (e.g. a stale field after
+ * a resample) or the raise is zero.
+ */
+export class TrackRaiseProcessor implements ElevationGridProcessor {
+    readonly id = 'trackRaise';
+    constructor(private distance: Float32Array, private raise: number, private radius: number) {}
+
+    process(grid: HeightGrid): HeightGrid {
+        const { heights } = grid;
+        if (this.distance.length !== heights.length || this.raise === 0 || this.radius <= 0) return grid;
+        const out = new Float32Array(heights);
+        for (let i = 0; i < out.length; i++) {
+            if (Number.isNaN(out[i])) continue;          // leave no-data holes alone
+            if (this.distance[i] <= this.radius) out[i] += this.raise;
+        }
+        return { ...grid, heights: out };
+    }
+}
+
 // --- elevation value stage ---------------------------------------------------
 
 /** Per-cell context handed to an ElevationValueProcessor. `raw` is the original sampled

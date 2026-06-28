@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
     HeightScaleProcessor, WaterProcessor, LowCutProcessor, SocketProcessor, TileDividerProcessor,
-    type ElevationContext, type VertexMesh,
+    TrackRaiseProcessor, type ElevationContext, type VertexMesh,
 } from '../../src/model/processors';
 import type { HeightGrid } from '../../src/HeightSampler';
 
@@ -87,6 +87,32 @@ describe('TileDividerProcessor', () => {
         expect(out.cols).toBe(4);
         expect(out.rows).toBe(4);
         expect([...out.heights].some(Number.isNaN)).toBe(false);
+    });
+});
+
+describe('TrackRaiseProcessor', () => {
+    // 4-cell grid; distance field marks cells 0 and 2 as on/near a track, 1 and 3 as far.
+    const grid = (heights: number[]): HeightGrid =>
+        ({ heights: new Float32Array(heights), cols: 2, rows: 2, widthMeters: 10, heightMeters: 10, minHeight: 0, maxHeight: 0, zoom: 14, tilesX: 1, tilesY: 1 });
+
+    it('raises cells within the radius by the raise amount, leaving far cells untouched', () => {
+        const dist = new Float32Array([0, 50, 8, 50]); // cells 0 & 2 within 10 m
+        const out = new TrackRaiseProcessor(dist, 3, 10).process(grid([100, 100, 100, 100]));
+        expect([...out.heights]).toEqual([103, 100, 103, 100]);
+    });
+
+    it('leaves no-data (NaN) cells as holes even when within the radius', () => {
+        const dist = new Float32Array([0, 0, 0, 0]);
+        const out = new TrackRaiseProcessor(dist, 5, 10).process(grid([NaN, 10, 10, 10]));
+        expect(Number.isNaN(out.heights[0])).toBe(true);
+        expect(out.heights[1]).toBe(15);
+    });
+
+    it('is a no-op when the field length does not match the grid', () => {
+        const dist = new Float32Array([0, 0, 0]); // wrong length (3 ≠ 4)
+        const g = grid([1, 2, 3, 4]);
+        const out = new TrackRaiseProcessor(dist, 5, 10).process(g);
+        expect(out).toBe(g);
     });
 });
 

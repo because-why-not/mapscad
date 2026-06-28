@@ -15,6 +15,7 @@
         onSelectToggle = () => {},
         onAspectChange = () => {},
         onFetchTracks = () => {},
+        onAddTracksToPreview = () => {},
         initialMapZoom = 0,
         // 3D-view menu (forwarded to PreviewPanel)
         previewDems = [],
@@ -66,6 +67,7 @@
     export function setSelectActive(active) { mapPanel?.setSelectActive(active); }
     export function setSelectTool(tool) { mapPanel?.setSelectTool(tool); }
     export function setHasSelection(has) { mapPanel?.setHasSelection(has); }
+    export function setTracksAvailable(has) { previewPanel?.setTracksAvailable(has); }
     export function setMapZoom(z) { mapPanel?.setZoom(z); }
     export function setPreviewStats(stats) { previewPanel?.setPreviewStats(stats); }
     export function setPreviewLoading(state) { previewPanel?.setPreviewLoading(state); }
@@ -137,6 +139,7 @@
         {onSelectToggle}
         {onAspectChange}
         {onFetchTracks}
+        {onAddTracksToPreview}
         initialZoom={initialMapZoom}
         canCollapse={showBoth}
         onCollapse={collapseMap}

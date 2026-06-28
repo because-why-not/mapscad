@@ -14,6 +14,7 @@
         onSelectToggle = () => {},
         onAspectChange = () => {},
         onFetchTracks = () => {},
+        onAddTracksToPreview = () => {},
         initialZoom = 0,
         canCollapse = false,
         onCollapse = () => {},
@@ -38,7 +39,10 @@
     // True once a selection exists, so the "download tracks" button can appear. Pushed in
     // from index.ts as the selection is drawn / cleared / restored.
     let hasSelection = $state(false);
-    export function setHasSelection(has) { hasSelection = has; }
+    // True once a download has returned tracks for the current selection, gating the
+    // "Add to preview" button. Reset whenever the selection changes (tracks no longer match).
+    let tracksReady = $state(false);
+    export function setHasSelection(has) { hasSelection = has; tracksReady = false; }
     // Track-download button feedback: idle label, a busy flag, and a transient result note.
     let tracksBusy = $state(false);
     let tracksLabel = $state('Walking tracks');
@@ -49,6 +53,7 @@
         tracksLabel = 'Downloading…';
         try {
             const count = await onFetchTracks();
+            tracksReady = count > 0;
             tracksLabel = count ? `${count} tracks` : 'No tracks found';
         } catch {
             tracksLabel = 'Download failed';
@@ -219,6 +224,13 @@
                 {#if tracksBusy}<span class="loading loading-spinner loading-xs"></span>{/if}
                 {tracksLabel}
             </button>
+            <!-- Hand the downloaded tracks to the 3D preview (reveals its Tracks section). -->
+            <button
+                class="btn btn-sm shadow-md border-0 bg-base-100 whitespace-nowrap"
+                title="Add the downloaded tracks to the 3D preview"
+                onclick={onAddTracksToPreview}
+                disabled={!tracksReady}
+            >Add to preview</button>
         {/if}
     </div>
 

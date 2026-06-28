@@ -1,6 +1,6 @@
 import type { HeightGrid } from './HeightSampler';
 import {
-    type ElevationGridProcessor, TileDividerProcessor,
+    type ElevationGridProcessor, TileDividerProcessor, TrackRaiseProcessor,
     type ElevationValueProcessor, type ElevationContext, HeightScaleProcessor, WaterProcessor, LowCutProcessor,
     type VertexProcessor, type VertexMesh, SocketProcessor,
 } from './model/processors';
@@ -32,6 +32,9 @@ export interface ModelSettings {
     waterLevel: number;      // metres: height water is rendered at (e.g. -50 for a clear step)
     lowCutEnabled: boolean;  // replace everything below lowCutLevel with no-data (carve a hole)
     lowCutLevel: number;     // metres (running height, after water, before scale): below this → a hole
+    tracksEnabled: boolean;  // raise terrain along downloaded OSM tracks (needs a track field set)
+    trackRaise: number;      // metres to raise cells near a track by
+    trackRadius: number;     // metres: cells within this distance of a track are raised
     shape: SelectionShape;   // footprint cut from the (still rectangular) sampled grid
 }
 
@@ -77,6 +80,9 @@ export const DEFAULT_MODEL_SETTINGS: ModelSettings = {
     waterLevel: 0,
     lowCutEnabled: false,
     lowCutLevel: 0,
+    tracksEnabled: false,
+    trackRaise: 2,
+    trackRadius: 10,
     shape: SelectionShape.Rectangle,
 };
 
@@ -112,6 +118,9 @@ const SOCKET_FLOOR_OFFSET = 0.1;
  */
 export class MapModel {
     private grid: HeightGrid | null = null;
+    // Per-cell distance (metres) to the nearest OSM track, aligned to the current grid; feeds
+    // TrackRaiseProcessor. null = no tracks loaded. index.ts keeps it in sync with the grid.
+    private trackDistance: Float32Array | null = null;
     private settings: ModelSettings;
     private listeners = new Set<() => void>();
     private cache: ModelGeometry | null = null;
@@ -145,6 +154,14 @@ export class MapModel {
 
     getGrid(): HeightGrid | null {
         return this.grid;
+    }
+
+    /** Set the per-cell track distance field (metres to nearest track), aligned to the current
+     *  grid, or null to clear it. Rebuilds so the TrackRaiseProcessor picks it up. */
+    setTrackDistance(field: Float32Array | null): void {
+        if (this.trackDistance === field) return; // no-op (covers clearing an already-empty field)
+        this.trackDistance = field;
+        this.notify();
     }
 
     hasModel(): boolean {
@@ -269,19 +286,24 @@ export class MapModel {
 
     // --- processor chains ----------------------------------------------------
 
-    /** Grid-reshaping tools, applied to the whole grid before any value processing or
-     *  geometry (may change its dimensions: e.g. tile dividers, crop, resample). Today only
-     *  tiling is wired up — `tilesEnabled` injects a TileDividerProcessor; future reshapers
-     *  (crop, resample, composite sources) slot into this same list. */
+    /** Grid-reshaping tools, applied to the whole grid before any value processing or geometry.
+     *  Some may change its dimensions (tile dividers). Today: track raise (OSM tracks, when a
+     *  distance field is set) then tiling; future reshapers (crop, resample, composite sources)
+     *  slot into this same list. */
     private gridProcessors(): ElevationGridProcessor[] {
         const s = this.settings;
+        const list: ElevationGridProcessor[] = [];
+        // Track raise runs FIRST, on the freshly sampled grid (its dims match the distance
+        // field), before tiling injects dividers and before the value chain.
+        if (s.tracksEnabled && this.trackDistance) {
+            list.push(new TrackRaiseProcessor(this.trackDistance, s.trackRaise, s.trackRadius));
+        }
         // Tiling is expressed as a grid reshape: inject no-data divider lines so the hole
         // path walls each block into its own body. Replaces the old per-block buildTile loop.
         if (s.tilesEnabled && (s.tilesX > 1 || s.tilesY > 1)) {
-            const divider = new TileDividerProcessor(s.tilesX, s.tilesY);
-            return [divider];
+            list.push(new TileDividerProcessor(s.tilesX, s.tilesY));
         }
-        return [];
+        return list;
     }
 
     /** Elevation-domain tools, applied per cell to the height value. Order matters and is the
@@ -469,6 +491,9 @@ function sanitize(s: ModelSettings): ModelSettings {
         waterLevel: num(s.waterLevel, 0),
         lowCutEnabled: !!s.lowCutEnabled,
         lowCutLevel: num(s.lowCutLevel, 0),
+        tracksEnabled: !!s.tracksEnabled,
+        trackRaise: num(s.trackRaise, 2),
+        trackRadius: Math.max(0, num(s.trackRadius, 10)),
         shape: s.shape === SelectionShape.Oval ? SelectionShape.Oval : SelectionShape.Rectangle,
     };
 }

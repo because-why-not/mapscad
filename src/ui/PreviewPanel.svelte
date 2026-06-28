@@ -70,10 +70,17 @@
     let waterLevel = $state(untrack(() => initialSettings.waterLevel ?? 0));
     let lowCutEnabled = $state(untrack(() => initialSettings.lowCutEnabled ?? false));
     let lowCutLevel = $state(untrack(() => initialSettings.lowCutLevel ?? 0));
+    let tracksEnabled = $state(untrack(() => initialSettings.tracksEnabled ?? false));
+    let trackRaise = $state(untrack(() => initialSettings.trackRaise ?? 2));
+    let trackRadius = $state(untrack(() => initialSettings.trackRadius ?? 10));
     let smoothShading = $state(untrack(() => initialSettings.smoothShading ?? true));
 
+    // Whether OSM tracks have been added from the map; gates the Tracks section's visibility.
+    let tracksAvailable = $state(false);
+    export function setTracksAvailable(has) { tracksAvailable = has; }
+
     function settings() {
-        return { heightZoom, resolutionLimit, heightScale, socketEnabled, socketSize, tilesEnabled, tilesX, tilesY, waterEnabled, waterCutoff, waterLevel, lowCutEnabled, lowCutLevel, smoothShading };
+        return { heightZoom, resolutionLimit, heightScale, socketEnabled, socketSize, tilesEnabled, tilesX, tilesY, waterEnabled, waterCutoff, waterLevel, lowCutEnabled, lowCutLevel, tracksEnabled, trackRaise, trackRadius, smoothShading };
     }
     function emit() { onSettingsChange(settings()); }
     function selectAll(e) { e.target.select(); }
@@ -254,6 +261,29 @@
                     </div>
                 {/if}
             </div>
+
+            <!-- Tracks (only once OSM tracks have been added from the map) -->
+            {#if tracksAvailable}
+                <div class="px-4 py-1 mt-2 text-xs font-bold uppercase tracking-wider opacity-50">Tracks</div>
+                <div class="px-4 py-2">
+                    <label class="flex items-center gap-2 cursor-pointer">
+                        <input type="checkbox" class="checkbox checkbox-sm" bind:checked={tracksEnabled} onchange={emit} />
+                        <span class="text-sm">Raise along tracks</span>
+                    </label>
+                    {#if tracksEnabled}
+                        <div class="mt-2 flex items-center gap-2">
+                            <span class="text-sm flex-1">Raise by</span>
+                            <input type="number" step="0.5" class="input input-sm input-bordered w-24" bind:value={trackRaise} onfocus={selectAll} onchange={emit} />
+                            <span class="text-sm opacity-60">m</span>
+                        </div>
+                        <div class="mt-2 flex items-center gap-2">
+                            <span class="text-sm flex-1">Within</span>
+                            <input type="number" min="0" step="1" class="input input-sm input-bordered w-24" bind:value={trackRadius} onfocus={selectAll} onchange={emit} />
+                            <span class="text-sm opacity-60">m</span>
+                        </div>
+                    {/if}
+                </div>
+            {/if}
 
             <!-- Preview (display only; does not affect the exported model) -->
             <div class="px-4 py-1 mt-2 text-xs font-bold uppercase tracking-wider opacity-50">Preview</div>
