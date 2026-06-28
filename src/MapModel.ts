@@ -1,4 +1,9 @@
 import type { HeightGrid } from './HeightSampler';
+import {
+    type ElevationProcessor, type ElevationContext, HeightScaleProcessor, WaterProcessor,
+    type VertexProcessor, type VertexMesh, SocketProcessor,
+} from './model/processors';
+import { pushQuadOriented } from './model/geometry';
 
 /**
  * The single canonical 3D model. Everything that isn't sampling flows through here:
@@ -146,9 +151,12 @@ export class MapModel {
         const nx = s.tilesEnabled ? Math.min(s.tilesX, cols - 1) : 1;
         const ny = s.tilesEnabled ? Math.min(s.tilesY, rows - 1) : 1;
 
+        // Elevation stage: run the per-cell processor chain (exaggeration, water, …) once,
+        // up front, into a model-space height field both the surface and the socket read.
+        const processed = this.applyElevation(grid);
         // Lowest model-space surface (incl. water), so the socket floor sits below the
         // water too. Shared across tiles, so a multi-tile print stays level.
-        const minY = this.effectiveMinY(grid);
+        const minY = minOf(processed);
 
         const tiles: ModelTile[] = [];
         let vertexCount = 0, triangleCount = 0;
@@ -161,7 +169,7 @@ export class MapModel {
                 const c0 = Math.round(tx * (cols - 1) / nx);
                 const c1 = Math.round((tx + 1) * (cols - 1) / nx);
                 if (c1 <= c0) continue;
-                const tile = this.buildTile(grid, c0, c1, r0, r1, tx, ty, minY);
+                const tile = this.buildTile(grid, processed, c0, c1, r0, r1, tx, ty, minY);
                 tiles.push(tile);
                 vertexCount += tile.positions.length / 3;
                 triangleCount += tile.indices.length / 3;
@@ -194,10 +202,10 @@ export class MapModel {
 
     /** Build one independent solid spanning grid columns c0..c1 and rows r0..r1. */
     private buildTile(
-        grid: HeightGrid, c0: number, c1: number, r0: number, r1: number, ix0: number, iy0: number,
-        minY: number,
+        grid: HeightGrid, processed: Float32Array,
+        c0: number, c1: number, r0: number, r1: number, ix0: number, iy0: number, minY: number,
     ): ModelTile {
-        const { heights, cols, rows, widthMeters, heightMeters } = grid;
+        const { cols, rows, widthMeters, heightMeters } = grid;
         const tcols = c1 - c0 + 1, trows = r1 - r0 + 1;
 
         // Model-centred metre coordinates. The sampler walks west→east (c) and
@@ -206,7 +214,7 @@ export class MapModel {
         // mesh and exported STL are not mirrored.
         const X = (c: number) => -widthMeters / 2 + (c / (cols - 1)) * widthMeters;
         const Z = (r: number) => heightMeters / 2 - (r / (rows - 1)) * heightMeters;
-        const Y = (c: number, r: number) => this.surfaceY(heights[r * cols + c]);
+        const Y = (c: number, r: number) => processed[r * cols + c];
 
         const positions: number[] = [];
         const indices: number[] = [];
@@ -222,13 +230,10 @@ export class MapModel {
             }
         }
 
-        if (this.settings.socketEnabled) {
-            // The socket is a print/handling feature, so its thickness is literal metres
-            // and is NOT affected by heightScale — only the terrain itself is exaggerated.
-            // Keep at least a sliver so a "size 0" socket is still a handleable solid.
-            const baseY = minY - Math.max(this.settings.socketSize, SOCKET_FLOOR_OFFSET);
-            this.addSocket(positions, indices, tcols, trows, baseY);
-        }
+        // Vertex stage: each processor mutates this solid's mesh (e.g. the socket closes the
+        // open sheet into a watertight solid). minY is the model-wide floor anchor.
+        const mesh: VertexMesh = { positions, indices, tcols, trows, minY };
+        for (const vp of this.vertexProcessors()) vp.process(mesh);
 
         return {
             positions: new Float32Array(positions),
@@ -237,27 +242,39 @@ export class MapModel {
         };
     }
 
-    /**
-     * Model-space height (Y, metres) for a raw sample. Terrain is exaggerated by
-     * heightScale; water is a fixed plane at the literal waterLevel — exaggeration must
-     * not move the waterline (same rule as the socket thickness).
-     */
-    private surfaceY(h: number): number {
+    // --- processor chains ----------------------------------------------------
+
+    /** Elevation-domain tools, applied per cell to the height value (order matters: water
+     *  runs after exaggeration so the waterline stays at its literal metres). */
+    private elevationProcessors(): ElevationProcessor[] {
         const s = this.settings;
-        if (s.waterEnabled && h < s.waterCutoff) return s.waterLevel; // literal metres
-        return h * s.heightScale;
+        const list: ElevationProcessor[] = [new HeightScaleProcessor(s.heightScale)];
+        if (s.waterEnabled) list.push(new WaterProcessor(s.waterCutoff, s.waterLevel));
+        return list;
     }
 
-    /** Lowest model-space surface Y once the water cutoff applies (drives the socket floor). */
-    private effectiveMinY(grid: HeightGrid): number {
+    /** Geometry-domain tools, applied to each emitted solid's mesh. */
+    private vertexProcessors(): VertexProcessor[] {
         const s = this.settings;
-        if (!s.waterEnabled) return grid.minHeight * s.heightScale;
-        let min = Infinity;
-        for (let i = 0; i < grid.heights.length; i++) {
-            const v = this.surfaceY(grid.heights[i]);
-            if (v < min) min = v;
+        return s.socketEnabled ? [new SocketProcessor(s.socketSize, SOCKET_FLOOR_OFFSET)] : [];
+    }
+
+    /** Run the elevation chain over every cell to produce model-space heights (metres). */
+    private applyElevation(grid: HeightGrid): Float32Array {
+        const procs = this.elevationProcessors();
+        const { heights, cols, rows } = grid;
+        const out = new Float32Array(heights.length);
+        for (let r = 0; r < rows; r++) {
+            for (let c = 0; c < cols; c++) {
+                const idx = r * cols + c;
+                const raw = heights[idx];
+                const ctx: ElevationContext = { raw, col: c, row: r, cols, rows, grid };
+                let v = raw;
+                for (const p of procs) v = p.process(v, ctx);
+                out[idx] = v;
+            }
         }
-        return Number.isFinite(min) ? min : grid.minHeight * s.heightScale;
+        return out;
     }
 
     /**
@@ -279,6 +296,8 @@ export class MapModel {
             return du * du + dv * dv <= 1;
         };
 
+        const processed = this.applyElevation(grid);
+
         // Lowest / highest surface over the KEPT region (so the socket floor and thickness
         // reflect the oval, not the discarded corners).
         let minSurf = Infinity, highY = -Infinity;
@@ -286,7 +305,7 @@ export class MapModel {
             for (let cc = 0; cc < cols - 1; cc++) {
                 if (!inside(cc, cr)) continue;
                 for (const [c, r] of [[cc, cr], [cc + 1, cr], [cc, cr + 1], [cc + 1, cr + 1]] as const) {
-                    const y = this.surfaceY(grid.heights[r * cols + c]);
+                    const y = processed[r * cols + c];
                     if (y < minSurf) minSurf = y;
                     if (y > highY) highY = y;
                 }
@@ -299,7 +318,7 @@ export class MapModel {
             };
         }
 
-        const tile = this.buildMaskedTile(grid, inside, minSurf);
+        const tile = this.buildMaskedTile(grid, processed, inside, minSurf);
         let minThickness = 0, maxThickness = 0, lowY = minSurf;
         if (s.socketEnabled) {
             const baseY = minSurf - Math.max(s.socketSize, SOCKET_FLOOR_OFFSET);
@@ -319,13 +338,13 @@ export class MapModel {
 
     /** One solid over the kept cells: top + (when socketed) base & boundary walls. */
     private buildMaskedTile(
-        grid: HeightGrid, inside: (cc: number, cr: number) => boolean, minSurf: number,
+        grid: HeightGrid, processed: Float32Array, inside: (cc: number, cr: number) => boolean, minSurf: number,
     ): ModelTile {
-        const { heights, cols, rows, widthMeters, heightMeters } = grid;
+        const { cols, rows, widthMeters, heightMeters } = grid;
         const X = (c: number) => -widthMeters / 2 + (c / (cols - 1)) * widthMeters;
         const Z = (r: number) => heightMeters / 2 - (r / (rows - 1)) * heightMeters;
         type V = [number, number, number];
-        const top = (c: number, r: number): V => [X(c), this.surfaceY(heights[r * cols + c]), Z(r)];
+        const top = (c: number, r: number): V => [X(c), processed[r * cols + c], Z(r)];
 
         const socket = this.settings.socketEnabled;
         const baseY = minSurf - Math.max(this.settings.socketSize, SOCKET_FLOOR_OFFSET);
@@ -334,7 +353,7 @@ export class MapModel {
         const positions: number[] = [];
         const indices: number[] = [];
         const quad = (p0: V, p1: V, p2: V, p3: V, ox: number, oy: number, oz: number) =>
-            this.pushQuadOriented(positions, indices, p0, p1, p2, p3, ox, oy, oz);
+            pushQuadOriented(positions, indices, p0, p1, p2, p3, ox, oy, oz);
 
         for (let cr = 0; cr < rows - 1; cr++) {
             for (let cc = 0; cc < cols - 1; cc++) {
@@ -354,67 +373,13 @@ export class MapModel {
         return { positions: new Float32Array(positions), indices: new Uint32Array(indices), ix0: 0, iy0: 0 };
     }
 
-    /** Push a quad (ring p0→p1→p2→p3) as two triangles wound so its normal faces (ox,oy,oz). */
-    private pushQuadOriented(
-        positions: number[], indices: number[],
-        p0: [number, number, number], p1: [number, number, number],
-        p2: [number, number, number], p3: [number, number, number],
-        ox: number, oy: number, oz: number,
-    ): void {
-        const i0 = positions.length / 3;
-        positions.push(p0[0], p0[1], p0[2], p1[0], p1[1], p1[2], p2[0], p2[1], p2[2], p3[0], p3[1], p3[2]);
-        const i1 = i0 + 1, i2 = i0 + 2, i3 = i0 + 3;
-        const n = triNormal(positions, i0, i1, i2);
-        if (n.x * ox + n.y * oy + n.z * oz >= 0) indices.push(i0, i1, i2, i0, i2, i3);
-        else indices.push(i0, i2, i1, i0, i3, i2);
-    }
+}
 
-    /** Skirt + base that closes the open top surface into a watertight solid. */
-    private addSocket(positions: number[], indices: number[], tcols: number, trows: number, baseY: number): void {
-        const topCount = tcols * trows;
-        // Perimeter loop of top vertices, CCW-ish: north → east → south → west.
-        const loop: number[] = [];
-        for (let c = 0; c < tcols; c++) loop.push(c);                              // north edge
-        for (let r = 1; r < trows; r++) loop.push(r * tcols + (tcols - 1));        // east edge
-        for (let c = tcols - 2; c >= 0; c--) loop.push((trows - 1) * tcols + c);   // south edge
-        for (let r = trows - 2; r >= 1; r--) loop.push(r * tcols);                 // west edge
-        const n = loop.length;
-
-        // A bottom vertex directly below each perimeter top vertex.
-        for (let k = 0; k < n; k++) {
-            const ti = loop[k];
-            positions.push(positions[ti * 3], baseY, positions[ti * 3 + 2]);
-        }
-        const bottom = (k: number) => topCount + k;
-
-        // Walls: one quad per perimeter segment, oriented outward (away from the axis).
-        for (let k = 0; k < n; k++) {
-            const k1 = (k + 1) % n;
-            this.pushOriented(positions, indices, loop[k], loop[k1], bottom(k1), 'radial');
-            this.pushOriented(positions, indices, loop[k], bottom(k1), bottom(k), 'radial');
-        }
-        // Base: fan triangulate the bottom loop, oriented downward (-Y).
-        for (let k = 1; k < n - 1; k++) {
-            this.pushOriented(positions, indices, bottom(0), bottom(k), bottom(k + 1), 'down');
-        }
-    }
-
-    /** Push a triangle, flipping its winding so its normal faces the desired way. */
-    private pushOriented(
-        positions: number[], indices: number[], a: number, b: number, c: number, ref: 'radial' | 'down',
-    ): void {
-        const nrm = triNormal(positions, a, b, c);
-        let outward: boolean;
-        if (ref === 'down') {
-            outward = nrm.y < 0;
-        } else {
-            const cx = (positions[a * 3] + positions[b * 3] + positions[c * 3]) / 3;
-            const cz = (positions[a * 3 + 2] + positions[b * 3 + 2] + positions[c * 3 + 2]) / 3;
-            outward = nrm.x * cx + nrm.z * cz > 0;
-        }
-        if (outward) indices.push(a, b, c);
-        else indices.push(a, c, b);
-    }
+/** Smallest value in a float array (0 if empty / all non-finite). */
+function minOf(a: Float32Array): number {
+    let m = Infinity;
+    for (let i = 0; i < a.length; i++) if (a[i] < m) m = a[i];
+    return Number.isFinite(m) ? m : 0;
 }
 
 function sanitize(s: ModelSettings): ModelSettings {
@@ -437,12 +402,4 @@ function sanitize(s: ModelSettings): ModelSettings {
 function num(v: unknown, fallback: number): number {
     const n = Number(v);
     return Number.isFinite(n) ? n : fallback;
-}
-
-/** Unnormalised face normal of triangle (a,b,c) from a flat positions array. */
-function triNormal(p: number[], a: number, b: number, c: number): { x: number; y: number; z: number } {
-    const ax = p[a * 3], ay = p[a * 3 + 1], az = p[a * 3 + 2];
-    const ux = p[b * 3] - ax, uy = p[b * 3 + 1] - ay, uz = p[b * 3 + 2] - az;
-    const vx = p[c * 3] - ax, vy = p[c * 3 + 1] - ay, vz = p[c * 3 + 2] - az;
-    return { x: uy * vz - uz * vy, y: uz * vx - ux * vz, z: ux * vy - uy * vx };
 }
