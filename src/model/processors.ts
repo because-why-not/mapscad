@@ -82,9 +82,13 @@ export class TileDividerProcessor implements ElevationGridProcessor {
 }
 
 /**
- * Raises every cell within `radius` metres of an OSM track by `raise` metres, from a precomputed
- * per-cell distance field (metres to the nearest track, see osm/trackRaster.ts). A GRID
- * processor, so it runs on the freshly sampled grid — its dims match the field, and it runs
+ * Raises terrain along OSM tracks like a soft brush: a cell on the track centreline rises by the
+ * full `raise` metres, tapering smoothly to zero at `radius` metres away — a raised ridge, not a
+ * flat-topped wall. Uses a raised-cosine (Hann) falloff `½(1 + cos(π·d/radius))`, which has zero
+ * slope at both the centre and the edge so there are no cliffs or kinks. Driven by a precomputed
+ * per-cell distance field (metres to the nearest track, see osm/trackRaster.ts).
+ *
+ * A GRID processor, so it runs on the freshly sampled grid — its dims match the field, and it runs
  * before tiling and before the value chain, so the raised path then flows through water/scale
  * like any other terrain. A no-op if the field doesn't match the grid (e.g. a stale field after
  * a resample) or the raise is zero.
@@ -99,7 +103,10 @@ export class TrackRaiseProcessor implements ElevationGridProcessor {
         const out = new Float32Array(heights);
         for (let i = 0; i < out.length; i++) {
             if (Number.isNaN(out[i])) continue;          // leave no-data holes alone
-            if (this.distance[i] <= this.radius) out[i] += this.raise;
+            const d = this.distance[i];
+            if (d > this.radius) continue;
+            const falloff = 0.5 * (1 + Math.cos(Math.PI * d / this.radius));
+            out[i] += this.raise * falloff;
         }
         return { ...grid, heights: out };
     }
