@@ -61,13 +61,15 @@ describe('buildGeometry — heightScale exaggerates terrain only', () => {
     });
 });
 
-describe('buildGeometry — water is a literal plane, not scaled', () => {
+describe('buildGeometry — water cutoff is tested on the raw height, then scaled with the rest', () => {
     it('flattens sub-cutoff cells to waterLevel and leaves land exaggerated', () => {
         const geo = build(flat, {
             waterEnabled: true, waterCutoff: 5, waterLevel: -50, heightScale: 2,
         });
-        // height 0 < cutoff → exactly -50 (NOT -100); height 10 ≥ cutoff → 10*2 = 20.
-        expect(geo.minY).toBeCloseTo(-50);
+        // heightScale runs LAST, so it multiplies the water plane too: the cutoff still
+        // tests the raw height (0 < 5 → water), but the -50 level is then scaled to -100;
+        // land at 10 ≥ cutoff → 10*2 = 20.
+        expect(geo.minY).toBeCloseTo(-100);
         expect(geo.maxY).toBeCloseTo(20);
     });
 

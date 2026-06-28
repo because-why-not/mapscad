@@ -102,8 +102,9 @@ export interface ElevationValueProcessor {
     process(value: number, ctx: ElevationContext): number;
 }
 
-/** Vertical exaggeration: scales the (running) height. Terrain only — water/socket stay
- *  literal metres, which is why water runs AFTER this in the default chain. */
+/** Vertical exaggeration: scales the (running) height. Runs LAST in the elevation chain so
+ *  the threshold processors before it (water cutoff, low-cut) compare un-exaggerated metres;
+ *  it then scales their output too, so the water plane stays proportional to the relief. */
 export class HeightScaleProcessor implements ElevationValueProcessor {
     readonly id = 'heightScale';
     constructor(private scale: number) {}
@@ -112,8 +113,9 @@ export class HeightScaleProcessor implements ElevationValueProcessor {
     }
 }
 
-/** Flatten everything below `cutoff` (tested on the RAW height, so exaggeration can't move
- *  the waterline) to a fixed, literal `level`. */
+/** Flatten everything below `cutoff` (tested on the RAW height, so the waterline is set by
+ *  true elevation, not the running value) to `level`. heightScale runs after this, so the
+ *  level given here is in un-exaggerated metres and is scaled with the rest of the terrain. */
 export class WaterProcessor implements ElevationValueProcessor {
     readonly id = 'water';
     constructor(private cutoff: number, private level: number) {}
@@ -122,13 +124,15 @@ export class WaterProcessor implements ElevationValueProcessor {
     }
 }
 
-/** Replace everything below `threshold` (tested on the RAW height, like water) with no-data
- *  (NaN), so MapModel carves a hole there instead of drawing a surface. */
+/** Replace everything below `threshold` with no-data (NaN), so MapModel carves a hole there
+ *  instead of drawing a surface. Unlike water this tests the RUNNING value (what earlier
+ *  processors produced), so it composes with them — e.g. set water to -100, then cut below 0
+ *  to drop that water as a hole. */
 export class LowCutProcessor implements ElevationValueProcessor {
     readonly id = 'lowCut';
     constructor(private threshold: number) {}
-    process(value: number, ctx: ElevationContext): number {
-        return ctx.raw < this.threshold ? NaN : value;
+    process(value: number): number {
+        return value < this.threshold ? NaN : value;
     }
 }
 

@@ -181,16 +181,16 @@
                 {/if}
                 <div class="flex flex-col gap-1">
                     <span class="text-sm flex items-center justify-between">Zoom <span class="font-mono">z{heightZoom}</span></span>
-                    <input type="range" min={zMin} max={zMax} step="1" class="range range-sm" bind:value={heightZoom} oninput={emit} />
+                    <input type="range" min={zMin} max={zMax} step="1" class="range range-sm" bind:value={heightZoom} onchange={emit} />
                 </div>
                 <div class="flex items-center gap-2">
                     <span class="text-sm flex-1">Resolution limit</span>
-                    <input type="number" min="64" step="64" class="input input-sm input-bordered w-24" bind:value={resolutionLimit} onfocus={selectAll} oninput={emit} />
+                    <input type="number" min="64" step="64" class="input input-sm input-bordered w-24" bind:value={resolutionLimit} onfocus={selectAll} onchange={emit} />
                     <span class="text-sm opacity-60">vtx</span>
                 </div>
                 <div class="flex flex-col gap-1">
                     <span class="text-sm flex items-center justify-between">Height scale <span class="font-mono">{heightScale}×</span></span>
-                    <input type="range" min="0.1" max="5" step="0.1" class="range range-sm" bind:value={heightScale} oninput={emit} />
+                    <input type="range" min="0.1" max="5" step="0.1" class="range range-sm" bind:value={heightScale} onchange={emit} />
                 </div>
                 <div class="flex flex-col gap-2">
                     <label class="flex items-center gap-2 cursor-pointer">
@@ -200,12 +200,12 @@
                     {#if waterEnabled}
                         <div class="flex items-center gap-2">
                             <span class="text-sm flex-1">Below</span>
-                            <input type="number" step="1" class="input input-sm input-bordered w-24" bind:value={waterCutoff} onfocus={selectAll} oninput={emit} />
+                            <input type="number" step="1" class="input input-sm input-bordered w-24" bind:value={waterCutoff} onfocus={selectAll} onchange={emit} />
                             <span class="text-sm opacity-60">m</span>
                         </div>
                         <div class="flex items-center gap-2">
                             <span class="text-sm flex-1">Water at</span>
-                            <input type="number" step="1" class="input input-sm input-bordered w-24" bind:value={waterLevel} onfocus={selectAll} oninput={emit} />
+                            <input type="number" step="1" class="input input-sm input-bordered w-24" bind:value={waterLevel} onfocus={selectAll} onchange={emit} />
                             <span class="text-sm opacity-60">m</span>
                         </div>
                     {/if}
@@ -218,7 +218,7 @@
                     {#if lowCutEnabled}
                         <div class="flex items-center gap-2">
                             <span class="text-sm flex-1">Remove below</span>
-                            <input type="number" step="1" class="input input-sm input-bordered w-24" bind:value={lowCutLevel} onfocus={selectAll} oninput={emit} />
+                            <input type="number" step="1" class="input input-sm input-bordered w-24" bind:value={lowCutLevel} onfocus={selectAll} onchange={emit} />
                             <span class="text-sm opacity-60">m</span>
                         </div>
                     {/if}
@@ -234,7 +234,7 @@
                 {#if socketEnabled}
                     <div class="mt-2 flex items-center gap-2">
                         <span class="text-sm">Size</span>
-                        <input type="number" min="0" step="0.1" class="input input-sm input-bordered w-24" bind:value={socketSize} onfocus={selectAll} oninput={emit} />
+                        <input type="number" min="0" step="0.1" class="input input-sm input-bordered w-24" bind:value={socketSize} onfocus={selectAll} onchange={emit} />
                         <span class="text-sm opacity-60">m</span>
                     </div>
                 {/if}
@@ -248,9 +248,9 @@
                 </label>
                 {#if tilesEnabled}
                     <div class="mt-2 flex items-center gap-2">
-                        <input type="number" min="1" step="1" class="input input-sm input-bordered w-16 text-center" bind:value={tilesX} onfocus={selectAll} oninput={emit} />
+                        <input type="number" min="1" step="1" class="input input-sm input-bordered w-16 text-center" bind:value={tilesX} onfocus={selectAll} onchange={emit} />
                         <span class="text-sm opacity-60">×</span>
-                        <input type="number" min="1" step="1" class="input input-sm input-bordered w-16 text-center" bind:value={tilesY} onfocus={selectAll} oninput={emit} />
+                        <input type="number" min="1" step="1" class="input input-sm input-bordered w-16 text-center" bind:value={tilesY} onfocus={selectAll} onchange={emit} />
                     </div>
                 {/if}
             </div>

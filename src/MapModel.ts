@@ -31,7 +31,7 @@ export interface ModelSettings {
     waterCutoff: number;     // metres: terrain below this is treated as water (e.g. sea)
     waterLevel: number;      // metres: height water is rendered at (e.g. -50 for a clear step)
     lowCutEnabled: boolean;  // replace everything below lowCutLevel with no-data (carve a hole)
-    lowCutLevel: number;     // metres (raw elevation): terrain below this becomes a hole
+    lowCutLevel: number;     // metres (running height, after water, before scale): below this → a hole
     shape: SelectionShape;   // footprint cut from the (still rectangular) sampled grid
 }
 
@@ -260,9 +260,10 @@ export class MapModel {
      *  runs after exaggeration so the waterline stays at its literal metres). */
     private elevationValueProcessors(): ElevationValueProcessor[] {
         const s = this.settings;
-        const list: ElevationValueProcessor[] = [new HeightScaleProcessor(s.heightScale)];
+        const list: ElevationValueProcessor[] = [];
         if (s.waterEnabled) list.push(new WaterProcessor(s.waterCutoff, s.waterLevel));
         if (s.lowCutEnabled) list.push(new LowCutProcessor(s.lowCutLevel));
+        list.push(new HeightScaleProcessor(s.heightScale));
         return list;
     }
 

@@ -35,11 +35,12 @@ describe('WaterProcessor', () => {
 });
 
 describe('LowCutProcessor', () => {
-    it('replaces below-threshold (by RAW height) with NaN, passes the rest through', () => {
-        const p = new LowCutProcessor(100);
-        expect(Number.isNaN(p.process(250, ctx(80)))).toBe(true); // raw 80 < 100 -> hole
-        expect(p.process(250, ctx(120))).toBe(250);               // raw 120 >= 100 -> unchanged
-        expect(p.process(7, ctx(100))).toBe(7);                   // boundary is NOT below
+    it('cuts by the RUNNING value (post-water), not raw, so it composes with water', () => {
+        const p = new LowCutProcessor(0);
+        // raw 30 is above 0, but water already lowered the running value to -100 -> hole.
+        expect(Number.isNaN(p.process(-100, ctx(30)))).toBe(true);
+        expect(p.process(40, ctx(-5))).toBe(40); // running value 40 kept, regardless of raw
+        expect(p.process(0, ctx(0))).toBe(0);    // boundary is NOT below
     });
 });
 
