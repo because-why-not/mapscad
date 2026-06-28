@@ -68,10 +68,12 @@
     let waterEnabled = $state(untrack(() => initialSettings.waterEnabled ?? false));
     let waterCutoff = $state(untrack(() => initialSettings.waterCutoff ?? 0));
     let waterLevel = $state(untrack(() => initialSettings.waterLevel ?? 0));
+    let lowCutEnabled = $state(untrack(() => initialSettings.lowCutEnabled ?? false));
+    let lowCutLevel = $state(untrack(() => initialSettings.lowCutLevel ?? 0));
     let smoothShading = $state(untrack(() => initialSettings.smoothShading ?? true));
 
     function settings() {
-        return { heightZoom, resolutionLimit, heightScale, socketEnabled, socketSize, tilesEnabled, tilesX, tilesY, waterEnabled, waterCutoff, waterLevel, smoothShading };
+        return { heightZoom, resolutionLimit, heightScale, socketEnabled, socketSize, tilesEnabled, tilesX, tilesY, waterEnabled, waterCutoff, waterLevel, lowCutEnabled, lowCutLevel, smoothShading };
     }
     function emit() { onSettingsChange(settings()); }
     function selectAll(e) { e.target.select(); }
@@ -204,6 +206,19 @@
                         <div class="flex items-center gap-2">
                             <span class="text-sm flex-1">Water at</span>
                             <input type="number" step="1" class="input input-sm input-bordered w-24" bind:value={waterLevel} onfocus={selectAll} oninput={emit} />
+                            <span class="text-sm opacity-60">m</span>
+                        </div>
+                    {/if}
+                </div>
+                <div class="flex flex-col gap-2">
+                    <label class="flex items-center gap-2 cursor-pointer">
+                        <input type="checkbox" class="checkbox checkbox-sm" bind:checked={lowCutEnabled} onchange={emit} />
+                        <span class="text-sm">Cut-off hole</span>
+                    </label>
+                    {#if lowCutEnabled}
+                        <div class="flex items-center gap-2">
+                            <span class="text-sm flex-1">Remove below</span>
+                            <input type="number" step="1" class="input input-sm input-bordered w-24" bind:value={lowCutLevel} onfocus={selectAll} oninput={emit} />
                             <span class="text-sm opacity-60">m</span>
                         </div>
                     {/if}

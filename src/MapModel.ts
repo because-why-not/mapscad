@@ -1,10 +1,10 @@
 import type { HeightGrid } from './HeightSampler';
 import {
     type ElevationGridProcessor, TileDividerProcessor,
-    type ElevationValueProcessor, type ElevationContext, HeightScaleProcessor, WaterProcessor,
+    type ElevationValueProcessor, type ElevationContext, HeightScaleProcessor, WaterProcessor, LowCutProcessor,
     type VertexProcessor, type VertexMesh, SocketProcessor,
 } from './model/processors';
-import { pushQuadOriented } from './model/geometry';
+import { pushQuadOriented, weldIndexed } from './model/geometry';
 
 /**
  * The single canonical 3D model. Everything that isn't sampling flows through here:
@@ -30,6 +30,8 @@ export interface ModelSettings {
     waterEnabled: boolean;   // flatten everything below waterCutoff to a single water level
     waterCutoff: number;     // metres: terrain below this is treated as water (e.g. sea)
     waterLevel: number;      // metres: height water is rendered at (e.g. -50 for a clear step)
+    lowCutEnabled: boolean;  // replace everything below lowCutLevel with no-data (carve a hole)
+    lowCutLevel: number;     // metres (raw elevation): terrain below this becomes a hole
     shape: SelectionShape;   // footprint cut from the (still rectangular) sampled grid
 }
 
@@ -73,6 +75,8 @@ export const DEFAULT_MODEL_SETTINGS: ModelSettings = {
     waterEnabled: false,
     waterCutoff: 0,
     waterLevel: 0,
+    lowCutEnabled: false,
+    lowCutLevel: 0,
     shape: SelectionShape.Rectangle,
 };
 
@@ -232,11 +236,8 @@ export class MapModel {
         const mesh: VertexMesh = { positions, indices, tcols, trows, minY };
         for (const vp of this.vertexProcessors()) vp.process(mesh);
 
-        return {
-            positions: new Float32Array(positions),
-            indices: new Uint32Array(indices),
-            ix0, iy0,
-        };
+        const welded = weldIndexed(positions, indices);
+        return { positions: welded.positions, indices: welded.indices, ix0, iy0 };
     }
 
     // --- processor chains ----------------------------------------------------
@@ -261,6 +262,7 @@ export class MapModel {
         const s = this.settings;
         const list: ElevationValueProcessor[] = [new HeightScaleProcessor(s.heightScale)];
         if (s.waterEnabled) list.push(new WaterProcessor(s.waterCutoff, s.waterLevel));
+        if (s.lowCutEnabled) list.push(new LowCutProcessor(s.lowCutLevel));
         return list;
     }
 
@@ -392,7 +394,8 @@ export class MapModel {
                 if (!inside(cc + 1, cr)) quad(B, D, d, b, 1, 0, 0);  // east edge  → +X
             }
         }
-        return { positions: new Float32Array(positions), indices: new Uint32Array(indices), ix0: 0, iy0: 0 };
+        const welded = weldIndexed(positions, indices);
+        return { positions: welded.positions, indices: welded.indices, ix0: 0, iy0: 0 };
     }
 
 }
@@ -432,6 +435,8 @@ function sanitize(s: ModelSettings): ModelSettings {
         waterEnabled: !!s.waterEnabled,
         waterCutoff: num(s.waterCutoff, 0),
         waterLevel: num(s.waterLevel, 0),
+        lowCutEnabled: !!s.lowCutEnabled,
+        lowCutLevel: num(s.lowCutLevel, 0),
         shape: s.shape === SelectionShape.Oval ? SelectionShape.Oval : SelectionShape.Rectangle,
     };
 }

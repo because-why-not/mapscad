@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
-    HeightScaleProcessor, WaterProcessor, SocketProcessor, TileDividerProcessor,
+    HeightScaleProcessor, WaterProcessor, LowCutProcessor, SocketProcessor, TileDividerProcessor,
     type ElevationContext, type VertexMesh,
 } from '../../src/model/processors';
 import type { HeightGrid } from '../../src/HeightSampler';
@@ -31,6 +31,15 @@ describe('WaterProcessor', () => {
         expect(p.process(123, ctx(5))).toBe(123);
         // Below cutoff (by raw): force the literal water level, ignoring the running value.
         expect(p.process(123, ctx(-2))).toBe(-50);
+    });
+});
+
+describe('LowCutProcessor', () => {
+    it('replaces below-threshold (by RAW height) with NaN, passes the rest through', () => {
+        const p = new LowCutProcessor(100);
+        expect(Number.isNaN(p.process(250, ctx(80)))).toBe(true); // raw 80 < 100 -> hole
+        expect(p.process(250, ctx(120))).toBe(250);               // raw 120 >= 100 -> unchanged
+        expect(p.process(7, ctx(100))).toBe(7);                   // boundary is NOT below
     });
 });
 

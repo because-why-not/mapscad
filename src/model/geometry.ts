@@ -1,6 +1,35 @@
 /** Low-level mesh helpers shared by MapModel and the vertex processors. Pure functions over
  *  flat `positions` (x,y,z per vertex) + `indices` (3 per triangle) arrays. */
 
+/**
+ * Collapse coincident vertices into a single shared one, producing an INDEXED mesh: the
+ * surface/oval/socket builders emit "triangle soup" (every quad pushes its own corners), so
+ * the same physical point appears many times. Welding by quantised position (0.1 mm) gives a
+ * compact, truly-manifold buffer where `computeVertexNormals()` can average across faces —
+ * the single representation both the preview and the stats rely on. It never moves a vertex,
+ * so the exported triangles (hence the STL) are byte-for-byte unchanged.
+ */
+export function weldIndexed(positions: number[], indices: number[]): { positions: Float32Array; indices: Uint32Array } {
+    const QUANT = 1e4; // 0.1 mm in metre-space coordinates
+    const seen = new Map<string, number>();
+    const remap = new Uint32Array(positions.length / 3);
+    const out: number[] = [];
+    for (let v = 0; v < positions.length / 3; v++) {
+        const x = positions[v * 3], y = positions[v * 3 + 1], z = positions[v * 3 + 2];
+        const key = `${Math.round(x * QUANT)},${Math.round(y * QUANT)},${Math.round(z * QUANT)}`;
+        let id = seen.get(key);
+        if (id === undefined) {
+            id = out.length / 3;
+            seen.set(key, id);
+            out.push(x, y, z);
+        }
+        remap[v] = id;
+    }
+    const outIdx = new Uint32Array(indices.length);
+    for (let i = 0; i < indices.length; i++) outIdx[i] = remap[indices[i]];
+    return { positions: new Float32Array(out), indices: outIdx };
+}
+
 /** Unnormalised face normal of triangle (a,b,c) from a flat positions array. */
 export function triNormal(p: number[], a: number, b: number, c: number): { x: number; y: number; z: number } {
     const ax = p[a * 3], ay = p[a * 3 + 1], az = p[a * 3 + 2];

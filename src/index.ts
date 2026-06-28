@@ -16,7 +16,7 @@ import { TerrainPreview } from './TerrainPreview';
 import { MapModel, SelectionShape } from './MapModel';
 import { PreviewConfigStore } from './PreviewConfig';
 import { exportModelStl } from './StlMaker';
-import { estimateMemory, formatBytes, memoryLevel, isOverBudget } from './memory';
+import { estimateMemory, measureMemory, formatBytes, memoryLevel, isOverBudget } from './memory';
 import type { GeoView, MapEngine } from './engine/MapEngine';
 
 // This file is the composition root: the only place that names concrete engines.
@@ -137,7 +137,7 @@ function onModelChange(): void {
     preview?.setGeometry(geo);
     const grid = model.getGrid();
     if (!grid || !geo) { appInstance?.setPreviewStats(null); return; }
-    const mem = estimateMemory(grid);
+    const mem = measureMemory(geo, grid); // realistic: from the actual built mesh, not a grid guess
     const surfaceVerts = grid.cols * grid.rows;
     appInstance?.setPreviewStats({
         vertices: geo.vertexCount,

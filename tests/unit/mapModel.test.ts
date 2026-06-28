@@ -153,6 +153,29 @@ describe('buildGeometry — tiling (no-data dividers → separate bodies in one 
         expect(geo.tiles).toHaveLength(1);
         expect(connectedComponents(geo.tiles[0])).toBe(1);
     });
+
+    it('changes the vertex count when toggled on a no-data grid WITHOUT a socket', () => {
+        // Regression: with soup, tiling an open sheet left vertexCount identical (the seam was
+        // lost in the duplicated-vertex inflation). Welded, the separated seam shows up.
+        const N = NaN;
+        const coast = makeGrid(Array.from({ length: 6 }, (_, r) =>
+            Array.from({ length: 6 }, (_, c) => (r === 0 && c === 0 ? N : r + c))));
+        const off = build(coast, { socketEnabled: false });
+        const on = build(coast, { socketEnabled: false, tilesEnabled: true, tilesX: 2, tilesY: 2 });
+        expect(on.vertexCount).not.toBe(off.vertexCount);
+    });
+
+    it('emits a welded mesh: no two vertices share a position', () => {
+        const N = NaN;
+        const coast = makeGrid([[N, 0, 0], [0, 0, 0], [0, 0, 0]]);
+        const geo = build(coast, { socketEnabled: true, socketSize: 2 });
+        const tile = geo.tiles[0];
+        const seen = new Set<string>();
+        for (let i = 0; i < tile.positions.length; i += 3) {
+            seen.add(`${tile.positions[i].toFixed(3)},${tile.positions[i + 1].toFixed(3)},${tile.positions[i + 2].toFixed(3)}`);
+        }
+        expect(seen.size).toBe(tile.positions.length / 3); // every vertex position is unique
+    });
 });
 
 describe('buildGeometry — a socketed solid is a closed manifold', () => {

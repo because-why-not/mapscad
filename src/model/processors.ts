@@ -122,6 +122,16 @@ export class WaterProcessor implements ElevationValueProcessor {
     }
 }
 
+/** Replace everything below `threshold` (tested on the RAW height, like water) with no-data
+ *  (NaN), so MapModel carves a hole there instead of drawing a surface. */
+export class LowCutProcessor implements ElevationValueProcessor {
+    readonly id = 'lowCut';
+    constructor(private threshold: number) {}
+    process(value: number, ctx: ElevationContext): number {
+        return ctx.raw < this.threshold ? NaN : value;
+    }
+}
+
 // --- vertex / mesh stage -----------------------------------------------------
 
 /** A single solid under construction, handed to a VertexProcessor to mutate in place. */

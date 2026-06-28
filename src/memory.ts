@@ -26,14 +26,39 @@ export interface MemoryEstimate {
     totalBytes: number;
 }
 
+/** Geometry buffer bytes for a vertex/triangle count: position(3)+normal(3) floats per vertex,
+ *  uint32 index (3 per triangle). The single formula both the prediction and the measurement use. */
+export function geometryBytes(vertices: number, triangles: number): number {
+    return vertices * (3 + 3) * BYTES_PER_FLOAT + triangles * 3 * 4;
+}
+
+/**
+ * PREDICTIVE estimate from grid dimensions alone — used to gate a selection against the budget
+ * BEFORE anything is sampled or built (there's no mesh yet). Assumes the dense shared-vertex
+ * sheet; the real mesh (holes, oval, tiling, socket) differs, so use `measureMemory` once built.
+ */
 export function estimateMemory({ cols, rows, tilesX, tilesY }: MemoryParams): MemoryEstimate {
     const verts = cols * rows;
     const tris = Math.max(0, cols - 1) * Math.max(0, rows - 1) * 2;
-    // position(3) + normal(3) floats per vertex, uint32 index (3 per triangle).
-    const geometryBytes = verts * (3 + 3) * BYTES_PER_FLOAT + tris * 3 * 4;
+    const geom = geometryBytes(verts, tris);
     const heightBytes = verts * BYTES_PER_FLOAT;
     const tileBytes = tilesX * TILE * tilesY * TILE * 4;
-    return { geometryBytes, heightBytes, tileBytes, totalBytes: geometryBytes + heightBytes + tileBytes };
+    return { geometryBytes: geom, heightBytes, tileBytes, totalBytes: geom + heightBytes + tileBytes };
+}
+
+/**
+ * REALISTIC measurement once the geometry exists: geometry bytes from the ACTUAL built mesh
+ * (post weld/holes/tiling/socket), height bytes from the retained sampled grid, tile bytes
+ * from the DEM working set. This is what the overlay should show.
+ */
+export function measureMemory(
+    geo: { vertexCount: number; triangleCount: number },
+    grid: { cols: number; rows: number; tilesX: number; tilesY: number },
+): MemoryEstimate {
+    const geom = geometryBytes(geo.vertexCount, geo.triangleCount);
+    const heightBytes = grid.cols * grid.rows * BYTES_PER_FLOAT;
+    const tileBytes = grid.tilesX * TILE * grid.tilesY * TILE * 4;
+    return { geometryBytes: geom, heightBytes, tileBytes, totalBytes: geom + heightBytes + tileBytes };
 }
 
 export type MemoryLevel = 'ok' | 'warn' | 'high';
