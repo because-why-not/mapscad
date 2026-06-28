@@ -83,6 +83,33 @@ export const DEFAULT_MODEL_SETTINGS: ModelSettings = {
 // Minimum socket thickness, so a "size 0" socket is still a handleable solid.
 const SOCKET_FLOOR_OFFSET = 0.1;
 
+/**
+ * Holds the current `HeightGrid` + `ModelSettings` and turns them into neutral metre-space
+ * geometry on demand. Stateful only for caching and observation:
+ *
+ *   - `setGrid` / `applySettings` mutate inputs and `notify()` listeners; both mark the
+ *     cache `dirty`. `buildGeometry()` lazily rebuilds once and memoises until the next change,
+ *     so the preview and the STL exporter share one build (and one identical solid).
+ *
+ * `build()` runs the processor pipeline in four fixed stages (the order between stages is the
+ * load-bearing invariant; the order *within* a stage is decided by the list-builder methods):
+ *
+ *   1. grid     — `gridProcessors()` reshape the whole grid; may change its dimensions
+ *                 (tiling injects no-data dividers here).
+ *   2. elevation — `applyElevation()` runs `elevationValueProcessors()` per cell into a
+ *                 `processed` height field (water → low-cut → height-scale).
+ *   3. surface  — the fixed 2D→3D lift: `processed` heights become a vertex grid.
+ *   4. vertex   — `vertexProcessors()` mutate the assembled mesh (the socket closes it).
+ *
+ * Two build paths produce the same welded, shared-vertex representation:
+ *   - the fast `buildTile` sheet, for a gap-free rectangle, and
+ *   - `buildKept` → `buildMaskedTile`, a per-cell walled solid used whenever cells are
+ *     dropped — ovals AND no-data holes (real DEM gaps or injected tile dividers) both route
+ *     here, so tiling emits ONE solid whose disconnected, walled bodies are the tiles.
+ *
+ * This pluggable chain is the seed of the planned CAD-style feature history (see CLAUDE.md /
+ * todo.md): keep the stage boundary intact when adding processors.
+ */
 export class MapModel {
     private grid: HeightGrid | null = null;
     private settings: ModelSettings;
@@ -243,8 +270,9 @@ export class MapModel {
     // --- processor chains ----------------------------------------------------
 
     /** Grid-reshaping tools, applied to the whole grid before any value processing or
-     *  geometry (may change its dimensions: e.g. tile dividers, crop, resample). None are
-     *  wired to settings yet — TileDividerProcessor exists but isn't enabled here. */
+     *  geometry (may change its dimensions: e.g. tile dividers, crop, resample). Today only
+     *  tiling is wired up — `tilesEnabled` injects a TileDividerProcessor; future reshapers
+     *  (crop, resample, composite sources) slot into this same list. */
     private gridProcessors(): ElevationGridProcessor[] {
         const s = this.settings;
         // Tiling is expressed as a grid reshape: inject no-data divider lines so the hole
@@ -256,8 +284,11 @@ export class MapModel {
         return [];
     }
 
-    /** Elevation-domain tools, applied per cell to the height value (order matters: water
-     *  runs after exaggeration so the waterline stays at its literal metres). */
+    /** Elevation-domain tools, applied per cell to the height value. Order matters and is the
+     *  array order below: the threshold tools (water, low-cut) run FIRST so they compare
+     *  un-exaggerated metres, then HeightScaleProcessor runs LAST and scales everything —
+     *  including the water plane — keeping the whole model proportional. See the elevation
+     *  gotcha in CLAUDE.md. */
     private elevationValueProcessors(): ElevationValueProcessor[] {
         const s = this.settings;
         const list: ElevationValueProcessor[] = [];
