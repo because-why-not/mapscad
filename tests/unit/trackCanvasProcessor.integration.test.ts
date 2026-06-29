@@ -5,7 +5,7 @@
 // canvas, so this file opts into jsdom + the `canvas` (node-canvas) package, which together make
 // document.createElement('canvas').getContext('2d') real. The pure pixels→heights step is covered
 // separately in trackCanvasProcessor.test.ts; this verifies the geometry/coordinate path.
-import { describe, it, expect, beforeAll } from 'vitest';
+import { describe, it, expect, beforeAll, vi } from 'vitest';
 import { TrackCanvasProcessor } from '../../src/model/TrackCanvasProcessor';
 import { Tracks } from '../../src/osm/Tracks';
 import type { LonLat } from '../../src/SelectionArea';
@@ -72,5 +72,22 @@ describe('TrackCanvasProcessor.process (real canvas)', () => {
         const tracks = new Tracks([MID_ROW_TRACK], GRID);
         const out = new TrackCanvasProcessor(tracks, 50, 100).process(grid);
         expect(Number.isNaN(out.heights[idx(5, 4)])).toBe(true);
+    });
+
+    it('strokes ALL tracks in a single filtered draw (no per-track blur layer → no OOM)', () => {
+        // The filter blur allocates a full-canvas layer PER stroke() call, so one draw must cover
+        // every track regardless of count. Spy on the 2d-context prototype's stroke.
+        const proto = Object.getPrototypeOf(document.createElement('canvas').getContext('2d'));
+        const spy = vi.spyOn(proto, 'stroke');
+        try {
+            const many: Track[] = Array.from({ length: 50 }, (_, i) => {
+                const lat = 0.1 + (i / 50) * 0.8;
+                return [[0.05, lat], [0.95, lat]] as Track;
+            });
+            new TrackCanvasProcessor(new Tracks(many, GRID), 50, 100).process(flatGrid(100));
+            expect(spy).toHaveBeenCalledTimes(1);
+        } finally {
+            spy.mockRestore();
+        }
     });
 });

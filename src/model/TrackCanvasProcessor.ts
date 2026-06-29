@@ -48,15 +48,21 @@ export class TrackCanvasProcessor implements ElevationGridProcessor {
         ctx.lineWidth = Math.max(1, radiusCells);
         ctx.filter = `blur(${(radiusCells * 0.5).toFixed(2)}px)`;
 
+        // Accumulate EVERY track as a subpath of ONE path (begin once, stroke once). A canvas
+        // `filter` allocates a full-canvas layer per draw call, so stroking per-track (thousands
+        // of ways) piles up thousands of GPU blur buffers and exhausts host memory — which crashes
+        // the shared GPU process and takes the preview's WebGL context down with it. One stroke =
+        // one blur pass; overlapping tracks also blur as a union instead of double-compositing.
+        ctx.beginPath();
         for (const line of this.tracks.gridTracks) {
             if (line.length < 2) continue;
-            ctx.beginPath();
             // gridTracks are fractional sample indices; pixel centres sit at +0.5, so a point at
-            // sample c is drawn at canvas x = c + 0.5 to land in the middle of cell c.
+            // sample c is drawn at canvas x = c + 0.5 to land in the middle of cell c. moveTo
+            // starts a fresh subpath, so the tracks stay disjoint within the single path.
             ctx.moveTo(line[0][0] + 0.5, line[0][1] + 0.5);
             for (let i = 1; i < line.length; i++) ctx.lineTo(line[i][0] + 0.5, line[i][1] + 0.5);
-            ctx.stroke();
         }
+        ctx.stroke();
 
         const image = ctx.getImageData(0, 0, cols, rows).data;
         return { ...grid, heights: addRasterRaise(image, heights, this.raise) };
