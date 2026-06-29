@@ -12,8 +12,11 @@ import { OpenLayersEngine } from './engine/OpenLayersEngine';
 import { MapLibreTerrainEngine } from './engine/MapLibreTerrainEngine';
 import { SelectionArea, LonLat } from './SelectionArea';
 import { TrackOverlay } from './TrackOverlay';
+import { BuildingOverlay } from './BuildingOverlay';
 import { fetchWalkingTracksRaw, parseTracks, tracksFromJson } from './osm/OverpassTracks';
+import { fetchBuildingsRaw, parseBuildings, buildingsFromJson } from './osm/OverpassBuildings';
 import { Tracks } from './osm/Tracks';
+import { Buildings } from './osm/Buildings';
 import { sampleSelectionHeights, rectExtent, groundResolution, tileCoverage } from './HeightSampler';
 import { TerrainPreview } from './TerrainPreview';
 import { MapModel, SelectionShape } from './MapModel';
@@ -58,6 +61,10 @@ let currentTracks: Tracks | null = null;
 // The raw Overpass JSON the current tracks came from, kept verbatim so Download can save the
 // exact server response (or the file an Upload was loaded from).
 let currentRawTracks: any = null;
+// Building overlay + state, mirroring the track equivalents above.
+let buildingOverlay: BuildingOverlay | null = null;
+let currentBuildings: Buildings | null = null;
+let currentRawBuildings: any = null;
 
 /** Compact toggle label for an elevation source name (drops the _elevation[_raw] tail). */
 function demLabel(name: string): string {
@@ -122,6 +129,7 @@ async function resample(): Promise<void> {
         if (abort.signal.aborted) return;
         model.setGrid(grid); // notifies -> preview + stats rebuild from the model
         syncTrackField(); // re-rasterise tracks (if any) to the new grid dimensions
+        syncBuildingField(); // re-rasterise buildings (if any) to the new grid dimensions
         Env.log(`[3d] terrain regenerated in ${Math.round(performance.now() - t0)} ms`);
     } catch (e) {
         if ((e as { name?: string })?.name === 'AbortError') Env.log('[3d] terrain build cancelled');
@@ -146,6 +154,15 @@ function syncTrackField(): void {
         widthMeters: grid.widthMeters, heightMeters: grid.heightMeters,
     });
     model.setTracks(bound);
+}
+
+/** Bind the current buildings to the model's grid and hand them over (or clear them). Mirrors
+ *  syncTrackField; BuildingCanvasProcessor paints each footprint into the heights. */
+function syncBuildingField(): void {
+    const grid = model.getGrid();
+    if (!currentBuildings || !currentCorners || !grid) { model.setBuildings(null); return; }
+    const bound = currentBuildings.withGrid({ corners: currentCorners, cols: grid.cols, rows: grid.rows });
+    model.setBuildings(bound);
 }
 
 // Resampling hits the network, so changes to zoom / resolution limit are debounced.
@@ -193,6 +210,11 @@ function onSelectionChange(corners: LonLat[] | null): void {
     currentRawTracks = null;
     model.setTracks(null);
     appInstance?.setTracksAvailable(false);
+    buildingOverlay?.clear();
+    currentBuildings = null;
+    currentRawBuildings = null;
+    model.setBuildings(null);
+    appInstance?.setBuildingsAvailable(false);
     if (corners) resample();
     else model.setGrid(null); // notifies -> preview clears, stats null
 }
@@ -442,6 +464,29 @@ async function init(): Promise<void> {
                 syncTrackField();
                 appInstance?.setTracksAvailable(true);
             },
+            // Building equivalents of the track callbacks above (same lifecycle).
+            onFetchBuildings: async () => {
+                if (!currentCorners) return 0;
+                const json = await fetchBuildingsRaw(currentCorners);
+                const fetched = parseBuildings(json);
+                currentRawBuildings = json;
+                currentBuildings = new Buildings(fetched);
+                buildingOverlay?.setBuildings(fetched);
+                return fetched.length;
+            },
+            onDownloadBuildings: () => currentRawBuildings,
+            onUploadBuildings: (json: any) => {
+                const fetched = buildingsFromJson(json);
+                currentRawBuildings = json;
+                currentBuildings = new Buildings(fetched);
+                buildingOverlay?.setBuildings(fetched);
+                return fetched.length;
+            },
+            onAddBuildingsToPreview: () => {
+                if (!currentBuildings || currentBuildings.isEmpty()) return;
+                syncBuildingField();
+                appInstance?.setBuildingsAvailable(true);
+            },
             previewDems,
             initialPreviewDemId: initialDemId,
             previewZoomMin,
@@ -510,6 +555,7 @@ async function init(): Promise<void> {
     const olEngine = new OpenLayersEngine(maps, olMap => {
         if (selection) return;
         selection = new SelectionArea(olMap, { onChange: onUserSelectionChange });
+        buildingOverlay = new BuildingOverlay(olMap);
         trackOverlay = new TrackOverlay(olMap);
         const savedCorners = config.get().selection;
         if (savedCorners) {

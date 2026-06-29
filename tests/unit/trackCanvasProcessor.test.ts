@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { addRasterRaise } from '../../src/model/TrackCanvasProcessor';
+import { addRasterRaise } from '../../src/model/rasterRaise';
 
 // Build an RGBA buffer (the form getImageData returns) whose RED channel carries the given
 // coverage bytes (0..255); the other channels are irrelevant to addRasterRaise.

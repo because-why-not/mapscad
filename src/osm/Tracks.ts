@@ -1,12 +1,10 @@
-import type { LonLat } from '../SelectionArea';
 import type { Track } from './OverpassTracks';
+import { projectLonLatLines, type GridSpace } from './gridProjection';
 
 /** The sampled grid the tracks are projected against — the selection corners plus the heightmap
- *  resolution and metre extents (everything the row-col conversion needs). */
-export interface TrackGrid {
-    corners: LonLat[];
-    cols: number;
-    rows: number;
+ *  resolution and metre extents (the extents are carried for callers; the col/row projection
+ *  itself only needs `GridSpace`). */
+export interface TrackGrid extends GridSpace {
     widthMeters: number;
     heightMeters: number;
 }
@@ -48,20 +46,9 @@ export class Tracks {
         return this.gridTrackBuffer;
     }
 
-    /** Project every track vertex from lon/lat onto the heightmap's fractional [col, row] grid,
-     *  using the affine corner basis (TL origin, eU→TR, eV→BL). */
+    /** Project every track vertex from lon/lat onto the heightmap's fractional [col, row] grid. */
     private toGridSpace(g: TrackGrid): Track[] {
-        const [TL, TR, , BL] = g.corners;
-        const eUx = TR[0] - TL[0], eUy = TR[1] - TL[1];
-        const eVx = BL[0] - TL[0], eVy = BL[1] - TL[1];
-        const det = eUx * eVy - eUy * eVx;
-        if (!det) return this.tracks.map(() => []);
-        return this.tracks.map(line => line.map(([lon, lat]) => {
-            const dx = lon - TL[0], dy = lat - TL[1];
-            const u = (dx * eVy - dy * eVx) / det;
-            const v = (eUx * dy - eUy * dx) / det;
-            return [u * g.cols - 0.5, v * g.rows - 0.5] as LonLat; // [col, row], parallel to [lon, lat]
-        }));
+        return projectLonLatLines(this.tracks, g);
     }
 
     private requireGrid(who: string): TrackGrid {

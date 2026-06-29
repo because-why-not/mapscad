@@ -17,6 +17,10 @@
         onAddTracksToPreview = () => {},
         onDownloadTracks = () => null,
         onUploadTracks = () => 0,
+        onFetchBuildings = () => {},
+        onAddBuildingsToPreview = () => {},
+        onDownloadBuildings = () => null,
+        onUploadBuildings = () => 0,
         initialZoom = 0,
         canCollapse = false,
         onCollapse = () => {},
@@ -30,6 +34,9 @@
     export function setZoom(z) { mapZoom = z; }
 
     let menuOpen = $state(false);
+    // Second slide-out (track icon button); mutually exclusive with the map menu so the two
+    // right-hand panels never overlap.
+    let tracksMenuOpen = $state(false);
     let activeProviderId = $state(untrack(() => initialActiveProviderId));
     let providerList = $state(untrack(() => tileProviders));
     let customList = $state(untrack(() => customMaps));
@@ -44,10 +51,14 @@
     // True once a download has returned tracks for the current selection, gating the
     // "Add to preview" button. Reset whenever the selection changes (tracks no longer match).
     let tracksReady = $state(false);
-    export function setHasSelection(has) { hasSelection = has; tracksReady = false; }
+    let buildingsReady = $state(false);
+    export function setHasSelection(has) { hasSelection = has; tracksReady = false; buildingsReady = false; }
     // Track-download button feedback: idle label, a busy flag, and a transient result note.
     let tracksBusy = $state(false);
-    let tracksLabel = $state('Walking tracks');
+    let tracksLabel = $state('Download tracks');
+    // Building-download button feedback (mirror of the track equivalents).
+    let buildingsBusy = $state(false);
+    let buildingsLabel = $state('Download buildings');
 
     async function fetchTracks() {
         if (tracksBusy) return;
@@ -61,24 +72,24 @@
             tracksLabel = 'Download failed';
         } finally {
             tracksBusy = false;
-            setTimeout(() => tracksLabel = 'Walking tracks', 2500);
+            setTimeout(() => tracksLabel = 'Download tracks', 2500);
         }
     }
 
-    // Save the raw downloaded track JSON to a file the user can keep and re-upload later.
-    function downloadTracks() {
-        const json = onDownloadTracks();
+    // Save the raw downloaded JSON (tracks or buildings) to a file the user can keep and re-upload.
+    function downloadJson(getJson, filename) {
+        const json = getJson();
         if (!json) return;
         const blob = new Blob([JSON.stringify(json)], { type: 'application/json' });
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
-        a.download = 'tracks.json';
+        a.download = filename;
         a.click();
         URL.revokeObjectURL(url);
     }
 
-    // Hidden file input behind the Upload button; reading a saved file re-ingests its tracks
+    // Hidden file inputs behind the Upload buttons; reading a saved file re-ingests its data
     // exactly like a fresh download (overlay + enables "Add to preview").
     let trackFileInput = $state();
     async function uploadTracks(e) {
@@ -93,7 +104,40 @@
         } catch {
             tracksLabel = 'Upload failed';
         } finally {
-            setTimeout(() => tracksLabel = 'Walking tracks', 2500);
+            setTimeout(() => tracksLabel = 'Download tracks', 2500);
+        }
+    }
+
+    async function fetchBuildings() {
+        if (buildingsBusy) return;
+        buildingsBusy = true;
+        buildingsLabel = 'Downloading…';
+        try {
+            const count = await onFetchBuildings();
+            buildingsReady = count > 0;
+            buildingsLabel = count ? `${count} buildings` : 'No buildings found';
+        } catch {
+            buildingsLabel = 'Download failed';
+        } finally {
+            buildingsBusy = false;
+            setTimeout(() => buildingsLabel = 'Download buildings', 2500);
+        }
+    }
+
+    let buildingFileInput = $state();
+    async function uploadBuildings(e) {
+        const file = e.target.files?.[0];
+        e.target.value = '';
+        if (!file) return;
+        try {
+            const json = JSON.parse(await file.text());
+            const count = onUploadBuildings(json);
+            buildingsReady = count > 0;
+            buildingsLabel = count ? `${count} buildings` : 'No buildings found';
+        } catch {
+            buildingsLabel = 'Upload failed';
+        } finally {
+            setTimeout(() => buildingsLabel = 'Download buildings', 2500);
         }
     }
     // Aspect-ratio lock for drawing/resizing (session-only). 'free' or a 'w:h' preset, or
@@ -246,61 +290,34 @@
                 </div>
             {/if}
         {/if}
-
-        {#if hasSelection}
-            <!-- Download OSM walking tracks for the current selection and overlay them. -->
-            <button
-                class="btn btn-sm shadow-md border-0 bg-base-100 whitespace-nowrap"
-                title="Download walking tracks in the selected area"
-                onclick={fetchTracks}
-                disabled={tracksBusy}
-            >
-                {#if tracksBusy}<span class="loading loading-spinner loading-xs"></span>{/if}
-                {tracksLabel}
-            </button>
-            <!-- Hand the downloaded tracks to the 3D preview (reveals its Tracks section). -->
-            <button
-                class="btn btn-sm shadow-md border-0 bg-base-100 whitespace-nowrap"
-                title="Add the downloaded tracks to the 3D preview"
-                onclick={onAddTracksToPreview}
-                disabled={!tracksReady}
-            >Add to preview</button>
-            <!-- Save the raw downloaded track JSON (only once tracks exist). -->
-            {#if tracksReady}
-                <button
-                    class="btn btn-sm shadow-md border-0 bg-base-100 whitespace-nowrap"
-                    title="Download the raw track data as a JSON file"
-                    onclick={downloadTracks}
-                >Download</button>
-            {/if}
-            <!-- Reuse tracks from a previously downloaded file (no server round-trip). -->
-            <button
-                class="btn btn-sm shadow-md border-0 bg-base-100 whitespace-nowrap"
-                title="Load tracks from a previously downloaded JSON file"
-                onclick={() => trackFileInput.click()}
-            >Upload</button>
-            <input
-                type="file"
-                accept=".json,application/json"
-                bind:this={trackFileInput}
-                onchange={uploadTracks}
-                class="hidden"
-            />
-        {/if}
     </div>
 
-    <!-- Menu button -->
-    <button
-        class="btn btn-square bg-base-100 shadow-md absolute top-4 right-4 z-[1000] border-0"
-        aria-label="Open map menu"
-        onclick={() => menuOpen = true}
-    >
-        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <line x1="3" y1="6" x2="21" y2="6"></line>
-            <line x1="3" y1="12" x2="21" y2="12"></line>
-            <line x1="3" y1="18" x2="21" y2="18"></line>
-        </svg>
-    </button>
+    <!-- Menu buttons (map menu + tracks menu) stacked top-right -->
+    <div class="absolute top-4 right-4 z-[1000] flex flex-col gap-2">
+        <button
+            class="btn btn-square bg-base-100 shadow-md border-0"
+            aria-label="Open map menu"
+            onclick={() => { menuOpen = true; tracksMenuOpen = false; }}
+        >
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <line x1="3" y1="6" x2="21" y2="6"></line>
+                <line x1="3" y1="12" x2="21" y2="12"></line>
+                <line x1="3" y1="18" x2="21" y2="18"></line>
+            </svg>
+        </button>
+        <button
+            class="btn btn-square bg-base-100 shadow-md border-0"
+            aria-label="Open tracks menu"
+            title="Walking tracks"
+            onclick={() => { tracksMenuOpen = true; menuOpen = false; }}
+        >
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="6" cy="19" r="2"></circle>
+                <circle cx="18" cy="5" r="2"></circle>
+                <path d="M8 19h6a4 4 0 0 0 0-8H10a4 4 0 0 1 0-8h6"></path>
+            </svg>
+        </button>
+    </div>
 
     <!-- Live zoom readout (sits above the OL scale line at the bottom-left) -->
     <div class="absolute bottom-8 left-2 z-[1000] bg-base-100/90 shadow-md rounded px-2 py-0.5 text-xs font-mono tabular-nums pointer-events-none">
@@ -313,6 +330,9 @@
 
     {#if menuOpen}
         <button class="absolute inset-0 z-[1999] cursor-default bg-transparent border-0 p-0" aria-label="Close menu" onclick={() => menuOpen = false}></button>
+    {/if}
+    {#if tracksMenuOpen}
+        <button class="absolute inset-0 z-[1999] cursor-default bg-transparent border-0 p-0" aria-label="Close tracks menu" onclick={() => tracksMenuOpen = false}></button>
     {/if}
 
     <div class="absolute inset-y-0 right-0 w-72 bg-base-200 shadow-2xl z-[2000] flex flex-col transition-transform duration-300 {menuOpen ? 'translate-x-0' : 'translate-x-full'}">
@@ -362,6 +382,45 @@
                         </label>
                     {/if}
                     <button class="btn btn-sm btn-outline" onclick={setSunNow}>Now</button>
+                </div>
+            {/if}
+        </div>
+    </div>
+
+    <!-- OpenStreetMap data slide-out: download / reuse tracks + buildings for the selection. -->
+    <div class="absolute inset-y-0 right-0 w-72 bg-base-200 shadow-2xl z-[2000] flex flex-col transition-transform duration-300 {tracksMenuOpen ? 'translate-x-0' : 'translate-x-full'}">
+        <div class="flex items-center justify-between px-4 py-3 bg-primary text-primary-content">
+            <h2 class="text-lg font-semibold">OpenStreetMap data</h2>
+            <button class="btn btn-ghost btn-sm btn-circle text-primary-content" onclick={() => tracksMenuOpen = false}>✕</button>
+        </div>
+        <div class="overflow-y-auto flex-1 py-2">
+            {#if !hasSelection}
+                <p class="px-4 py-2 text-sm opacity-60">Select an area on the map to download OpenStreetMap data for it.</p>
+            {:else}
+                <!-- Walking tracks -->
+                <div class="px-4 py-1 text-xs font-bold uppercase tracking-wider opacity-50">Walking tracks</div>
+                <div class="px-4 py-2 flex flex-col gap-2">
+                    <button class="btn btn-sm btn-block" title="Download walking tracks in the selected area" onclick={fetchTracks} disabled={tracksBusy}>
+                        {#if tracksBusy}<span class="loading loading-spinner loading-xs"></span>{/if}
+                        {tracksLabel}
+                    </button>
+                    <button class="btn btn-sm btn-block" title="Add the downloaded tracks to the 3D preview" onclick={onAddTracksToPreview} disabled={!tracksReady}>Add to preview</button>
+                    <button class="btn btn-sm btn-block" title="Download the raw track data as a JSON file" onclick={() => downloadJson(onDownloadTracks, 'tracks.json')} disabled={!tracksReady}>Download JSON</button>
+                    <button class="btn btn-sm btn-block" title="Load tracks from a previously downloaded JSON file" onclick={() => trackFileInput.click()}>Upload JSON</button>
+                    <input type="file" accept=".json,application/json" bind:this={trackFileInput} onchange={uploadTracks} class="hidden" />
+                </div>
+
+                <!-- Buildings -->
+                <div class="px-4 py-1 mt-2 text-xs font-bold uppercase tracking-wider opacity-50">Buildings</div>
+                <div class="px-4 py-2 flex flex-col gap-2">
+                    <button class="btn btn-sm btn-block" title="Download building footprints in the selected area" onclick={fetchBuildings} disabled={buildingsBusy}>
+                        {#if buildingsBusy}<span class="loading loading-spinner loading-xs"></span>{/if}
+                        {buildingsLabel}
+                    </button>
+                    <button class="btn btn-sm btn-block" title="Add the downloaded buildings to the 3D preview" onclick={onAddBuildingsToPreview} disabled={!buildingsReady}>Add to preview</button>
+                    <button class="btn btn-sm btn-block" title="Download the raw building data as a JSON file" onclick={() => downloadJson(onDownloadBuildings, 'buildings.json')} disabled={!buildingsReady}>Download JSON</button>
+                    <button class="btn btn-sm btn-block" title="Load buildings from a previously downloaded JSON file" onclick={() => buildingFileInput.click()}>Upload JSON</button>
+                    <input type="file" accept=".json,application/json" bind:this={buildingFileInput} onchange={uploadBuildings} class="hidden" />
                 </div>
             {/if}
         </div>
