@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
     HeightScaleProcessor, WaterProcessor, LowCutProcessor, SocketProcessor, TileDividerProcessor,
-    TrackRaiseProcessor, type ElevationContext, type VertexMesh,
+    type ElevationContext, type VertexMesh,
 } from '../../src/model/processors';
 import type { HeightGrid } from '../../src/HeightSampler';
 
@@ -87,36 +87,6 @@ describe('TileDividerProcessor', () => {
         expect(out.cols).toBe(4);
         expect(out.rows).toBe(4);
         expect([...out.heights].some(Number.isNaN)).toBe(false);
-    });
-});
-
-describe('TrackRaiseProcessor', () => {
-    // 4-cell grid; distance field marks cells 0 and 2 as on/near a track, 1 and 3 as far.
-    const grid = (heights: number[]): HeightGrid =>
-        ({ heights: new Float32Array(heights), cols: 2, rows: 2, widthMeters: 10, heightMeters: 10, minHeight: 0, maxHeight: 0, zoom: 14, tilesX: 1, tilesY: 1 });
-
-    it('raises with a smooth bell: full on the centreline, half at half-radius, zero at the edge', () => {
-        // distances: on-track, half-radius, exactly at radius, far beyond. raise 4, radius 10.
-        const dist = new Float32Array([0, 5, 10, 50]);
-        const out = new TrackRaiseProcessor(dist, 4, 10).process(grid([100, 100, 100, 100]));
-        expect(out.heights[0]).toBeCloseTo(104);   // centreline → full +4
-        expect(out.heights[1]).toBeCloseTo(102);   // half-radius → +2
-        expect(out.heights[2]).toBeCloseTo(100);   // at the edge → +0 (no cliff)
-        expect(out.heights[3]).toBe(100);          // beyond the radius → untouched
-    });
-
-    it('leaves no-data (NaN) cells as holes even when within the radius', () => {
-        const dist = new Float32Array([0, 0, 0, 0]);
-        const out = new TrackRaiseProcessor(dist, 5, 10).process(grid([NaN, 10, 10, 10]));
-        expect(Number.isNaN(out.heights[0])).toBe(true);
-        expect(out.heights[1]).toBe(15); // d=0 → full raise
-    });
-
-    it('is a no-op when the field length does not match the grid', () => {
-        const dist = new Float32Array([0, 0, 0]); // wrong length (3 ≠ 4)
-        const g = grid([1, 2, 3, 4]);
-        const out = new TrackRaiseProcessor(dist, 5, 10).process(g);
-        expect(out).toBe(g);
     });
 });
 

@@ -12,8 +12,8 @@ import { OpenLayersEngine } from './engine/OpenLayersEngine';
 import { MapLibreTerrainEngine } from './engine/MapLibreTerrainEngine';
 import { SelectionArea, LonLat } from './SelectionArea';
 import { TrackOverlay } from './TrackOverlay';
-import { fetchWalkingTracks, type Track } from './osm/OverpassTracks';
-import { trackDistanceField } from './osm/trackRaster';
+import { fetchWalkingTracks } from './osm/OverpassTracks';
+import { Tracks } from './osm/Tracks';
 import { sampleSelectionHeights, rectExtent, groundResolution, tileCoverage } from './HeightSampler';
 import { TerrainPreview } from './TerrainPreview';
 import { MapModel, SelectionShape } from './MapModel';
@@ -52,9 +52,9 @@ const config = new PreviewConfigStore();
 let currentCorners: LonLat[] | null = null;
 // OSM walking-track overlay on the OL 2D map; created once the OL map is ready.
 let trackOverlay: TrackOverlay | null = null;
-// The tracks last downloaded for the current selection (lon/lat polylines). Kept so they can
-// be re-rasterised into the model's distance field when added to the preview or on resample.
-let currentTracks: Track[] | null = null;
+// The tracks last downloaded for the current selection (gridless, lon/lat). Kept so they can be
+// re-bound to the grid and handed to the model when added to the preview or on resample.
+let currentTracks: Tracks | null = null;
 
 /** Compact toggle label for an elevation source name (drops the _elevation[_raw] tail). */
 function demLabel(name: string): string {
@@ -133,15 +133,16 @@ function cancelResample(): void {
     resampleAbort?.abort();
 }
 
-/** Rasterise the current tracks into a per-cell distance field aligned to the model's grid and
- *  hand it to the model (or clear it). Called whenever the tracks or the grid change. */
+/** Bind the current tracks to the model's grid and hand them over (or clear them). Called
+ *  whenever the tracks or the grid change; TrackCanvasProcessor paints them into the heights. */
 function syncTrackField(): void {
     const grid = model.getGrid();
-    if (!currentTracks || !currentCorners || !grid) { model.setTrackDistance(null); return; }
-    const field = trackDistanceField(
-        currentCorners, currentTracks, grid.cols, grid.rows, grid.widthMeters, grid.heightMeters,
-    );
-    model.setTrackDistance(field);
+    if (!currentTracks || !currentCorners || !grid) { model.setTracks(null); return; }
+    const bound = currentTracks.withGrid({
+        corners: currentCorners, cols: grid.cols, rows: grid.rows,
+        widthMeters: grid.widthMeters, heightMeters: grid.heightMeters,
+    });
+    model.setTracks(bound);
 }
 
 // Resampling hits the network, so changes to zoom / resolution limit are debounced.
@@ -186,7 +187,7 @@ function onSelectionChange(corners: LonLat[] | null): void {
     // Any downloaded tracks no longer match the new area: drop them + the preview section.
     trackOverlay?.clear();
     currentTracks = null;
-    model.setTrackDistance(null);
+    model.setTracks(null);
     appInstance?.setTracksAvailable(false);
     if (corners) resample();
     else model.setGrid(null); // notifies -> preview clears, stats null
@@ -411,15 +412,15 @@ async function init(): Promise<void> {
             // map. Returns the count so the button can report it; throws bubble to the panel.
             onFetchTracks: async () => {
                 if (!currentCorners) return 0;
-                const tracks = await fetchWalkingTracks(currentCorners);
-                currentTracks = tracks;
-                trackOverlay?.setTracks(tracks);
-                return tracks.length;
+                const fetched = await fetchWalkingTracks(currentCorners);
+                currentTracks = new Tracks(fetched);
+                trackOverlay?.setTracks(fetched);
+                return fetched.length;
             },
-            // Push the downloaded tracks into the model: rasterise them to the grid and reveal
-            // the preview's Tracks section so the raise can be configured.
+            // Push the downloaded tracks into the model: bind them to the grid and reveal the
+            // preview's Tracks section so the raise can be configured.
             onAddTracksToPreview: () => {
-                if (!currentTracks?.length) return;
+                if (!currentTracks || currentTracks.isEmpty()) return;
                 syncTrackField();
                 appInstance?.setTracksAvailable(true);
             },

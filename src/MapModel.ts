@@ -1,9 +1,11 @@
 import type { HeightGrid } from './HeightSampler';
 import {
-    type ElevationGridProcessor, TileDividerProcessor, TrackRaiseProcessor,
+    type ElevationGridProcessor, TileDividerProcessor,
     type ElevationValueProcessor, type ElevationContext, HeightScaleProcessor, WaterProcessor, LowCutProcessor,
     type VertexProcessor, type VertexMesh, SocketProcessor,
 } from './model/processors';
+import { TrackCanvasProcessor } from './model/TrackCanvasProcessor';
+import type { Tracks } from './osm/Tracks';
 import { pushQuadOriented, weldIndexed } from './model/geometry';
 
 /**
@@ -118,9 +120,9 @@ const SOCKET_FLOOR_OFFSET = 0.1;
  */
 export class MapModel {
     private grid: HeightGrid | null = null;
-    // Per-cell distance (metres) to the nearest OSM track, aligned to the current grid; feeds
-    // TrackRaiseProcessor. null = no tracks loaded. index.ts keeps it in sync with the grid.
-    private trackDistance: Float32Array | null = null;
+    // OSM tracks bound to the current grid (lon/lat → [col,row]); feeds TrackCanvasProcessor.
+    // null = no tracks loaded. index.ts keeps it in sync with the grid.
+    private tracks: Tracks | null = null;
     private settings: ModelSettings;
     private listeners = new Set<() => void>();
     private cache: ModelGeometry | null = null;
@@ -156,11 +158,11 @@ export class MapModel {
         return this.grid;
     }
 
-    /** Set the per-cell track distance field (metres to nearest track), aligned to the current
-     *  grid, or null to clear it. Rebuilds so the TrackRaiseProcessor picks it up. */
-    setTrackDistance(field: Float32Array | null): void {
-        if (this.trackDistance === field) return; // no-op (covers clearing an already-empty field)
-        this.trackDistance = field;
+    /** Set the OSM tracks (grid-bound, see Tracks.withGrid), or null to clear them. Rebuilds so
+     *  the TrackCanvasProcessor picks them up. */
+    setTracks(tracks: Tracks | null): void {
+        if (this.tracks === tracks) return; // no-op (covers clearing already-empty tracks)
+        this.tracks = tracks;
         this.notify();
     }
 
@@ -293,10 +295,10 @@ export class MapModel {
     private gridProcessors(): ElevationGridProcessor[] {
         const s = this.settings;
         const list: ElevationGridProcessor[] = [];
-        // Track raise runs FIRST, on the freshly sampled grid (its dims match the distance
-        // field), before tiling injects dividers and before the value chain.
-        if (s.tracksEnabled && this.trackDistance) {
-            list.push(new TrackRaiseProcessor(this.trackDistance, s.trackRaise, s.trackRadius));
+        // Track raise runs FIRST, on the freshly sampled grid (its dims match the tracks' bound
+        // grid), before tiling injects dividers and before the value chain.
+        if (s.tracksEnabled && this.tracks && !this.tracks.isEmpty()) {
+            list.push(new TrackCanvasProcessor(this.tracks, s.trackRaise, s.trackRadius));
         }
         // Tiling is expressed as a grid reshape: inject no-data divider lines so the hole
         // path walls each block into its own body. Replaces the old per-block buildTile loop.
