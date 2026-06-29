@@ -15,6 +15,8 @@
         onAspectChange = () => {},
         onFetchTracks = () => {},
         onAddTracksToPreview = () => {},
+        onDownloadTracks = () => null,
+        onUploadTracks = () => 0,
         initialZoom = 0,
         canCollapse = false,
         onCollapse = () => {},
@@ -59,6 +61,38 @@
             tracksLabel = 'Download failed';
         } finally {
             tracksBusy = false;
+            setTimeout(() => tracksLabel = 'Walking tracks', 2500);
+        }
+    }
+
+    // Save the raw downloaded track JSON to a file the user can keep and re-upload later.
+    function downloadTracks() {
+        const json = onDownloadTracks();
+        if (!json) return;
+        const blob = new Blob([JSON.stringify(json)], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'tracks.json';
+        a.click();
+        URL.revokeObjectURL(url);
+    }
+
+    // Hidden file input behind the Upload button; reading a saved file re-ingests its tracks
+    // exactly like a fresh download (overlay + enables "Add to preview").
+    let trackFileInput = $state();
+    async function uploadTracks(e) {
+        const file = e.target.files?.[0];
+        e.target.value = ''; // reset so re-selecting the same file fires onchange again
+        if (!file) return;
+        try {
+            const json = JSON.parse(await file.text());
+            const count = onUploadTracks(json);
+            tracksReady = count > 0;
+            tracksLabel = count ? `${count} tracks` : 'No tracks found';
+        } catch {
+            tracksLabel = 'Upload failed';
+        } finally {
             setTimeout(() => tracksLabel = 'Walking tracks', 2500);
         }
     }
@@ -231,6 +265,27 @@
                 onclick={onAddTracksToPreview}
                 disabled={!tracksReady}
             >Add to preview</button>
+            <!-- Save the raw downloaded track JSON (only once tracks exist). -->
+            {#if tracksReady}
+                <button
+                    class="btn btn-sm shadow-md border-0 bg-base-100 whitespace-nowrap"
+                    title="Download the raw track data as a JSON file"
+                    onclick={downloadTracks}
+                >Download</button>
+            {/if}
+            <!-- Reuse tracks from a previously downloaded file (no server round-trip). -->
+            <button
+                class="btn btn-sm shadow-md border-0 bg-base-100 whitespace-nowrap"
+                title="Load tracks from a previously downloaded JSON file"
+                onclick={() => trackFileInput.click()}
+            >Upload</button>
+            <input
+                type="file"
+                accept=".json,application/json"
+                bind:this={trackFileInput}
+                onchange={uploadTracks}
+                class="hidden"
+            />
         {/if}
     </div>
 

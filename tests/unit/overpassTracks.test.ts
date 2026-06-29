@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { cornersToBBox, buildQuery, parseTracks } from '../../src/osm/OverpassTracks';
+import { cornersToBBox, buildQuery, parseTracks, tracksFromJson } from '../../src/osm/OverpassTracks';
 import type { LonLat } from '../../src/SelectionArea';
 
 describe('cornersToBBox', () => {
@@ -43,5 +43,26 @@ describe('parseTracks', () => {
     it('is safe on an empty / malformed response', () => {
         expect(parseTracks({})).toEqual([]);
         expect(parseTracks(null)).toEqual([]);
+    });
+});
+
+describe('tracksFromJson', () => {
+    it('parses a raw Overpass response (has .elements)', () => {
+        const json = { elements: [{ type: 'way', geometry: [{ lat: 50, lon: 9 }, { lat: 50.1, lon: 9.1 }] }] };
+        expect(tracksFromJson(json)).toEqual([[[9, 50], [9.1, 50.1]]]);
+    });
+
+    it('accepts an already-parsed array of [lon,lat] polylines', () => {
+        const lines = [[[9, 50], [9.1, 50.1]]];
+        expect(tracksFromJson(lines)).toEqual(lines);
+    });
+
+    it('drops malformed polylines from an array (too short / bad points)', () => {
+        const lines = [
+            [[9, 50]],                       // single point
+            [[9, 50], [9.1, 50.1]],          // good
+            [[9, 50], ['x', 50.1]],          // non-numeric point
+        ];
+        expect(tracksFromJson(lines as any)).toEqual([[[9, 50], [9.1, 50.1]]]);
     });
 });

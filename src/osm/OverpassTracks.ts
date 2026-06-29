@@ -63,8 +63,21 @@ export function parseTracks(json: any): Track[] {
     return tracks;
 }
 
-/** Download all walking tracks within the selection. Throws on a non-OK Overpass response. */
-export async function fetchWalkingTracks(corners: LonLat[], signal?: AbortSignal): Promise<Track[]> {
+/** Build tracks from either a raw Overpass JSON response (has `.elements` — what a downloaded
+ *  file holds) or an already-parsed array of [lon,lat] polylines. Lets the Upload button accept
+ *  whatever was saved without the caller knowing which form it is. */
+export function tracksFromJson(json: any): Track[] {
+    if (Array.isArray(json)) {
+        return json.filter((line): line is Track =>
+            Array.isArray(line) && line.length >= 2 &&
+            line.every(p => Array.isArray(p) && p.length === 2 && typeof p[0] === 'number' && typeof p[1] === 'number'));
+    }
+    return parseTracks(json);
+}
+
+/** Download the raw Overpass JSON response for the selection (unparsed, so it can be saved to
+ *  disk verbatim and re-ingested later). Throws on a non-OK Overpass response. */
+export async function fetchWalkingTracksRaw(corners: LonLat[], signal?: AbortSignal): Promise<any> {
     const query = buildQuery(cornersToBBox(corners));
     Env.log('[tracks] downloading walking tracks from Overpass…');
     const t0 = performance.now();
@@ -75,7 +88,11 @@ export async function fetchWalkingTracks(corners: LonLat[], signal?: AbortSignal
     });
     if (!res.ok) throw new Error(`Overpass request failed (${res.status})`);
     const json = await res.json();
-    const tracks = parseTracks(json);
-    Env.log(`[tracks] downloaded ${tracks.length} tracks in ${Math.round(performance.now() - t0)} ms`);
-    return tracks;
+    Env.log(`[tracks] downloaded ${json?.elements?.length ?? 0} elements in ${Math.round(performance.now() - t0)} ms`);
+    return json;
+}
+
+/** Download all walking tracks within the selection. Throws on a non-OK Overpass response. */
+export async function fetchWalkingTracks(corners: LonLat[], signal?: AbortSignal): Promise<Track[]> {
+    return parseTracks(await fetchWalkingTracksRaw(corners, signal));
 }

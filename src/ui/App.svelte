@@ -16,6 +16,8 @@
         onAspectChange = () => {},
         onFetchTracks = () => {},
         onAddTracksToPreview = () => {},
+        onDownloadTracks = () => null,
+        onUploadTracks = () => 0,
         initialMapZoom = 0,
         // 3D-view menu (forwarded to PreviewPanel)
         previewDems = [],
@@ -140,6 +142,8 @@
         {onAspectChange}
         {onFetchTracks}
         {onAddTracksToPreview}
+        {onDownloadTracks}
+        {onUploadTracks}
         initialZoom={initialMapZoom}
         canCollapse={showBoth}
         onCollapse={collapseMap}

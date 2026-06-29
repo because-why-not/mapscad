@@ -12,7 +12,7 @@ import { OpenLayersEngine } from './engine/OpenLayersEngine';
 import { MapLibreTerrainEngine } from './engine/MapLibreTerrainEngine';
 import { SelectionArea, LonLat } from './SelectionArea';
 import { TrackOverlay } from './TrackOverlay';
-import { fetchWalkingTracks } from './osm/OverpassTracks';
+import { fetchWalkingTracksRaw, parseTracks, tracksFromJson } from './osm/OverpassTracks';
 import { Tracks } from './osm/Tracks';
 import { sampleSelectionHeights, rectExtent, groundResolution, tileCoverage } from './HeightSampler';
 import { TerrainPreview } from './TerrainPreview';
@@ -55,6 +55,9 @@ let trackOverlay: TrackOverlay | null = null;
 // The tracks last downloaded for the current selection (gridless, lon/lat). Kept so they can be
 // re-bound to the grid and handed to the model when added to the preview or on resample.
 let currentTracks: Tracks | null = null;
+// The raw Overpass JSON the current tracks came from, kept verbatim so Download can save the
+// exact server response (or the file an Upload was loaded from).
+let currentRawTracks: any = null;
 
 /** Compact toggle label for an elevation source name (drops the _elevation[_raw] tail). */
 function demLabel(name: string): string {
@@ -187,6 +190,7 @@ function onSelectionChange(corners: LonLat[] | null): void {
     // Any downloaded tracks no longer match the new area: drop them + the preview section.
     trackOverlay?.clear();
     currentTracks = null;
+    currentRawTracks = null;
     model.setTracks(null);
     appInstance?.setTracksAvailable(false);
     if (corners) resample();
@@ -412,7 +416,21 @@ async function init(): Promise<void> {
             // map. Returns the count so the button can report it; throws bubble to the panel.
             onFetchTracks: async () => {
                 if (!currentCorners) return 0;
-                const fetched = await fetchWalkingTracks(currentCorners);
+                const json = await fetchWalkingTracksRaw(currentCorners);
+                const fetched = parseTracks(json);
+                currentRawTracks = json;
+                currentTracks = new Tracks(fetched);
+                trackOverlay?.setTracks(fetched);
+                return fetched.length;
+            },
+            // Save the raw Overpass response verbatim so the same tracks can be reused later
+            // without re-querying. Returns the JSON (or null if nothing's been downloaded).
+            onDownloadTracks: () => currentRawTracks,
+            // Reuse tracks from a previously downloaded file: ingest + overlay them exactly like
+            // a fresh download, so "Add to preview" then works. Returns the track count.
+            onUploadTracks: (json: any) => {
+                const fetched = tracksFromJson(json);
+                currentRawTracks = json;
                 currentTracks = new Tracks(fetched);
                 trackOverlay?.setTracks(fetched);
                 return fetched.length;
