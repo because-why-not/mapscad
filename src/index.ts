@@ -1,4 +1,4 @@
-import { mount } from 'svelte';
+import { mount, flushSync } from 'svelte';
 import App from './ui/App.svelte';
 import './ui/app.css';
 import { Env } from './Env';
@@ -461,6 +461,13 @@ async function init(): Promise<void> {
             onLayoutChange: () => preview?.resize(),
         },
     });
+
+    // mount() inserts the DOM synchronously, but child-component `bind:this` refs (mapPanel,
+    // previewPanel) are wired by effects that flush asynchronously. The selection-restore below
+    // runs synchronously (controller.select -> OL onReady, no awaits), so without this flush the
+    // App's setSelectTool/setHasSelection forwarders would hit still-null child refs and no-op,
+    // leaving the toolbar buttons stuck in their default state after a reload.
+    flushSync();
 
     // Read the Svelte-rendered mount nodes from the DOM (mount() inserts synchronously);
     // more reliable than threading bind:this through nested components.
