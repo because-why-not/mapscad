@@ -1,4 +1,5 @@
 import type { LonLat } from '../SelectionArea';
+import { Env } from '../Env';
 
 /**
  * Fetches walking tracks for a selection from the OpenStreetMap Overpass API. Pure network +
@@ -65,6 +66,8 @@ export function parseTracks(json: any): Track[] {
 /** Download all walking tracks within the selection. Throws on a non-OK Overpass response. */
 export async function fetchWalkingTracks(corners: LonLat[], signal?: AbortSignal): Promise<Track[]> {
     const query = buildQuery(cornersToBBox(corners));
+    Env.log('[tracks] downloading walking tracks from Overpass…');
+    const t0 = performance.now();
     const res = await fetch(OVERPASS_URL, {
         method: 'POST',
         body: 'data=' + encodeURIComponent(query),
@@ -72,5 +75,7 @@ export async function fetchWalkingTracks(corners: LonLat[], signal?: AbortSignal
     });
     if (!res.ok) throw new Error(`Overpass request failed (${res.status})`);
     const json = await res.json();
-    return parseTracks(json);
+    const tracks = parseTracks(json);
+    Env.log(`[tracks] downloaded ${tracks.length} tracks in ${Math.round(performance.now() - t0)} ms`);
+    return tracks;
 }

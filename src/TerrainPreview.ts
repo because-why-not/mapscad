@@ -20,6 +20,7 @@ export class TerrainPreview {
     private framed = false; // only auto-frame the first model after the view was empty
     private lastW = 0;       // extent of the current model, for the reset-camera button
     private lastH = 0;
+    private lastCY = 0;      // vertical centre of the model (real elevation), for framing
     private raf = 0;
 
     // Custom right-drag rotation that orbits around the point under the cursor.
@@ -91,6 +92,8 @@ export class TerrainPreview {
 
         this.lastW = geo.widthMeters;
         this.lastH = geo.heightMeters;
+        // Y is real elevation (not centred on 0), so frame around the model's vertical midpoint.
+        this.lastCY = (geo.minY + geo.maxY) / 2;
 
         for (const tile of geo.tiles) {
             const buf = new THREE.BufferGeometry();
@@ -230,9 +233,10 @@ export class TerrainPreview {
 
     private frameCamera(w: number, h: number): void {
         const d = Math.max(w, h);
-        this.camera.position.set(0, d * 0.85, d * 0.95);
-        this.camera.lookAt(0, 0, 0);
-        this.controls.target.set(0, 0, 0);
+        const cy = this.lastCY; // model sits at real elevation; aim at its vertical centre
+        this.camera.position.set(0, cy + d * 0.85, d * 0.95);
+        this.camera.lookAt(0, cy, 0);
+        this.controls.target.set(0, cy, 0);
         this.controls.update();
     }
 }
