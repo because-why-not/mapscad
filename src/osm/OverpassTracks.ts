@@ -12,7 +12,7 @@ const OVERPASS_URL = 'https://overpass-api.de/api/interpreter';
 
 // OSM `highway` values that represent walkable tracks/paths (foot-first ways). Kept narrow on
 // purpose: this is "walking tracks", not the full road network.
-const WALKING_HIGHWAYS = ['path', 'footway', 'track', 'steps', 'bridleway', 'pedestrian'];
+const WALKING_HIGHWAYS = ['path', 'track', 'bridleway'];//, 'steps','footway', 'pedestrian'];
 
 /** A single track: a polyline of [lon, lat] points (lon/lat to match the app's LonLat). */
 export type Track = LonLat[];
