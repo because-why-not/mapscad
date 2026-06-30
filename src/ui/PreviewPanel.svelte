@@ -27,7 +27,8 @@
     let previewStats = $state(null);
     export function setPreviewStats(stats) { previewStats = stats; }
 
-    // Build progress for the bottom loading bar: null = hidden, else { loaded, total }.
+    // Bottom loading bar: null = hidden. Download phase = { loaded, total } (DEM tiles); build phase
+    // = { percent } (off-thread geometry build). The two render differently; both are cancellable.
     let previewLoading = $state(null);
     export function setPreviewLoading(state) { previewLoading = state; }
 
@@ -127,12 +128,20 @@
 
     {#if previewLoading}
         <div class="absolute bottom-0 left-0 right-0 z-[2100] bg-base-100/95 backdrop-blur border-t border-base-300 px-4 py-2 flex items-center gap-3">
-            <span class="text-sm whitespace-nowrap">Building preview…</span>
-            {#if previewLoading.total > 0}
-                <progress class="progress progress-primary flex-1" value={previewLoading.loaded} max={previewLoading.total}></progress>
-                <span class="text-xs font-mono tabular-nums whitespace-nowrap">{previewLoading.loaded} / {previewLoading.total} tiles</span>
+            {#if previewLoading.percent != null}
+                <!-- Build phase: off-thread geometry build. -->
+                <span class="text-sm whitespace-nowrap">Building mesh…</span>
+                <progress class="progress progress-primary flex-1" value={previewLoading.percent} max="100"></progress>
+                <span class="text-xs font-mono tabular-nums whitespace-nowrap">{previewLoading.percent}%</span>
             {:else}
-                <progress class="progress progress-primary flex-1"></progress>
+                <!-- Download phase: fetching DEM tiles. -->
+                <span class="text-sm whitespace-nowrap">Downloading elevation…</span>
+                {#if previewLoading.total > 0}
+                    <progress class="progress progress-primary flex-1" value={previewLoading.loaded} max={previewLoading.total}></progress>
+                    <span class="text-xs font-mono tabular-nums whitespace-nowrap">{previewLoading.loaded} / {previewLoading.total} tiles</span>
+                {:else}
+                    <progress class="progress progress-primary flex-1"></progress>
+                {/if}
             {/if}
             <button class="btn btn-sm btn-error" onclick={onCancel}>Cancel</button>
         </div>

@@ -19,7 +19,7 @@ import { OsmVectorData } from './osm/OsmVectorData';
 import { OSM_FEATURES, osmFeature } from './osm/osmFeatures';
 import { sampleSelectionHeights, rectExtent, groundResolution, tileCoverage } from './HeightSampler';
 import { TerrainPreview } from './TerrainPreview';
-import { MapModel, SelectionShape } from './MapModel';
+import { MapModel, SelectionShape, type ModelGeometry } from './MapModel';
 import { PreviewConfigStore } from './PreviewConfig';
 import { exportModelStl } from './StlMaker';
 import { estimateMemory, measureMemory, formatBytes, memoryLevel, isOverBudget } from './memory';
@@ -143,13 +143,18 @@ async function resample(): Promise<void> {
         if ((e as { name?: string })?.name === 'AbortError') Env.log('[3d] terrain build cancelled');
         else Env.error('resample', e);
     } finally {
-        if (resampleAbort === abort) { resampleAbort = null; appInstance?.setPreviewLoading(null); }
+        // On success setGrid kicked off the worker build, which now owns the progress bar (it hides
+        // it when done) — only clear it here if no build took over (download error/abort). The
+        // `resampleAbort === abort` guard stops a superseded resample from clobbering the live bar.
+        if (resampleAbort === abort) { resampleAbort = null; if (!buildBusy) appInstance?.setPreviewLoading(null); }
     }
 }
 
-/** User clicked Cancel on the loading bar — stop the in-flight build, keep the old preview. */
+/** User clicked Cancel on the loading bar — stop whichever phase is running (DEM download or the
+ *  off-thread build), keeping the previous preview. */
 function cancelResample(): void {
     resampleAbort?.abort();
+    cancelBuild();
 }
 
 /** Bind one OSM feature's downloaded ways to the model's grid and hand them over (or clear them).
@@ -251,10 +256,83 @@ function scheduleResample(): void {
     resampleTimer = window.setTimeout(resample, 200);
 }
 
-/** The model changed (new heights or new settings): rebuild the preview and the stats. */
+// Off-main-thread geometry build. Every model change rebuilds the preview in a worker so the heavy
+// build/buildKept math (and the weld) never blocks the UI, and the user can watch + cancel it on the
+// shared progress bar. One worker, latest-wins: while a build is in flight, the newest change is held
+// in `buildPending` and started on completion (intermediate slider ticks are skipped). Cancel and an
+// error/recreate just terminate the worker; the next build lazily spins up a fresh one.
+let buildWorker: Worker | null = null;
+let buildSeq = 0;            // id of the in-flight build; stale messages (after cancel) are ignored
+let buildBusy = false;
+let buildPending = false;
+
+function getBuildWorker(): Worker {
+    if (!buildWorker) {
+        buildWorker = new Worker(new URL('./model/geometry.worker.ts', import.meta.url));
+        buildWorker.onmessage = onBuildMessage;
+        buildWorker.onerror = (e) => { Env.error('build worker', e.message); finishBuild(); };
+    }
+    return buildWorker;
+}
+
+/** The model changed (new heights or new settings): rebuild the preview + stats off-thread. */
 function onModelChange(): void {
-    const geo = model.buildGeometry();
+    const grid = model.getGrid();
+    if (!grid) {                          // selection cleared: drop the preview, stats, and any build
+        cancelBuild();
+        preview?.setGeometry(null);
+        appInstance?.setPreviewStats(null);
+        return;
+    }
+    if (buildBusy) { buildPending = true; return; } // newest change wins when the current build ends
+    startBuild();
+}
+
+/** Kick off a build of the current model state in the worker, showing the progress bar. */
+function startBuild(): void {
+    const input = model.getBuildInput();
+    if (!input) return;
+    buildBusy = true;
+    buildPending = false;
+    const id = ++buildSeq;
+    appInstance?.setPreviewLoading({ phase: 'build', percent: 0 });
+    // Copy (no transfer): `input.grid` may be the model's own grid — don't detach it.
+    getBuildWorker().postMessage({ id, grid: input.grid, settings: input.settings });
+}
+
+function onBuildMessage(e: MessageEvent): void {
+    const msg = e.data;
+    if (msg.id !== buildSeq) return; // superseded by a cancel / newer build
+    if (msg.type === 'progress') {
+        appInstance?.setPreviewLoading({ phase: 'build', percent: Math.round(msg.fraction * 100) });
+        return;
+    }
+    if (msg.type === 'error') { Env.error('build', msg.message); finishBuild(); return; }
+    // done
+    const geo: ModelGeometry = msg.geo;
     preview?.setGeometry(geo);
+    updatePreviewStats(geo);
+    finishBuild();
+}
+
+/** Current build settled (done / error): start the queued one if any, else hide the bar. */
+function finishBuild(): void {
+    buildBusy = false;
+    if (buildPending) startBuild();
+    else appInstance?.setPreviewLoading(null);
+}
+
+/** User Cancel (or a model clear): abandon the in-flight build, keep the existing preview. */
+function cancelBuild(): void {
+    if (buildWorker) { buildWorker.terminate(); buildWorker = null; }
+    buildSeq++;            // invalidate any late message from the terminated worker
+    buildBusy = false;
+    buildPending = false;
+    appInstance?.setPreviewLoading(null);
+}
+
+/** Push the realistic mesh stats for a freshly built geometry to the overlay. */
+function updatePreviewStats(geo: ModelGeometry | null): void {
     const grid = model.getGrid();
     if (!grid || !geo) { appInstance?.setPreviewStats(null); return; }
     const mem = measureMemory(geo, grid); // realistic: from the actual built mesh, not a grid guess

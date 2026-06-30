@@ -1,13 +1,9 @@
 import type { HeightGrid } from './HeightSampler';
-import {
-    type ElevationGridProcessor, TileDividerProcessor,
-    type ElevationValueProcessor, type ElevationContext, HeightScaleProcessor, WaterProcessor, LowCutProcessor,
-    type VertexProcessor, type VertexMesh, SocketProcessor,
-} from './model/processors';
+import type { ElevationGridProcessor } from './model/processors';
 import { OsmCanvasProcessor } from './model/OsmCanvasProcessor';
+import { buildModelGeometry, type BuildInput } from './model/buildGeometry';
 import type { OsmVectorData } from './osm/OsmVectorData';
 import { OSM_FEATURES } from './osm/osmFeatures';
-import { pushQuadOriented, weldIndexed } from './model/geometry';
 
 /**
  * The single canonical 3D model. Everything that isn't sampling flows through here:
@@ -101,9 +97,6 @@ function defaultOsmSettings(): Record<string, OsmFeatureSettings> {
     for (const def of OSM_FEATURES) osm[def.id] = { enabled: false, raise: def.raise, radius: def.radius };
     return osm;
 }
-
-// Minimum socket thickness, so a "size 0" socket is still a handleable solid.
-const SOCKET_FLOOR_OFFSET = 0.1;
 
 /**
  * Holds the current `HeightGrid` + `ModelSettings` and turns them into neutral metre-space
@@ -208,294 +201,41 @@ export class MapModel {
     }
 
     private build(grid: HeightGrid): ModelGeometry {
-        const s = this.settings;
-        // Grid stage: reshape the whole grid first (may change its dimensions), so both the
-        // oval and rectangle builders and the value chain see the result. Empty by default.
-        for (const gp of this.gridProcessors()) grid = gp.process(grid);
-        // The oval footprint masks the sampled rectangle, so it gets its own builder
-        // (per-cell solid with a boundary-following wall); the rectangle path is untouched.
-        if (s.shape === SelectionShape.Oval) return this.buildOval(grid);
-
-        const { cols, rows, widthMeters, heightMeters } = grid;
-
-        // Elevation stage: run the per-cell processor chain (exaggeration, water, …) once,
-        // up front, into a model-space height field both the surface and the socket read.
-        const processed = this.applyElevation(grid);
-
-        // No-data carves holes: real gaps OR the tile dividers injected by gridProcessors().
-        // Route through the masked builder — one solid whose disconnected bodies ARE the tiles,
-        // each walled. The fast shared-vertex path below handles the un-tiled, gap-free case.
-        if (hasNoData(processed)) {
-            const keep = (cc: number, cr: number) => cellHasData(processed, cols, rows, cc, cr);
-            return this.buildKept(grid, processed, keep);
-        }
-
-        // Lowest model-space surface (incl. water), so the socket floor sits below the water.
-        const minY = minOf(processed);
-        const tile = this.buildTile(grid, processed, 0, cols - 1, 0, rows - 1, 0, 0, minY);
-
-        let lowY = Infinity, highY = -Infinity;
-        for (let i = 1; i < tile.positions.length; i += 3) {
-            const y = tile.positions[i];
-            if (y < lowY) lowY = y;
-            if (y > highY) highY = y;
-        }
-        if (!Number.isFinite(lowY)) { lowY = 0; highY = 0; }
-
-        // Solid thickness = top surface down to the flat base. Thinnest column sits at the
-        // lowest surface (= the socket depth); thickest reaches the highest surface. Without
-        // a socket the mesh is an open sheet, so there is no thickness.
-        let minThickness = 0, maxThickness = 0;
-        if (s.socketEnabled) {
-            const baseY = minY - Math.max(s.socketSize, SOCKET_FLOOR_OFFSET);
-            minThickness = minY - baseY;
-            maxThickness = highY - baseY;
-        }
-
-        return {
-            tiles: [tile], widthMeters, heightMeters,
-            vertexCount: tile.positions.length / 3,
-            triangleCount: tile.indices.length / 3,
-            minY: lowY, maxY: highY,
-            socketStartY: s.socketEnabled ? minY : null,
-            minThickness, maxThickness,
-        };
+        // Run the DOM-bound OSM grid stage here (workers have no canvas), then hand the raised grid
+        // to the shared pure pipeline — the SAME code the build worker runs off-thread.
+        for (const gp of this.osmGridProcessors()) grid = gp.process(grid);
+        const input: BuildInput = { grid, settings: this.settings };
+        return buildModelGeometry(input);
     }
 
-    /** Build one independent solid spanning grid columns c0..c1 and rows r0..r1. */
-    private buildTile(
-        grid: HeightGrid, processed: Float32Array,
-        c0: number, c1: number, r0: number, r1: number, ix0: number, iy0: number, minY: number,
-    ): ModelTile {
-        const { cols, rows, widthMeters, heightMeters } = grid;
-        const tcols = c1 - c0 + 1, trows = r1 - r0 + 1;
-
-        // Model-centred metre coordinates. The sampler walks west→east (c) and
-        // south→north (r), so +X is east and the south edge (r=0) is +Z (toward the
-        // default camera), north is -Z. This keeps East×North=Up (right-handed), so the
-        // mesh and exported STL are not mirrored.
-        const X = (c: number) => -widthMeters / 2 + (c / (cols - 1)) * widthMeters;
-        const Z = (r: number) => heightMeters / 2 - (r / (rows - 1)) * heightMeters;
-        const Y = (c: number, r: number) => processed[r * cols + c];
-
-        const positions: number[] = [];
-        const indices: number[] = [];
-
-        // Top surface.
-        for (let r = r0; r <= r1; r++) {
-            for (let c = c0; c <= c1; c++) positions.push(X(c), Y(c, r), Z(r));
-        }
-        for (let r = 0; r < trows - 1; r++) {
-            for (let c = 0; c < tcols - 1; c++) {
-                const a = r * tcols + c, b = a + 1, cc = a + tcols, d = cc + 1;
-                indices.push(a, b, cc, b, d, cc); // winding gives +Y up (with -Z = north)
-            }
-        }
-
-        // Vertex stage: each processor mutates this solid's mesh (e.g. the socket closes the
-        // open sheet into a watertight solid). minY is the model-wide floor anchor.
-        const mesh: VertexMesh = { positions, indices, tcols, trows, minY };
-        for (const vp of this.vertexProcessors()) vp.process(mesh);
-
-        const welded = weldIndexed(positions, indices);
-        return { positions: welded.positions, indices: welded.indices, ix0, iy0 };
+    /** Snapshot for an off-thread build: the OSM-raised grid + a settings copy. Runs only the
+     *  canvas-based OSM grid processors (the rest of the pipeline is pure and runs in the worker via
+     *  `buildModelGeometry`). Returns null when there's no grid. The returned grid is either a fresh
+     *  array (OSM active) or `this.grid` itself (no OSM) — postMessage copies it, so either is safe. */
+    getBuildInput(): BuildInput | null {
+        if (!this.grid) return null;
+        let grid = this.grid;
+        for (const gp of this.osmGridProcessors()) grid = gp.process(grid);
+        return { grid, settings: this.getSettings() };
     }
 
-    // --- processor chains ----------------------------------------------------
-
-    /** Grid-reshaping tools, applied to the whole grid before any value processing or geometry.
-     *  Some may change its dimensions (tile dividers). Today: OSM-feature raises (tracks, streets,
-     *  buildings — painted onto the freshly sampled grid) then tiling; future reshapers (crop,
-     *  resample, composite sources) slot into this same list. */
-    private gridProcessors(): ElevationGridProcessor[] {
+    /** The DOM-bound grid stage: OSM-feature raises, painted onto the sampled grid before any value
+     *  processing or geometry. Registry order is preserved so overlapping features composite
+     *  deterministically. Tiling (a pure reshape) runs later, inside `buildModelGeometry`. */
+    private osmGridProcessors(): ElevationGridProcessor[] {
         const s = this.settings;
         const list: ElevationGridProcessor[] = [];
-        // OSM-feature raises run FIRST, on the freshly sampled grid (its dims match each feature's
-        // bound grid), before tiling injects dividers and before the value chain. Registry order
-        // is preserved so overlapping features composite deterministically.
         for (const def of OSM_FEATURES) {
             const fs = s.osm[def.id];
             const data = this.osmData.get(def.id);
             if (fs?.enabled && data && !data.isEmpty()) {
-                list.push(new OsmCanvasProcessor(data, def, fs.raise, fs.radius));
+                const proc = new OsmCanvasProcessor(data, def, fs.raise, fs.radius);
+                list.push(proc);
             }
-        }
-        // Tiling is expressed as a grid reshape: inject no-data divider lines so the hole
-        // path walls each block into its own body. Replaces the old per-block buildTile loop.
-        if (s.tilesEnabled && (s.tilesX > 1 || s.tilesY > 1)) {
-            list.push(new TileDividerProcessor(s.tilesX, s.tilesY));
         }
         return list;
     }
 
-    /** Elevation-domain tools, applied per cell to the height value. Order matters and is the
-     *  array order below: the threshold tools (water, low-cut) run FIRST so they compare
-     *  un-exaggerated metres, then HeightScaleProcessor runs LAST and scales everything —
-     *  including the water plane — keeping the whole model proportional. See the elevation
-     *  gotcha in CLAUDE.md. */
-    private elevationValueProcessors(): ElevationValueProcessor[] {
-        const s = this.settings;
-        const list: ElevationValueProcessor[] = [];
-        if (s.waterEnabled) list.push(new WaterProcessor(s.waterCutoff, s.waterLevel));
-        if (s.lowCutEnabled) list.push(new LowCutProcessor(s.lowCutLevel));
-        list.push(new HeightScaleProcessor(s.heightScale));
-        return list;
-    }
-
-    /** Geometry-domain tools, applied to each emitted solid's mesh. */
-    private vertexProcessors(): VertexProcessor[] {
-        const s = this.settings;
-        return s.socketEnabled ? [new SocketProcessor(s.socketSize, SOCKET_FLOOR_OFFSET)] : [];
-    }
-
-    /** Run the elevation chain over every cell to produce model-space heights (metres). */
-    private applyElevation(grid: HeightGrid): Float32Array {
-        const procs = this.elevationValueProcessors();
-        const { heights, cols, rows } = grid;
-        const out = new Float32Array(heights.length);
-        for (let r = 0; r < rows; r++) {
-            for (let c = 0; c < cols; c++) {
-                const idx = r * cols + c;
-                const raw = heights[idx];
-                const ctx: ElevationContext = { raw, col: c, row: r, cols, rows, grid };
-                let v = raw;
-                for (const p of procs) v = p.process(v, ctx);
-                out[idx] = v;
-            }
-        }
-        return out;
-    }
-
-    /**
-     * Oval footprint: the inscribed ellipse of the sampled rectangle. Cells whose centre
-     * falls outside the ellipse are dropped, and the kept region is emitted as one solid
-     * with a wall on every boundary edge — a stair-stepped but watertight outline. Tiling
-     * is ignored for ovals (a single solid). The rectangle path is left exactly as-is.
-     */
-    private buildOval(grid: HeightGrid): ModelGeometry {
-        const { cols, rows } = grid;
-
-        // A cell (cc,cr) spans grid columns cc..cc+1 and rows cr..cr+1; keep it if its
-        // centre is inside the unit ellipse AND all four corners carry data (no-data carves
-        // holes in the oval too).
-        const inside = (cc: number, cr: number): boolean => {
-            if (cc < 0 || cr < 0 || cc >= cols - 1 || cr >= rows - 1) return false;
-            const du = 2 * ((cc + 0.5) / (cols - 1)) - 1;
-            const dv = 2 * ((cr + 0.5) / (rows - 1)) - 1;
-            return du * du + dv * dv <= 1;
-        };
-
-        const processed = this.applyElevation(grid);
-        const keep = (cc: number, cr: number) => inside(cc, cr) && cellHasData(processed, cols, rows, cc, cr);
-        return this.buildKept(grid, processed, keep);
-    }
-
-    /** Emit one masked solid over the cells kept by `keep`: top + (when socketed) base &
-     *  boundary walls. Shared by the oval and the no-data (hole-carving) rectangle path. */
-    private buildKept(
-        grid: HeightGrid, processed: Float32Array, keep: (cc: number, cr: number) => boolean,
-    ): ModelGeometry {
-        const { cols, rows, widthMeters, heightMeters } = grid;
-        const s = this.settings;
-
-        // Lowest / highest surface over the KEPT region (so the socket floor and thickness
-        // reflect the kept cells, not the discarded ones).
-        let minSurf = Infinity, highY = -Infinity;
-        for (let cr = 0; cr < rows - 1; cr++) {
-            for (let cc = 0; cc < cols - 1; cc++) {
-                if (!keep(cc, cr)) continue;
-                for (const [c, r] of [[cc, cr], [cc + 1, cr], [cc, cr + 1], [cc + 1, cr + 1]] as const) {
-                    const y = processed[r * cols + c];
-                    if (y < minSurf) minSurf = y;
-                    if (y > highY) highY = y;
-                }
-            }
-        }
-        if (!Number.isFinite(minSurf)) {
-            return {
-                tiles: [], widthMeters, heightMeters, vertexCount: 0, triangleCount: 0,
-                minY: 0, maxY: 0, socketStartY: null, minThickness: 0, maxThickness: 0,
-            };
-        }
-
-        const tile = this.buildMaskedTile(grid, processed, keep, minSurf);
-        let minThickness = 0, maxThickness = 0, lowY = minSurf;
-        if (s.socketEnabled) {
-            const baseY = minSurf - Math.max(s.socketSize, SOCKET_FLOOR_OFFSET);
-            lowY = baseY;
-            minThickness = minSurf - baseY;
-            maxThickness = highY - baseY;
-        }
-        return {
-            tiles: [tile], widthMeters, heightMeters,
-            vertexCount: tile.positions.length / 3,
-            triangleCount: tile.indices.length / 3,
-            minY: lowY, maxY: highY,
-            socketStartY: s.socketEnabled ? minSurf : null,
-            minThickness, maxThickness,
-        };
-    }
-
-    /** One solid over the kept cells: top + (when socketed) base & boundary walls. */
-    private buildMaskedTile(
-        grid: HeightGrid, processed: Float32Array, inside: (cc: number, cr: number) => boolean, minSurf: number,
-    ): ModelTile {
-        const { cols, rows, widthMeters, heightMeters } = grid;
-        const X = (c: number) => -widthMeters / 2 + (c / (cols - 1)) * widthMeters;
-        const Z = (r: number) => heightMeters / 2 - (r / (rows - 1)) * heightMeters;
-        type V = [number, number, number];
-        const top = (c: number, r: number): V => [X(c), processed[r * cols + c], Z(r)];
-
-        const socket = this.settings.socketEnabled;
-        const baseY = minSurf - Math.max(this.settings.socketSize, SOCKET_FLOOR_OFFSET);
-        const bot = (c: number, r: number): V => [X(c), baseY, Z(r)];
-
-        const positions: number[] = [];
-        const indices: number[] = [];
-        const quad = (p0: V, p1: V, p2: V, p3: V, ox: number, oy: number, oz: number) =>
-            pushQuadOriented(positions, indices, p0, p1, p2, p3, ox, oy, oz);
-
-        for (let cr = 0; cr < rows - 1; cr++) {
-            for (let cc = 0; cc < cols - 1; cc++) {
-                if (!inside(cc, cr)) continue;
-                const A = top(cc, cr), B = top(cc + 1, cr), C = top(cc, cr + 1), D = top(cc + 1, cr + 1);
-                quad(A, B, D, C, 0, 1, 0); // top surface faces +Y
-                if (!socket) continue;
-                const a = bot(cc, cr), b = bot(cc + 1, cr), c = bot(cc, cr + 1), d = bot(cc + 1, cr + 1);
-                quad(a, b, d, c, 0, -1, 0); // base faces -Y
-                // A wall on each edge whose neighbouring cell is outside the oval.
-                if (!inside(cc, cr - 1)) quad(A, B, b, a, 0, 0, 1);  // south edge → +Z
-                if (!inside(cc, cr + 1)) quad(C, D, d, c, 0, 0, -1); // north edge → -Z
-                if (!inside(cc - 1, cr)) quad(A, C, c, a, -1, 0, 0); // west edge  → -X
-                if (!inside(cc + 1, cr)) quad(B, D, d, b, 1, 0, 0);  // east edge  → +X
-            }
-        }
-        const welded = weldIndexed(positions, indices);
-        return { positions: welded.positions, indices: welded.indices, ix0: 0, iy0: 0 };
-    }
-
-}
-
-/** Smallest value in a float array (0 if empty / all non-finite). NaN entries are skipped. */
-function minOf(a: Float32Array): number {
-    let m = Infinity;
-    for (let i = 0; i < a.length; i++) if (a[i] < m) m = a[i];
-    return Number.isFinite(m) ? m : 0;
-}
-
-/** True if any cell is no-data (NaN) — the trigger to carve holes instead of a full sheet. */
-function hasNoData(a: Float32Array): boolean {
-    for (let i = 0; i < a.length; i++) if (Number.isNaN(a[i])) return true;
-    return false;
-}
-
-/** A cell (cc,cr) spans grid corners (cc..cc+1, cr..cr+1); printable only if all four carry
- *  data. A single no-data corner drops the whole cell, so the hole follows the missing data. */
-function cellHasData(processed: Float32Array, cols: number, rows: number, cc: number, cr: number): boolean {
-    if (cc < 0 || cr < 0 || cc >= cols - 1 || cr >= rows - 1) return false;
-    const a = processed[cr * cols + cc], b = processed[cr * cols + cc + 1];
-    const c = processed[(cr + 1) * cols + cc], d = processed[(cr + 1) * cols + cc + 1];
-    return a === a && b === b && c === c && d === d; // NaN !== NaN
 }
 
 function sanitize(s: ModelSettings): ModelSettings {
