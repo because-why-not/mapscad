@@ -185,12 +185,20 @@ function selectOsm(featureId: string | null, elementId: number | null): void {
     appInstance?.setOsmSelected(selectedOsm?.featureId ?? null, selectedOsm?.elementId ?? null);
 }
 
-/** Bring an element into the map view (used when it's picked from the list — it may be off-screen).
- *  Right padding clears the open OSM-data panel so the element doesn't land underneath it. */
+// Width (px) of the open OSM-data panel; the centred element is shifted left of it so it stays visible.
+const OSM_PANEL_PX = 288; // matches the panel's w-72
+
+/** Centre the map on an element (used when it's picked from the list — it may be off-screen) WITHOUT
+ *  changing the zoom. The centre is nudged so the element sits in the middle of the map area left of
+ *  the open OSM-data panel rather than underneath it. */
 function panToOsm(featureId: string, elementId: number): void {
     const extent = osmOverlays.get(featureId)?.extentOf(elementId);
     if (!extent || !olMap) return;
-    olMap.getView().fit(extent, { maxZoom: 17, padding: [40, 300, 40, 40], duration: 250 });
+    const view = olMap.getView();
+    const res = view.getResolution() ?? 0;
+    const cx = (extent[0] + extent[2]) / 2 + (OSM_PANEL_PX / 2) * res;
+    const cy = (extent[1] + extent[3]) / 2;
+    view.animate({ center: [cx, cy], duration: 250 });
 }
 
 /** Delete one element from a feature: drop it from the editable set, redraw, clear the selection if

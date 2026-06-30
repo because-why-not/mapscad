@@ -34,9 +34,8 @@
     export function setZoom(z) { mapZoom = z; }
 
     let menuOpen = $state(false);
-    // Second slide-out (track icon button); mutually exclusive with the map menu so the two
-    // right-hand panels never overlap.
-    let tracksMenuOpen = $state(false);
+    // The combined right-hand menu has two tabs: 'map' (layers + sun) and 'osm' (OpenStreetMap data).
+    let activeTab = $state('map');
     let activeProviderId = $state(untrack(() => initialActiveProviderId));
     let providerList = $state(untrack(() => tileProviders));
     let customList = $state(untrack(() => customMaps));
@@ -65,7 +64,7 @@
         osmSelected = featureId !== null && elementId !== null ? { featureId, elementId } : null;
         // Selecting an element (e.g. by clicking it on the map) opens the OSM-data menu so the user
         // sees the matching list entry highlighted — the map ↔ list connection.
-        if (osmSelected) { tracksMenuOpen = true; menuOpen = false; }
+        if (osmSelected) { menuOpen = true; activeTab = 'osm'; }
     }
     const isSelected = (fid, eid) => osmSelected?.featureId === fid && osmSelected?.elementId === eid;
     // Scroll the selected row into view once the menu/list has rendered (it stays in the DOM even
@@ -287,12 +286,13 @@
         {/if}
     </div>
 
-    <!-- Menu buttons (map menu + tracks menu) stacked top-right -->
+    <!-- Menu buttons: both open the one combined menu, each on its tab -->
     <div class="absolute top-4 right-4 z-[1000] flex flex-col gap-2">
         <button
             class="btn btn-square bg-base-100 shadow-md border-0"
             aria-label="Open map menu"
-            onclick={() => { menuOpen = true; tracksMenuOpen = false; }}
+            title="Map"
+            onclick={() => { menuOpen = true; activeTab = 'map'; }}
         >
             <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <line x1="3" y1="6" x2="21" y2="6"></line>
@@ -304,7 +304,7 @@
             class="btn btn-square bg-base-100 shadow-md border-0"
             aria-label="Open OpenStreetMap data menu"
             title="OpenStreetMap data"
-            onclick={() => { tracksMenuOpen = true; menuOpen = false; }}
+            onclick={() => { menuOpen = true; activeTab = 'osm'; }}
         >
             <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                 <circle cx="6" cy="19" r="2"></circle>
@@ -326,15 +326,22 @@
     {#if menuOpen}
         <button class="absolute inset-0 z-[1999] cursor-default bg-transparent border-0 p-0" aria-label="Close menu" onclick={() => menuOpen = false}></button>
     {/if}
-    {#if tracksMenuOpen}
-        <button class="absolute inset-0 z-[1999] cursor-default bg-transparent border-0 p-0" aria-label="Close tracks menu" onclick={() => tracksMenuOpen = false}></button>
-    {/if}
 
     <div class="absolute inset-y-0 right-0 w-72 bg-base-200 shadow-2xl z-[2000] flex flex-col transition-transform duration-300 {menuOpen ? 'translate-x-0' : 'translate-x-full'}">
-        <div class="flex items-center justify-between px-4 py-3 bg-primary text-primary-content">
-            <h2 class="text-lg font-semibold">Map Controls</h2>
-            <button class="btn btn-ghost btn-sm btn-circle text-primary-content" onclick={() => menuOpen = false}>✕</button>
+        <!-- Tab header: switch between Map controls and OpenStreetMap data -->
+        <div class="flex items-stretch bg-primary text-primary-content">
+            <button
+                class="flex-1 px-4 py-3 text-sm font-semibold {activeTab === 'map' ? 'bg-base-200 text-base-content' : 'opacity-80 hover:opacity-100'}"
+                onclick={() => activeTab = 'map'}
+            >Map</button>
+            <button
+                class="flex-1 px-4 py-3 text-sm font-semibold {activeTab === 'osm' ? 'bg-base-200 text-base-content' : 'opacity-80 hover:opacity-100'}"
+                onclick={() => activeTab = 'osm'}
+            >OSM data</button>
+            <button class="btn btn-ghost btn-sm btn-circle text-primary-content self-center mx-1" aria-label="Close menu" onclick={() => menuOpen = false}>✕</button>
         </div>
+
+        {#if activeTab === 'map'}
         <div class="overflow-y-auto flex-1 py-2">
             {#each sections as section (section.title)}
                 {@const isOpen = openSection === section.title}
@@ -380,14 +387,8 @@
                 </div>
             {/if}
         </div>
-    </div>
-
-    <!-- OpenStreetMap data slide-out: download / reuse tracks + buildings for the selection. -->
-    <div class="absolute inset-y-0 right-0 w-72 bg-base-200 shadow-2xl z-[2000] flex flex-col transition-transform duration-300 {tracksMenuOpen ? 'translate-x-0' : 'translate-x-full'}">
-        <div class="flex items-center justify-between px-4 py-3 bg-primary text-primary-content">
-            <h2 class="text-lg font-semibold">OpenStreetMap data</h2>
-            <button class="btn btn-ghost btn-sm btn-circle text-primary-content" onclick={() => tracksMenuOpen = false}>✕</button>
-        </div>
+        {:else}
+        <!-- OpenStreetMap data tab: download / reuse / edit tracks + buildings for the selection. -->
         <div class="overflow-y-auto flex-1 py-2">
             {#if !hasSelection}
                 <p class="px-4 py-2 text-sm opacity-60">Select an area on the map to download OpenStreetMap data for it.</p>
@@ -423,5 +424,6 @@
                 <input type="file" accept=".json,application/json" bind:this={osmFileInput} onchange={uploadOsm} class="hidden" />
             {/if}
         </div>
+        {/if}
     </div>
 </div>
