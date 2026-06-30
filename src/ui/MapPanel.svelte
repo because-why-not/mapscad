@@ -21,6 +21,10 @@
         onAddBuildingsToPreview = () => {},
         onDownloadBuildings = () => null,
         onUploadBuildings = () => 0,
+        onFetchStreets = () => {},
+        onAddStreetsToPreview = () => {},
+        onDownloadStreets = () => null,
+        onUploadStreets = () => 0,
         initialZoom = 0,
         canCollapse = false,
         onCollapse = () => {},
@@ -52,13 +56,17 @@
     // "Add to preview" button. Reset whenever the selection changes (tracks no longer match).
     let tracksReady = $state(false);
     let buildingsReady = $state(false);
-    export function setHasSelection(has) { hasSelection = has; tracksReady = false; buildingsReady = false; }
+    let streetsReady = $state(false);
+    export function setHasSelection(has) { hasSelection = has; tracksReady = false; buildingsReady = false; streetsReady = false; }
     // Track-download button feedback: idle label, a busy flag, and a transient result note.
     let tracksBusy = $state(false);
     let tracksLabel = $state('Download tracks');
     // Building-download button feedback (mirror of the track equivalents).
     let buildingsBusy = $state(false);
     let buildingsLabel = $state('Download buildings');
+    // Street-download button feedback (mirror of the track equivalents).
+    let streetsBusy = $state(false);
+    let streetsLabel = $state('Download streets');
 
     async function fetchTracks() {
         if (tracksBusy) return;
@@ -138,6 +146,39 @@
             buildingsLabel = 'Upload failed';
         } finally {
             setTimeout(() => buildingsLabel = 'Download buildings', 2500);
+        }
+    }
+
+    async function fetchStreets() {
+        if (streetsBusy) return;
+        streetsBusy = true;
+        streetsLabel = 'Downloading…';
+        try {
+            const count = await onFetchStreets();
+            streetsReady = count > 0;
+            streetsLabel = count ? `${count} streets` : 'No streets found';
+        } catch {
+            streetsLabel = 'Download failed';
+        } finally {
+            streetsBusy = false;
+            setTimeout(() => streetsLabel = 'Download streets', 2500);
+        }
+    }
+
+    let streetFileInput = $state();
+    async function uploadStreets(e) {
+        const file = e.target.files?.[0];
+        e.target.value = '';
+        if (!file) return;
+        try {
+            const json = JSON.parse(await file.text());
+            const count = onUploadStreets(json);
+            streetsReady = count > 0;
+            streetsLabel = count ? `${count} streets` : 'No streets found';
+        } catch {
+            streetsLabel = 'Upload failed';
+        } finally {
+            setTimeout(() => streetsLabel = 'Download streets', 2500);
         }
     }
     // Aspect-ratio lock for drawing/resizing (session-only). 'free' or a 'w:h' preset, or
@@ -307,8 +348,8 @@
         </button>
         <button
             class="btn btn-square bg-base-100 shadow-md border-0"
-            aria-label="Open tracks menu"
-            title="Walking tracks"
+            aria-label="Open OpenStreetMap data menu"
+            title="OpenStreetMap data"
             onclick={() => { tracksMenuOpen = true; menuOpen = false; }}
         >
             <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -397,10 +438,10 @@
             {#if !hasSelection}
                 <p class="px-4 py-2 text-sm opacity-60">Select an area on the map to download OpenStreetMap data for it.</p>
             {:else}
-                <!-- Walking tracks -->
-                <div class="px-4 py-1 text-xs font-bold uppercase tracking-wider opacity-50">Walking tracks</div>
+                <!-- Tracks -->
+                <div class="px-4 py-1 text-xs font-bold uppercase tracking-wider opacity-50">Tracks</div>
                 <div class="px-4 py-2 flex flex-col gap-2">
-                    <button class="btn btn-sm btn-block" title="Download walking tracks in the selected area" onclick={fetchTracks} disabled={tracksBusy}>
+                    <button class="btn btn-sm btn-block" title="Download tracks in the selected area" onclick={fetchTracks} disabled={tracksBusy}>
                         {#if tracksBusy}<span class="loading loading-spinner loading-xs"></span>{/if}
                         {tracksLabel}
                     </button>
@@ -421,6 +462,19 @@
                     <button class="btn btn-sm btn-block" title="Download the raw building data as a JSON file" onclick={() => downloadJson(onDownloadBuildings, 'buildings.json')} disabled={!buildingsReady}>Download JSON</button>
                     <button class="btn btn-sm btn-block" title="Load buildings from a previously downloaded JSON file" onclick={() => buildingFileInput.click()}>Upload JSON</button>
                     <input type="file" accept=".json,application/json" bind:this={buildingFileInput} onchange={uploadBuildings} class="hidden" />
+                </div>
+
+                <!-- Streets (car roads) -->
+                <div class="px-4 py-1 mt-2 text-xs font-bold uppercase tracking-wider opacity-50">Streets</div>
+                <div class="px-4 py-2 flex flex-col gap-2">
+                    <button class="btn btn-sm btn-block" title="Download streets (car roads) in the selected area" onclick={fetchStreets} disabled={streetsBusy}>
+                        {#if streetsBusy}<span class="loading loading-spinner loading-xs"></span>{/if}
+                        {streetsLabel}
+                    </button>
+                    <button class="btn btn-sm btn-block" title="Add the downloaded streets to the 3D preview" onclick={onAddStreetsToPreview} disabled={!streetsReady}>Add to preview</button>
+                    <button class="btn btn-sm btn-block" title="Download the raw street data as a JSON file" onclick={() => downloadJson(onDownloadStreets, 'streets.json')} disabled={!streetsReady}>Download JSON</button>
+                    <button class="btn btn-sm btn-block" title="Load streets from a previously downloaded JSON file" onclick={() => streetFileInput.click()}>Upload JSON</button>
+                    <input type="file" accept=".json,application/json" bind:this={streetFileInput} onchange={uploadStreets} class="hidden" />
                 </div>
             {/if}
         </div>

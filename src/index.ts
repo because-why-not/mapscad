@@ -13,10 +13,13 @@ import { MapLibreTerrainEngine } from './engine/MapLibreTerrainEngine';
 import { SelectionArea, LonLat } from './SelectionArea';
 import { TrackOverlay } from './TrackOverlay';
 import { BuildingOverlay } from './BuildingOverlay';
-import { fetchWalkingTracksRaw, parseTracks, tracksFromJson } from './osm/OverpassTracks';
+import { StreetOverlay } from './StreetOverlay';
+import { fetchTracksRaw, parseTracks, tracksFromJson } from './osm/OverpassTracks';
 import { fetchBuildingsRaw, parseBuildings, buildingsFromJson } from './osm/OverpassBuildings';
+import { fetchStreetsRaw, parseStreets, streetsFromJson } from './osm/OverpassStreets';
 import { Tracks } from './osm/Tracks';
 import { Buildings } from './osm/Buildings';
+import { Streets } from './osm/Streets';
 import { sampleSelectionHeights, rectExtent, groundResolution, tileCoverage } from './HeightSampler';
 import { TerrainPreview } from './TerrainPreview';
 import { MapModel, SelectionShape } from './MapModel';
@@ -65,6 +68,10 @@ let currentRawTracks: any = null;
 let buildingOverlay: BuildingOverlay | null = null;
 let currentBuildings: Buildings | null = null;
 let currentRawBuildings: any = null;
+// Street (car-road) overlay + state, mirroring the track equivalents above.
+let streetOverlay: StreetOverlay | null = null;
+let currentStreets: Streets | null = null;
+let currentRawStreets: any = null;
 
 /** Compact toggle label for an elevation source name (drops the _elevation[_raw] tail). */
 function demLabel(name: string): string {
@@ -130,6 +137,7 @@ async function resample(): Promise<void> {
         model.setGrid(grid); // notifies -> preview + stats rebuild from the model
         syncTrackField(); // re-rasterise tracks (if any) to the new grid dimensions
         syncBuildingField(); // re-rasterise buildings (if any) to the new grid dimensions
+        syncStreetField(); // re-rasterise streets (if any) to the new grid dimensions
         Env.log(`[3d] terrain regenerated in ${Math.round(performance.now() - t0)} ms`);
     } catch (e) {
         if ((e as { name?: string })?.name === 'AbortError') Env.log('[3d] terrain build cancelled');
@@ -163,6 +171,15 @@ function syncBuildingField(): void {
     if (!currentBuildings || !currentCorners || !grid) { model.setBuildings(null); return; }
     const bound = currentBuildings.withGrid({ corners: currentCorners, cols: grid.cols, rows: grid.rows });
     model.setBuildings(bound);
+}
+
+/** Bind the current streets to the model's grid and hand them over (or clear them). Mirrors
+ *  syncTrackField; StreetCanvasProcessor paints them into the heights. */
+function syncStreetField(): void {
+    const grid = model.getGrid();
+    if (!currentStreets || !currentCorners || !grid) { model.setStreets(null); return; }
+    const bound = currentStreets.withGrid({ corners: currentCorners, cols: grid.cols, rows: grid.rows });
+    model.setStreets(bound);
 }
 
 // Resampling hits the network, so changes to zoom / resolution limit are debounced.
@@ -215,6 +232,11 @@ function onSelectionChange(corners: LonLat[] | null): void {
     currentRawBuildings = null;
     model.setBuildings(null);
     appInstance?.setBuildingsAvailable(false);
+    streetOverlay?.clear();
+    currentStreets = null;
+    currentRawStreets = null;
+    model.setStreets(null);
+    appInstance?.setStreetsAvailable(false);
     if (corners) resample();
     else model.setGrid(null); // notifies -> preview clears, stats null
 }
@@ -438,7 +460,7 @@ async function init(): Promise<void> {
             // map. Returns the count so the button can report it; throws bubble to the panel.
             onFetchTracks: async () => {
                 if (!currentCorners) return 0;
-                const json = await fetchWalkingTracksRaw(currentCorners);
+                const json = await fetchTracksRaw(currentCorners);
                 const fetched = parseTracks(json);
                 currentRawTracks = json;
                 currentTracks = new Tracks(fetched);
@@ -486,6 +508,29 @@ async function init(): Promise<void> {
                 if (!currentBuildings || currentBuildings.isEmpty()) return;
                 syncBuildingField();
                 appInstance?.setBuildingsAvailable(true);
+            },
+            // Street equivalents of the track callbacks above (same lifecycle).
+            onFetchStreets: async () => {
+                if (!currentCorners) return 0;
+                const json = await fetchStreetsRaw(currentCorners);
+                const fetched = parseStreets(json);
+                currentRawStreets = json;
+                currentStreets = new Streets(fetched);
+                streetOverlay?.setStreets(fetched);
+                return fetched.length;
+            },
+            onDownloadStreets: () => currentRawStreets,
+            onUploadStreets: (json: any) => {
+                const fetched = streetsFromJson(json);
+                currentRawStreets = json;
+                currentStreets = new Streets(fetched);
+                streetOverlay?.setStreets(fetched);
+                return fetched.length;
+            },
+            onAddStreetsToPreview: () => {
+                if (!currentStreets || currentStreets.isEmpty()) return;
+                syncStreetField();
+                appInstance?.setStreetsAvailable(true);
             },
             previewDems,
             initialPreviewDemId: initialDemId,
@@ -556,6 +601,7 @@ async function init(): Promise<void> {
         if (selection) return;
         selection = new SelectionArea(olMap, { onChange: onUserSelectionChange });
         buildingOverlay = new BuildingOverlay(olMap);
+        streetOverlay = new StreetOverlay(olMap);
         trackOverlay = new TrackOverlay(olMap);
         const savedCorners = config.get().selection;
         if (savedCorners) {

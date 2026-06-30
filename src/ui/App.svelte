@@ -22,6 +22,10 @@
         onAddBuildingsToPreview = () => {},
         onDownloadBuildings = () => null,
         onUploadBuildings = () => 0,
+        onFetchStreets = () => {},
+        onAddStreetsToPreview = () => {},
+        onDownloadStreets = () => null,
+        onUploadStreets = () => 0,
         initialMapZoom = 0,
         // 3D-view menu (forwarded to PreviewPanel)
         previewDems = [],
@@ -75,6 +79,7 @@
     export function setHasSelection(has) { mapPanel?.setHasSelection(has); }
     export function setTracksAvailable(has) { previewPanel?.setTracksAvailable(has); }
     export function setBuildingsAvailable(has) { previewPanel?.setBuildingsAvailable(has); }
+    export function setStreetsAvailable(has) { previewPanel?.setStreetsAvailable(has); }
     export function setMapZoom(z) { mapPanel?.setZoom(z); }
     export function setPreviewStats(stats) { previewPanel?.setPreviewStats(stats); }
     export function setPreviewLoading(state) { previewPanel?.setPreviewLoading(state); }
@@ -153,6 +158,10 @@
         {onAddBuildingsToPreview}
         {onDownloadBuildings}
         {onUploadBuildings}
+        {onFetchStreets}
+        {onAddStreetsToPreview}
+        {onDownloadStreets}
+        {onUploadStreets}
         initialZoom={initialMapZoom}
         canCollapse={showBoth}
         onCollapse={collapseMap}

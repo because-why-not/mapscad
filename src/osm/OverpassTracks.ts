@@ -2,7 +2,7 @@ import type { LonLat } from '../SelectionArea';
 import { Env } from '../Env';
 
 /**
- * Fetches walking tracks for a selection from the OpenStreetMap Overpass API. Pure network +
+ * Fetches tracks for a selection from the OpenStreetMap Overpass API. Pure network +
  * parsing — no map/DOM coupling, so it can be unit-tested and later reused by the height-grid
  * pipeline (see todo.md "Layered vector + raster pipeline"). For now its only consumer is the
  * map-view overlay (`TrackOverlay`).
@@ -10,9 +10,9 @@ import { Env } from '../Env';
 
 const OVERPASS_URL = 'https://overpass-api.de/api/interpreter';
 
-// OSM `highway` values that represent walkable tracks/paths (foot-first ways). Kept narrow on
-// purpose: this is "walking tracks", not the full road network.
-const WALKING_HIGHWAYS = ['path', 'track', 'bridleway'];//, 'steps','footway', 'pedestrian'];
+// OSM `highway` values that represent foot-first tracks/paths (walking away from roads). Kept
+// narrow on purpose: this is "tracks", not the car road network (see OverpassStreets for that).
+const TRACK_HIGHWAYS = ['path', 'track', 'bridleway'];//, 'steps','footway', 'pedestrian'];
 
 /** A single track: a polyline of [lon, lat] points (lon/lat to match the app's LonLat). */
 export type Track = LonLat[];
@@ -38,10 +38,10 @@ export function cornersToBBox(corners: LonLat[]): BBox {
     return { south, west, north, east };
 }
 
-/** Overpass QL for every walking-track way within the bbox, geometry inlined (`out geom`). */
+/** Overpass QL for every track way within the bbox, geometry inlined (`out geom`). */
 export function buildQuery(bbox: BBox): string {
     const { south, west, north, east } = bbox;
-    const filter = WALKING_HIGHWAYS.join('|');
+    const filter = TRACK_HIGHWAYS.join('|');
     return `[out:json][timeout:25];
 (
   way["highway"~"^(${filter})$"](${south},${west},${north},${east});
@@ -77,9 +77,9 @@ export function tracksFromJson(json: any): Track[] {
 
 /** Download the raw Overpass JSON response for the selection (unparsed, so it can be saved to
  *  disk verbatim and re-ingested later). Throws on a non-OK Overpass response. */
-export async function fetchWalkingTracksRaw(corners: LonLat[], signal?: AbortSignal): Promise<any> {
+export async function fetchTracksRaw(corners: LonLat[], signal?: AbortSignal): Promise<any> {
     const query = buildQuery(cornersToBBox(corners));
-    Env.log('[tracks] downloading walking tracks from Overpass…');
+    Env.log('[tracks] downloading tracks from Overpass…');
     const t0 = performance.now();
     const res = await fetch(OVERPASS_URL, {
         method: 'POST',
@@ -92,7 +92,7 @@ export async function fetchWalkingTracksRaw(corners: LonLat[], signal?: AbortSig
     return json;
 }
 
-/** Download all walking tracks within the selection. Throws on a non-OK Overpass response. */
-export async function fetchWalkingTracks(corners: LonLat[], signal?: AbortSignal): Promise<Track[]> {
-    return parseTracks(await fetchWalkingTracksRaw(corners, signal));
+/** Download all tracks within the selection. Throws on a non-OK Overpass response. */
+export async function fetchTracks(corners: LonLat[], signal?: AbortSignal): Promise<Track[]> {
+    return parseTracks(await fetchTracksRaw(corners, signal));
 }

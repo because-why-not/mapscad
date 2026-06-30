@@ -6,8 +6,10 @@ import {
 } from './model/processors';
 import { TrackCanvasProcessor } from './model/TrackCanvasProcessor';
 import { BuildingCanvasProcessor } from './model/BuildingCanvasProcessor';
+import { StreetCanvasProcessor } from './model/StreetCanvasProcessor';
 import type { Tracks } from './osm/Tracks';
 import type { Buildings } from './osm/Buildings';
+import type { Streets } from './osm/Streets';
 import { pushQuadOriented, weldIndexed } from './model/geometry';
 
 /**
@@ -41,6 +43,9 @@ export interface ModelSettings {
     trackRadius: number;     // metres: cells within this distance of a track are raised
     buildingsEnabled: boolean; // raise terrain over downloaded OSM building footprints
     buildingRaise: number;   // metres to raise (or carve, if negative) each footprint by
+    streetsEnabled: boolean; // raise terrain along downloaded OSM streets (car roads)
+    streetRaise: number;     // metres to raise cells near a street by
+    streetRadius: number;    // metres: cells within this distance of a street are raised
     shape: SelectionShape;   // footprint cut from the (still rectangular) sampled grid
 }
 
@@ -91,6 +96,9 @@ export const DEFAULT_MODEL_SETTINGS: ModelSettings = {
     trackRadius: 10,
     buildingsEnabled: false,
     buildingRaise: 6,
+    streetsEnabled: false,
+    streetRaise: 2,
+    streetRadius: 12,
     shape: SelectionShape.Rectangle,
 };
 
@@ -132,6 +140,9 @@ export class MapModel {
     // OSM building footprints bound to the current grid; feeds BuildingCanvasProcessor. Same
     // lifecycle as `tracks`.
     private buildings: Buildings | null = null;
+    // OSM streets (car roads) bound to the current grid; feeds StreetCanvasProcessor. Same
+    // lifecycle as `tracks`.
+    private streets: Streets | null = null;
     private settings: ModelSettings;
     private listeners = new Set<() => void>();
     private cache: ModelGeometry | null = null;
@@ -180,6 +191,14 @@ export class MapModel {
     setBuildings(buildings: Buildings | null): void {
         if (this.buildings === buildings) return;
         this.buildings = buildings;
+        this.notify();
+    }
+
+    /** Set the OSM streets (grid-bound, see Streets.withGrid), or null to clear them. Rebuilds so
+     *  the StreetCanvasProcessor picks them up. */
+    setStreets(streets: Streets | null): void {
+        if (this.streets === streets) return;
+        this.streets = streets;
         this.notify();
     }
 
@@ -320,6 +339,10 @@ export class MapModel {
         // Building raise runs on the same freshly sampled grid (after tracks, before tiling).
         if (s.buildingsEnabled && this.buildings && !this.buildings.isEmpty()) {
             list.push(new BuildingCanvasProcessor(this.buildings, s.buildingRaise));
+        }
+        // Street raise: same freshly sampled grid, painted like tracks (after buildings, before tiling).
+        if (s.streetsEnabled && this.streets && !this.streets.isEmpty()) {
+            list.push(new StreetCanvasProcessor(this.streets, s.streetRaise, s.streetRadius));
         }
         // Tiling is expressed as a grid reshape: inject no-data divider lines so the hole
         // path walls each block into its own body. Replaces the old per-block buildTile loop.
@@ -519,6 +542,9 @@ function sanitize(s: ModelSettings): ModelSettings {
         trackRadius: Math.max(0, num(s.trackRadius, 10)),
         buildingsEnabled: !!s.buildingsEnabled,
         buildingRaise: num(s.buildingRaise, 6),
+        streetsEnabled: !!s.streetsEnabled,
+        streetRaise: num(s.streetRaise, 2),
+        streetRadius: Math.max(0, num(s.streetRadius, 12)),
         shape: s.shape === SelectionShape.Oval ? SelectionShape.Oval : SelectionShape.Rectangle,
     };
 }
