@@ -21,7 +21,7 @@ export class TerrainPreview {
     private lastW = 0;       // extent of the current model, for the reset-camera button
     private lastH = 0;
     private lastCY = 0;      // vertical centre of the model (real elevation), for framing
-    private raf = 0;
+    private raf = 0;         // pending render-frame handle (0 = nothing scheduled)
 
     // Custom right-drag rotation that orbits around the point under the cursor.
     private raycaster = new THREE.Raycaster();
@@ -56,6 +56,10 @@ export class TerrainPreview {
             MIDDLE: THREE.MOUSE.DOLLY,
             RIGHT: undefined,
         } as any;
+        // Damping is off, so OrbitControls fires 'change' synchronously on every camera move
+        // (pan/zoom + our custom right-drag, which ends in controls.update()). That's our only
+        // camera redraw trigger — the scene has no animation, so there's no per-frame loop.
+        this.controls.addEventListener('change', this.requestRender);
         const el = this.renderer.domElement;
         el.addEventListener('pointerdown', this.onPointerDown);
         el.addEventListener('contextmenu', this.onContextMenu);
@@ -74,17 +78,25 @@ export class TerrainPreview {
         this.scene.add(this.group);
 
         this.resize();
-        const loop = () => {
-            this.raf = requestAnimationFrame(loop);
-            this.controls.update();
-            this.renderer.render(this.scene, this.camera);
-        };
-        loop();
+        this.requestRender(); // initial paint of the (empty) scene
     }
+
+    /** Schedule a single render on the next frame, coalescing multiple requests in the same tick.
+     *  The preview has no animation, so we redraw only when the model or the camera changes. */
+    private requestRender = (): void => {
+        if (this.raf) return;
+        this.raf = requestAnimationFrame(this.renderFrame);
+    };
+    private renderFrame = (): void => {
+        this.raf = 0;
+        this.controls.update();
+        this.renderer.render(this.scene, this.camera);
+    };
 
     /** Render a MapModel geometry (or null to clear). One Three mesh per tile. */
     setGeometry(geo: ModelGeometry | null): void {
         this.clear();
+        this.requestRender(); // content changed (cleared or rebuilt) — redraw regardless of the camera
         if (!geo || geo.tiles.length === 0) {
             this.framed = false; // next model after an empty view gets re-framed
             return;
@@ -144,6 +156,7 @@ export class TerrainPreview {
     setSmoothShading(enabled: boolean): void {
         this.material.flatShading = !enabled;
         this.material.needsUpdate = true;
+        this.requestRender();
     }
 
     // --- right-drag rotation around the cursor --------------------------------
@@ -214,10 +227,12 @@ export class TerrainPreview {
         this.renderer.setSize(w, h, false);
         this.camera.aspect = w / h;
         this.camera.updateProjectionMatrix();
+        this.requestRender();
     }
 
     dispose(): void {
         cancelAnimationFrame(this.raf);
+        this.controls.removeEventListener('change', this.requestRender);
         const el = this.renderer.domElement;
         el.removeEventListener('pointerdown', this.onPointerDown);
         el.removeEventListener('contextmenu', this.onContextMenu);
