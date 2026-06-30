@@ -21,6 +21,7 @@
         onOsmUpload = () => 0,
         onOsmSelectElement = () => {},
         onOsmDeleteElement = () => {},
+        onOsmHoverElement = () => {},
         initialZoom = 0,
         canCollapse = false,
         onCollapse = () => {},
@@ -323,10 +324,6 @@
         <button class="collapse-btn btn btn-xs btn-circle bg-base-100 border-0 shadow" title="Hide map" onclick={onCollapse}>‹</button>
     {/if}
 
-    {#if menuOpen}
-        <button class="absolute inset-0 z-[1999] cursor-default bg-transparent border-0 p-0" aria-label="Close menu" onclick={() => menuOpen = false}></button>
-    {/if}
-
     <div class="absolute inset-y-0 right-0 w-72 bg-base-200 shadow-2xl z-[2000] flex flex-col transition-transform duration-300 {menuOpen ? 'translate-x-0' : 'translate-x-full'}">
         <!-- Tab header: switch between Map controls and OpenStreetMap data -->
         <div class="flex items-stretch bg-primary text-primary-content">
@@ -413,7 +410,8 @@
                     {#if elements.length}
                         <ul class="mx-4 mb-1 max-h-48 overflow-y-auto rounded border border-base-300 divide-y divide-base-300 text-sm">
                             {#each elements as el (el.id)}
-                                <li data-osm-el="{f.id}:{el.id}" class="flex items-center {isSelected(f.id, el.id) ? 'bg-primary text-primary-content' : 'hover:bg-base-300'}">
+                                <li data-osm-el="{f.id}:{el.id}" class="flex items-center {isSelected(f.id, el.id) ? 'bg-primary text-primary-content' : 'hover:bg-base-300'}"
+                                    onmouseenter={() => onOsmHoverElement(f.id, el.id)} onmouseleave={() => onOsmHoverElement(null, null)}>
                                     <button class="flex-1 text-left px-2 py-1 truncate bg-transparent border-0" title={el.label} onclick={() => onOsmSelectElement(f.id, el.id)}>{el.label}</button>
                                     <button class="px-2 py-1 opacity-70 hover:opacity-100 bg-transparent border-0" title="Delete this {f.label.toLowerCase()} element" aria-label="Delete element" onclick={() => onOsmDeleteElement(f.id, el.id)}>✕</button>
                                 </li>

@@ -185,6 +185,12 @@ function selectOsm(featureId: string | null, elementId: number | null): void {
     appInstance?.setOsmSelected(selectedOsm?.featureId ?? null, selectedOsm?.elementId ?? null);
 }
 
+/** Transiently highlight an element on the map (from a list-row hover); null clears it. Does not
+ *  change the selection or the view. */
+function hoverOsm(featureId: string | null, elementId: number | null): void {
+    osmOverlays.forEach((ov, id) => ov.setHovered(featureId === id ? elementId : null));
+}
+
 // Width (px) of the open OSM-data panel; the centred element is shifted left of it so it stays visible.
 const OSM_PANEL_PX = 288; // matches the panel's w-72
 
@@ -540,6 +546,8 @@ async function init(): Promise<void> {
             // view, since the list row may point off-screen) and delete one.
             onOsmSelectElement: (id: string, elementId: number) => { selectOsm(id, elementId); panToOsm(id, elementId); },
             onOsmDeleteElement: (id: string, elementId: number) => deleteOsm(id, elementId),
+            // Hovering a list row highlights it on the map (no centring); null clears the highlight.
+            onOsmHoverElement: (id: string | null, elementId: number | null) => hoverOsm(id, elementId),
             previewDems,
             initialPreviewDemId: initialDemId,
             previewZoomMin,

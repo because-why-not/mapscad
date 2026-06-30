@@ -21,6 +21,7 @@ export class OsmOverlay {
     private source = new VectorSource();
     readonly layer: VectorLayer<VectorSource>;
     private selectedId: number | null = null;
+    private hoveredId: number | null = null;
     private base: Style;
     private selected: Style;
 
@@ -34,7 +35,10 @@ export class OsmOverlay {
         });
         this.layer = new VectorLayer({
             source: this.source,
-            style: (feature) => (feature.get('osmElementId') === this.selectedId ? this.selected : this.base),
+            style: (feature) => {
+                const id = feature.get('osmElementId');
+                return id === this.selectedId || id === this.hoveredId ? this.selected : this.base;
+            },
             zIndex: def.zIndex,
         });
         this.layer.set('osmFeatureId', def.id);
@@ -62,6 +66,13 @@ export class OsmOverlay {
         this.source.changed(); // re-evaluate the style function for every feature
     }
 
+    /** Transiently highlight one element as hovered (or null to clear), e.g. from a list-row hover. */
+    setHovered(elementId: number | null): void {
+        if (this.hoveredId === elementId) return;
+        this.hoveredId = elementId;
+        this.source.changed();
+    }
+
     /** The map-projection extent of one element's geometry, for fitting the view to it. */
     extentOf(elementId: number): number[] | null {
         const geom = this.source.getFeatureById(elementId)?.getGeometry();
@@ -71,6 +82,7 @@ export class OsmOverlay {
     /** Remove all drawn elements (e.g. when the selection changes or is cleared). */
     clear(): void {
         this.selectedId = null;
+        this.hoveredId = null;
         this.source.clear();
     }
 }
