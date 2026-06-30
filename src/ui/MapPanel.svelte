@@ -19,6 +19,8 @@
         onOsmAddToPreview = () => {},
         onOsmDownload = () => null,
         onOsmUpload = () => 0,
+        onOsmSelectElement = () => {},
+        onOsmDeleteElement = () => {},
         initialZoom = 0,
         canCollapse = false,
         onCollapse = () => {},
@@ -54,9 +56,31 @@
     const idleLabel = (f) => `Download ${f.noun}`;
     let osmState = $state(untrack(() =>
         Object.fromEntries(osmFeatures.map(f => [f.id, { busy: false, label: idleLabel(f), ready: false }]))));
+    // The object list per feature ({id,label}[]) and the single selected element (map ↔ list),
+    // both pushed in from index.ts. The list is a vector-editor-style object panel.
+    let osmElements = $state(untrack(() => Object.fromEntries(osmFeatures.map(f => [f.id, []]))));
+    let osmSelected = $state(null); // { featureId, elementId } | null
+    export function setOsmElements(id, elements) { osmElements[id] = elements; }
+    export function setOsmSelected(featureId, elementId) {
+        osmSelected = featureId !== null && elementId !== null ? { featureId, elementId } : null;
+        // Selecting an element (e.g. by clicking it on the map) opens the OSM-data menu so the user
+        // sees the matching list entry highlighted — the map ↔ list connection.
+        if (osmSelected) { tracksMenuOpen = true; menuOpen = false; }
+    }
+    const isSelected = (fid, eid) => osmSelected?.featureId === fid && osmSelected?.elementId === eid;
+    // Scroll the selected row into view once the menu/list has rendered (it stays in the DOM even
+    // when the panel is slid off-screen, so the query works regardless of open state).
+    $effect(() => {
+        const sel = osmSelected;
+        if (!sel) return;
+        requestAnimationFrame(() => {
+            document.querySelector(`[data-osm-el="${sel.featureId}:${sel.elementId}"]`)?.scrollIntoView({ block: 'nearest' });
+        });
+    });
     export function setHasSelection(has) {
         hasSelection = has;
-        for (const f of osmFeatures) osmState[f.id].ready = false;
+        osmSelected = null;
+        for (const f of osmFeatures) { osmState[f.id].ready = false; osmElements[f.id] = []; }
     }
 
     async function fetchOsm(f) {
@@ -371,16 +395,30 @@
                 <!-- One section per registry feature; entirely data-driven from `osmFeatures`. -->
                 {#each osmFeatures as f (f.id)}
                     {@const st = osmState[f.id]}
-                    <div class="px-4 py-1 mt-2 first:mt-0 text-xs font-bold uppercase tracking-wider opacity-50">{f.label}</div>
+                    {@const elements = osmElements[f.id] ?? []}
+                    <div class="px-4 py-1 mt-2 first:mt-0 text-xs font-bold uppercase tracking-wider opacity-50">
+                        {f.label}{#if elements.length}<span class="ml-1 font-normal normal-case opacity-70">({elements.length})</span>{/if}
+                    </div>
                     <div class="px-4 py-2 flex flex-col gap-2">
                         <button class="btn btn-sm btn-block" title="Download {f.noun} in the selected area" onclick={() => fetchOsm(f)} disabled={st.busy}>
                             {#if st.busy}<span class="loading loading-spinner loading-xs"></span>{/if}
                             {st.label}
                         </button>
                         <button class="btn btn-sm btn-block" title="Add the downloaded {f.noun} to the 3D preview" onclick={() => onOsmAddToPreview(f.id)} disabled={!st.ready}>Add to preview</button>
-                        <button class="btn btn-sm btn-block" title="Download the raw {f.noun} data as a JSON file" onclick={() => downloadJson(() => onOsmDownload(f.id), `${f.id}.json`)} disabled={!st.ready}>Download JSON</button>
+                        <button class="btn btn-sm btn-block" title="Download the {f.noun} (with your deletions) as a JSON file" onclick={() => downloadJson(() => onOsmDownload(f.id), `${f.id}.json`)} disabled={!st.ready}>Download JSON</button>
                         <button class="btn btn-sm btn-block" title="Load {f.noun} from a previously downloaded JSON file" onclick={() => pickUpload(f.id)}>Upload JSON</button>
                     </div>
+                    <!-- Object list: click a row to select it on the map (and vice-versa); × deletes it. -->
+                    {#if elements.length}
+                        <ul class="mx-4 mb-1 max-h-48 overflow-y-auto rounded border border-base-300 divide-y divide-base-300 text-sm">
+                            {#each elements as el (el.id)}
+                                <li data-osm-el="{f.id}:{el.id}" class="flex items-center {isSelected(f.id, el.id) ? 'bg-primary text-primary-content' : 'hover:bg-base-300'}">
+                                    <button class="flex-1 text-left px-2 py-1 truncate bg-transparent border-0" title={el.label} onclick={() => onOsmSelectElement(f.id, el.id)}>{el.label}</button>
+                                    <button class="px-2 py-1 opacity-70 hover:opacity-100 bg-transparent border-0" title="Delete this {f.label.toLowerCase()} element" aria-label="Delete element" onclick={() => onOsmDeleteElement(f.id, el.id)}>✕</button>
+                                </li>
+                            {/each}
+                        </ul>
+                    {/if}
                 {/each}
                 <input type="file" accept=".json,application/json" bind:this={osmFileInput} onchange={uploadOsm} class="hidden" />
             {/if}

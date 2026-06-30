@@ -11,8 +11,9 @@ import { MapController } from './MapController';
 import { OpenLayersEngine } from './engine/OpenLayersEngine';
 import { MapLibreTerrainEngine } from './engine/MapLibreTerrainEngine';
 import { SelectionArea, LonLat } from './SelectionArea';
+import OlMap from 'ol/Map';
 import { OsmOverlay } from './OsmOverlay';
-import { fetchFeatureRaw, parseWays, waysFromJson } from './osm/OverpassFeature';
+import { fetchFeatureRaw, parseWays, waysFromJson, type OsmElement } from './osm/OverpassFeature';
 import { OsmVectorData } from './osm/OsmVectorData';
 import { OSM_FEATURES, osmFeature } from './osm/osmFeatures';
 import { sampleSelectionHeights, rectExtent, groundResolution, tileCoverage } from './HeightSampler';
@@ -54,13 +55,21 @@ let currentCorners: LonLat[] | null = null;
 // OSM feature state, all keyed by feature id (see osm/osmFeatures.ts). Generic so adding a feature
 // needs no new variables here.
 //  - osmOverlays: the OL 2D-map overlays, created once the OL map is ready.
-//  - currentOsm:  the ways last downloaded for the current selection (gridless, lon/lat), kept so
-//    they can be re-bound to the grid and handed to the model on "Add to preview" / resample.
-//  - currentRawOsm: the raw Overpass JSON each came from, verbatim, so Download saves the exact
-//    server response (or the file an Upload was loaded from).
+//  - currentOsm:  the editable element set per feature (gridless, lon/lat) — the source of truth for
+//    the overlay, the object list, the preview, and Download. Edits (delete) replace the entry.
 const osmOverlays = new Map<string, OsmOverlay>();
 const currentOsm = new Map<string, OsmVectorData>();
-const currentRawOsm = new Map<string, any>();
+// Feature ids that have been "Added to preview" (so their data is bound into the model). Gates the
+// model re-sync on fetch/upload/delete/resample so downloaded-but-not-added features stay map-only.
+const addedOsm = new Set<string>();
+// The currently selected element on the map / in the object list (one at a time, vector-editor
+// style), or null. Drives the overlay highlight, the list highlight, and keyboard Delete.
+let selectedOsm: { featureId: string; elementId: number } | null = null;
+// OSM element picking is disabled while an area-selection tool is active (those clicks draw/edit the
+// selection rectangle); re-enabled when no draw tool is active, like a vector app's Select tool.
+let osmPickEnabled = true;
+// The OpenLayers map, captured once it's ready, so the click hit-test can reach it.
+let olMap: OlMap | null = null;
 
 /** Compact toggle label for an elevation source name (drops the _elevation[_raw] tail). */
 function demLabel(name: string): string {
@@ -124,7 +133,7 @@ async function resample(): Promise<void> {
         });
         if (abort.signal.aborted) return;
         model.setGrid(grid); // notifies -> preview + stats rebuild from the model
-        for (const def of OSM_FEATURES) syncOsmField(def.id); // re-rasterise to the new grid dims
+        for (const id of addedOsm) syncOsmField(id); // re-rasterise added features to the new grid
         Env.log(`[3d] terrain regenerated in ${Math.round(performance.now() - t0)} ms`);
     } catch (e) {
         if ((e as { name?: string })?.name === 'AbortError') Env.log('[3d] terrain build cancelled');
@@ -147,6 +156,72 @@ function syncOsmField(id: string): void {
     if (!data || !currentCorners || !grid) { model.setOsmData(id, null); return; }
     const bound = data.withGrid({ corners: currentCorners, cols: grid.cols, rows: grid.rows });
     model.setOsmData(id, bound);
+}
+
+/** Ingest a freshly fetched / uploaded element set for one feature: it becomes the editable source
+ *  of truth, the overlay redraws, the object list refreshes, and (only if already added to the
+ *  preview) the model re-syncs — so downloading a large set just to view/edit it on the map doesn't
+ *  trigger a geometry rebuild. */
+function ingestOsm(id: string, elements: OsmElement[]): void {
+    currentOsm.set(id, new OsmVectorData(elements));
+    osmOverlays.get(id)?.setElements(elements);
+    pushOsmElements(id);
+    if (addedOsm.has(id)) syncOsmField(id);
+}
+
+/** Push one feature's element list to the object-list UI: a stable id + a label (OSM name, else a
+ *  running number). */
+function pushOsmElements(id: string): void {
+    const data = currentOsm.get(id);
+    const noun = osmFeature(id).label;
+    const elements = data ? data.list.map((e, i) => ({ id: e.id, label: e.name || `${noun} #${i + 1}` })) : [];
+    appInstance?.setOsmElements(id, elements);
+}
+
+/** Select one element (map ↔ list), or pass null to clear. Highlights it on the map and in the list. */
+function selectOsm(featureId: string | null, elementId: number | null): void {
+    selectedOsm = featureId !== null && elementId !== null ? { featureId, elementId } : null;
+    osmOverlays.forEach((ov, id) => ov.setSelected(selectedOsm?.featureId === id ? selectedOsm.elementId : null));
+    appInstance?.setOsmSelected(selectedOsm?.featureId ?? null, selectedOsm?.elementId ?? null);
+}
+
+/** Bring an element into the map view (used when it's picked from the list — it may be off-screen).
+ *  Right padding clears the open OSM-data panel so the element doesn't land underneath it. */
+function panToOsm(featureId: string, elementId: number): void {
+    const extent = osmOverlays.get(featureId)?.extentOf(elementId);
+    if (!extent || !olMap) return;
+    olMap.getView().fit(extent, { maxZoom: 17, padding: [40, 300, 40, 40], duration: 250 });
+}
+
+/** Delete one element from a feature: drop it from the editable set, redraw, clear the selection if
+ *  it was the deleted one, refresh the list, and re-sync the preview. */
+function deleteOsm(featureId: string, elementId: number): void {
+    const data = currentOsm.get(featureId);
+    if (!data) return;
+    const kept = data.list.filter(e => e.id !== elementId);
+    currentOsm.set(featureId, new OsmVectorData(kept));
+    osmOverlays.get(featureId)?.setElements(kept);
+    if (selectedOsm?.featureId === featureId && selectedOsm.elementId === elementId) selectOsm(null, null);
+    pushOsmElements(featureId);
+    if (addedOsm.has(featureId)) syncOsmField(featureId);
+}
+
+/** Map click handler (only while no draw tool is active): select the topmost OSM element under the
+ *  click, or clear the selection when the click misses every OSM feature. */
+function onMapClick(pixel: number[]): void {
+    if (!osmPickEnabled || !olMap) return;
+    let hit = false;
+    olMap.forEachFeatureAtPixel(pixel, (feature, layer) => {
+        const featureId = layer?.get('osmFeatureId');
+        const elementId = feature.get('osmElementId');
+        if (typeof featureId === 'string' && typeof elementId === 'number') {
+            selectOsm(featureId, elementId);
+            hit = true;
+            return true; // stop at the topmost OSM feature
+        }
+        return false;
+    }, { hitTolerance: 4, layerFilter: (l) => !!l.get('osmFeatureId') });
+    if (!hit) selectOsm(null, null);
 }
 
 // Resampling hits the network, so changes to zoom / resolution limit are debounced.
@@ -189,12 +264,14 @@ function onSelectionChange(corners: LonLat[] | null): void {
     appInstance?.setHasSelection(!!corners);   // map panel shows/hides the OSM-data button
     currentCorners = corners;
     // Any downloaded OSM features no longer match the new area: drop them + their preview sections.
+    selectOsm(null, null);
+    addedOsm.clear();
     for (const def of OSM_FEATURES) {
         osmOverlays.get(def.id)?.clear();
         currentOsm.delete(def.id);
-        currentRawOsm.delete(def.id);
         model.setOsmData(def.id, null);
         appInstance?.setOsmAvailable(def.id, false);
+        pushOsmElements(def.id); // empties the object list
     }
     if (corners) resample();
     else model.setGrid(null); // notifies -> preview clears, stats null
@@ -405,7 +482,10 @@ async function init(): Promise<void> {
             initialMapZoom: initialView.zoom,
             onSelectToggle: (active: boolean, shape: SelectionShape = SelectionShape.Rectangle) => {
                 if (!selection) return;
+                // While a draw tool is active, map clicks edit the area; OSM element picking is off.
+                osmPickEnabled = !active;
                 if (active) {
+                    selectOsm(null, null);                  // leave element-edit mode
                     selection.setShape(shape);              // redraw + (if a selection exists) keep it
                     model.applySettings({ shape });         // mask is a model setting -> rebuilds geometry
                     config.update({ model: model.getSettings() });
@@ -418,27 +498,25 @@ async function init(): Promise<void> {
             // The menu sections to render (one per registry feature), so the UI is data-driven.
             osmFeatures: OSM_FEATURES.map(f => ({ id: f.id, label: f.label, noun: f.noun, hasRadius: f.geometry === 'line' })),
             // Download one OSM feature for the current selection and overlay it on the map. Returns
-            // the way count so the button can report it; throws bubble to the panel.
+            // the element count so the button can report it; throws bubble to the panel.
             onOsmFetch: async (id: string) => {
                 if (!currentCorners) return 0;
                 const def = osmFeature(id);
                 const json = await fetchFeatureRaw(def, currentCorners);
                 const fetched = parseWays(def, json);
-                currentRawOsm.set(id, json);
-                currentOsm.set(id, new OsmVectorData(fetched));
-                osmOverlays.get(id)?.setWays(fetched);
+                ingestOsm(id, fetched);
                 return fetched.length;
             },
-            // The raw Overpass response, verbatim, so it can be saved and re-ingested (null if none).
-            onOsmDownload: (id: string) => currentRawOsm.get(id) ?? null,
-            // Reuse a feature from a previously downloaded file: ingest + overlay it exactly like a
-            // fresh download, so "Add to preview" then works. Returns the way count.
+            // The current (possibly edited) element set, as savable JSON. Null when nothing's loaded.
+            onOsmDownload: (id: string) => {
+                const data = currentOsm.get(id);
+                return data && !data.isEmpty() ? data.list : null;
+            },
+            // Reuse a feature from a previously saved file: ingest + overlay it exactly like a fresh
+            // download, so "Add to preview" then works. Returns the element count.
             onOsmUpload: (id: string, json: any) => {
-                const def = osmFeature(id);
-                const fetched = waysFromJson(def, json);
-                currentRawOsm.set(id, json);
-                currentOsm.set(id, new OsmVectorData(fetched));
-                osmOverlays.get(id)?.setWays(fetched);
+                const fetched = waysFromJson(osmFeature(id), json);
+                ingestOsm(id, fetched);
                 return fetched.length;
             },
             // Push the downloaded feature into the model: bind it to the grid and reveal the
@@ -446,9 +524,14 @@ async function init(): Promise<void> {
             onOsmAddToPreview: (id: string) => {
                 const data = currentOsm.get(id);
                 if (!data || data.isEmpty()) return;
+                addedOsm.add(id);
                 syncOsmField(id);
                 appInstance?.setOsmAvailable(id, true);
             },
+            // Object-list interactions: select an element (highlight it + bring it into the map
+            // view, since the list row may point off-screen) and delete one.
+            onOsmSelectElement: (id: string, elementId: number) => { selectOsm(id, elementId); panToOsm(id, elementId); },
+            onOsmDeleteElement: (id: string, elementId: number) => deleteOsm(id, elementId),
             previewDems,
             initialPreviewDemId: initialDemId,
             previewZoomMin,
@@ -514,14 +597,17 @@ async function init(): Promise<void> {
     // The region-selection tool lives on the OpenLayers 2D map; created when the OL map
     // is ready, then restored from any previously saved selection. The 2D hillshades render
     // here too, so the selection tool works over them.
-    const olEngine = new OpenLayersEngine(maps, olMap => {
+    const olEngine = new OpenLayersEngine(maps, map => {
         if (selection) return;
-        selection = new SelectionArea(olMap, { onChange: onUserSelectionChange });
+        olMap = map; // capture for the OSM click hit-test
+        selection = new SelectionArea(map, { onChange: onUserSelectionChange });
         // One overlay per registry feature, in zIndex order (the registry sets each zIndex).
         for (const def of OSM_FEATURES) {
-            const overlay = new OsmOverlay(olMap, def);
+            const overlay = new OsmOverlay(map, def);
             osmOverlays.set(def.id, overlay);
         }
+        // Click an OSM element to select it (vector-editor style); Delete removes the selected one.
+        map.on('singleclick', (e) => onMapClick(e.pixel));
         const savedCorners = config.get().selection;
         if (savedCorners) {
             const shape = config.get().model.shape;
@@ -547,6 +633,16 @@ async function init(): Promise<void> {
 
     // Selection / DEM / model changes alter the `c=` slice → keep the URL live.
     config.subscribe(() => scheduleUrlSync());
+
+    // Delete / Backspace removes the selected OSM element (unless the user is typing in a field).
+    document.addEventListener('keydown', (e) => {
+        if (e.key !== 'Delete' && e.key !== 'Backspace') return;
+        if (!selectedOsm) return;
+        const tag = (e.target as HTMLElement)?.tagName;
+        if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+        e.preventDefault();
+        deleteOsm(selectedOsm.featureId, selectedOsm.elementId);
+    });
 
     if (initialId) controller.select(initialId);
 }

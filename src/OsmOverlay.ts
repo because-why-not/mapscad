@@ -6,39 +6,71 @@ import VectorLayer from 'ol/layer/Vector';
 import VectorSource from 'ol/source/Vector';
 import { Fill, Stroke, Style } from 'ol/style';
 import { fromLonLat } from 'ol/proj';
-import type { OsmWay } from './osm/OverpassFeature';
+import type { OsmElement } from './osm/OverpassFeature';
 import type { OsmFeatureDef } from './osm/osmFeatures';
+
+/** Highlight colour for the selected element (shared across features). */
+const SELECT_COLOR = '#ffd400';
 
 /** A read-only overlay of one OSM feature on the OpenLayers 2D map. `line` features draw as stroked
  *  polylines, `area` features as filled polygons; the feature's `zIndex` orders them under the
- *  selection layer (1000) so the selection handles stay grabbable on top. Replaces the identical
- *  Track/Street/Building overlays. */
+ *  selection layer (1000). Each OL Feature carries its element id (`getId()` + `osmElementId`) so a
+ *  map click can be mapped back to an element, and the layer is tagged `osmFeatureId` so the click
+ *  hit-test can filter to OSM layers. One element can be highlighted as the current selection. */
 export class OsmOverlay {
     private source = new VectorSource();
+    readonly layer: VectorLayer<VectorSource>;
+    private selectedId: number | null = null;
+    private base: Style;
+    private selected: Style;
 
     constructor(map: OlMap, private def: OsmFeatureDef) {
-        const stroke = new Stroke({ color: def.strokeColor, width: def.geometry === 'area' ? 1 : 2 });
-        const style = new Style({
-            stroke,
-            fill: def.fillColor ? new Fill({ color: def.fillColor }) : undefined,
+        const fill = def.fillColor ? new Fill({ color: def.fillColor }) : undefined;
+        const width = def.geometry === 'area' ? 1 : 2;
+        this.base = new Style({ stroke: new Stroke({ color: def.strokeColor, width }), fill });
+        this.selected = new Style({
+            stroke: new Stroke({ color: SELECT_COLOR, width: width + 2 }),
+            fill: def.fillColor ? new Fill({ color: 'rgba(255, 212, 0, 0.45)' }) : undefined,
         });
-        const layer = new VectorLayer({ source: this.source, style, zIndex: def.zIndex });
-        map.addLayer(layer);
+        this.layer = new VectorLayer({
+            source: this.source,
+            style: (feature) => (feature.get('osmElementId') === this.selectedId ? this.selected : this.base),
+            zIndex: def.zIndex,
+        });
+        this.layer.set('osmFeatureId', def.id);
+        map.addLayer(this.layer);
     }
 
-    /** Replace the drawn ways (each a [lon,lat] polyline or ring) with a fresh set. */
-    setWays(ways: OsmWay[]): void {
+    /** Replace the drawn elements with a fresh set (after download / upload / delete). */
+    setElements(elements: readonly OsmElement[]): void {
         this.source.clear();
-        const features = ways.map(line => {
-            const coords = line.map(c => fromLonLat(c));
+        const features = elements.map(el => {
+            const coords = el.coords.map(c => fromLonLat(c));
             const geom = this.def.geometry === 'area' ? new Polygon([coords]) : new LineString(coords);
-            return new Feature(geom);
+            const feature = new Feature(geom);
+            feature.setId(el.id);
+            feature.set('osmElementId', el.id);
+            return feature;
         });
         this.source.addFeatures(features);
     }
 
-    /** Remove all drawn ways (e.g. when the selection changes or is cleared). */
+    /** Highlight one element as selected (or null to clear). Restyles in place. */
+    setSelected(elementId: number | null): void {
+        if (this.selectedId === elementId) return;
+        this.selectedId = elementId;
+        this.source.changed(); // re-evaluate the style function for every feature
+    }
+
+    /** The map-projection extent of one element's geometry, for fitting the view to it. */
+    extentOf(elementId: number): number[] | null {
+        const geom = this.source.getFeatureById(elementId)?.getGeometry();
+        return geom ? geom.getExtent() : null;
+    }
+
+    /** Remove all drawn elements (e.g. when the selection changes or is cleared). */
     clear(): void {
+        this.selectedId = null;
         this.source.clear();
     }
 }

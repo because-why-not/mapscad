@@ -20,6 +20,8 @@
         onOsmAddToPreview = () => {},
         onOsmDownload = () => null,
         onOsmUpload = () => 0,
+        onOsmSelectElement = () => {},
+        onOsmDeleteElement = () => {},
         initialMapZoom = 0,
         // 3D-view menu (forwarded to PreviewPanel)
         previewDems = [],
@@ -72,6 +74,8 @@
     export function setSelectTool(tool) { mapPanel?.setSelectTool(tool); }
     export function setHasSelection(has) { mapPanel?.setHasSelection(has); }
     export function setOsmAvailable(id, has) { previewPanel?.setOsmAvailable(id, has); }
+    export function setOsmElements(id, elements) { mapPanel?.setOsmElements(id, elements); }
+    export function setOsmSelected(featureId, elementId) { mapPanel?.setOsmSelected(featureId, elementId); }
     export function setMapZoom(z) { mapPanel?.setZoom(z); }
     export function setPreviewStats(stats) { previewPanel?.setPreviewStats(stats); }
     export function setPreviewLoading(state) { previewPanel?.setPreviewLoading(state); }
@@ -147,6 +151,8 @@
         {onOsmAddToPreview}
         {onOsmDownload}
         {onOsmUpload}
+        {onOsmSelectElement}
+        {onOsmDeleteElement}
         initialZoom={initialMapZoom}
         canCollapse={showBoth}
         onCollapse={collapseMap}

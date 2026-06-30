@@ -10,7 +10,6 @@ import { OsmCanvasProcessor } from '../../src/model/OsmCanvasProcessor';
 import { OsmVectorData } from '../../src/osm/OsmVectorData';
 import { osmFeature } from '../../src/osm/osmFeatures';
 import type { LonLat } from '../../src/SelectionArea';
-import type { OsmWay } from '../../src/osm/OverpassFeature';
 import type { HeightGrid } from '../../src/HeightSampler';
 
 const LINE = osmFeature('tracks');   // geometry: 'line'
@@ -19,6 +18,8 @@ const AREA = osmFeature('buildings'); // geometry: 'area'
 // Axis-aligned 1°×1° selection (TL, TR, BR, BL); 1000 m square, 10×10 cells (100 m each).
 const CORNERS: LonLat[] = [[0, 1], [1, 1], [1, 0], [0, 0]];
 const GRID = { corners: CORNERS, cols: 10, rows: 10 };
+// Wrap bare polylines as grid-bound elements (the processor only uses their geometry).
+const vd = (coords: LonLat[][]) => new OsmVectorData(coords.map((c, i) => ({ id: i + 1, coords: c })), GRID);
 
 function flatGrid(value = 100): HeightGrid {
     return {
@@ -30,9 +31,9 @@ function flatGrid(value = 100): HeightGrid {
 
 const idx = (col: number, row: number) => row * 10 + col;
 // A horizontal line at lat 0.55 → v 0.45 → row 4.
-const MID_ROW_LINE: OsmWay = [[0.05, 0.55], [0.95, 0.55]];
+const MID_ROW_LINE: LonLat[] = [[0.05, 0.55], [0.95, 0.55]];
 // A square ring covering grid cols/rows 2..7 (lon/lat .25→2, .75→7; v = 1−lat).
-const SQUARE: OsmWay = [[0.25, 0.75], [0.75, 0.75], [0.75, 0.25], [0.25, 0.25]];
+const SQUARE: LonLat[] = [[0.25, 0.75], [0.75, 0.75], [0.75, 0.25], [0.25, 0.25]];
 
 describe('OsmCanvasProcessor.process (real canvas)', () => {
     beforeAll(() => {
@@ -41,7 +42,7 @@ describe('OsmCanvasProcessor.process (real canvas)', () => {
     });
 
     it('line: raises along the painted way, leaves far cells flat, carves on negative', () => {
-        const data = new OsmVectorData([MID_ROW_LINE], GRID);
+        const data = vd([MID_ROW_LINE]);
         const up = new OsmCanvasProcessor(data, LINE, 50, 100).process(flatGrid(100));
         expect(up.heights).not.toBe(flatGrid(100).heights);
         expect(up.heights[idx(5, 4)]).toBeGreaterThan(130);
@@ -51,7 +52,7 @@ describe('OsmCanvasProcessor.process (real canvas)', () => {
     });
 
     it('area: raises cells inside the footprint, leaves outside cells flat (radius ignored)', () => {
-        const data = new OsmVectorData([SQUARE], GRID);
+        const data = vd([SQUARE]);
         const out = new OsmCanvasProcessor(data, AREA, 20, 0).process(flatGrid(100));
         expect(out.heights[idx(5, 5)]).toBe(120); // interior → full +20
         expect(out.heights[idx(0, 0)]).toBe(100); // far corner → unchanged
@@ -59,17 +60,17 @@ describe('OsmCanvasProcessor.process (real canvas)', () => {
 
     it('is a no-op for raise 0, empty data, or (line) radius 0', () => {
         const grid = flatGrid(100);
-        expect(new OsmCanvasProcessor(new OsmVectorData([MID_ROW_LINE], GRID), LINE, 0, 100).process(grid)).toBe(grid);
-        expect(new OsmCanvasProcessor(new OsmVectorData([MID_ROW_LINE], GRID), LINE, 50, 0).process(grid)).toBe(grid);
-        expect(new OsmCanvasProcessor(new OsmVectorData([], GRID), LINE, 50, 100).process(grid)).toBe(grid);
+        expect(new OsmCanvasProcessor(vd([MID_ROW_LINE]), LINE, 0, 100).process(grid)).toBe(grid);
+        expect(new OsmCanvasProcessor(vd([MID_ROW_LINE]), LINE, 50, 0).process(grid)).toBe(grid);
+        expect(new OsmCanvasProcessor(vd([]), LINE, 50, 100).process(grid)).toBe(grid);
         // radius 0 is NOT a no-op for an area feature (it ignores radius):
-        expect(new OsmCanvasProcessor(new OsmVectorData([SQUARE], GRID), AREA, 20, 0).process(grid)).not.toBe(grid);
+        expect(new OsmCanvasProcessor(vd([SQUARE]), AREA, 20, 0).process(grid)).not.toBe(grid);
     });
 
     it('preserves no-data (NaN) cells even when a way covers them', () => {
         const grid = flatGrid(100);
         grid.heights[idx(5, 4)] = NaN;
-        const out = new OsmCanvasProcessor(new OsmVectorData([MID_ROW_LINE], GRID), LINE, 50, 100).process(grid);
+        const out = new OsmCanvasProcessor(vd([MID_ROW_LINE]), LINE, 50, 100).process(grid);
         expect(Number.isNaN(out.heights[idx(5, 4)])).toBe(true);
     });
 
@@ -78,19 +79,19 @@ describe('OsmCanvasProcessor.process (real canvas)', () => {
         const strokeSpy = vi.spyOn(proto, 'stroke');
         const fillSpy = vi.spyOn(proto, 'fill');
         try {
-            const lines: OsmWay[] = Array.from({ length: 50 }, (_, i) => {
+            const lines: LonLat[][] = Array.from({ length: 50 }, (_, i) => {
                 const lat = 0.1 + (i / 50) * 0.8;
-                return [[0.05, lat], [0.95, lat]] as OsmWay;
+                return [[0.05, lat], [0.95, lat]] as LonLat[];
             });
-            new OsmCanvasProcessor(new OsmVectorData(lines, GRID), LINE, 50, 100).process(flatGrid(100));
+            new OsmCanvasProcessor(vd(lines), LINE, 50, 100).process(flatGrid(100));
             expect(strokeSpy).toHaveBeenCalledTimes(1);
             strokeSpy.mockClear();
             fillSpy.mockClear();
-            const rings: OsmWay[] = Array.from({ length: 20 }, (_, i) => {
+            const rings: LonLat[][] = Array.from({ length: 20 }, (_, i) => {
                 const lon = 0.05 + (i / 20) * 0.04;
-                return [[lon, 0.6], [lon + 0.01, 0.6], [lon + 0.01, 0.5], [lon, 0.5]] as OsmWay;
+                return [[lon, 0.6], [lon + 0.01, 0.6], [lon + 0.01, 0.5], [lon, 0.5]] as LonLat[];
             });
-            new OsmCanvasProcessor(new OsmVectorData(rings, GRID), AREA, 20, 0).process(flatGrid(100));
+            new OsmCanvasProcessor(vd(rings), AREA, 20, 0).process(flatGrid(100));
             expect(fillSpy).toHaveBeenCalledTimes(1);
         } finally {
             strokeSpy.mockRestore();

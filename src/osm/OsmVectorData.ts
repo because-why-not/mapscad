@@ -1,39 +1,41 @@
-import type { OsmWay } from './OverpassFeature';
+import type { LonLat } from '../SelectionArea';
+import type { OsmElement } from './OverpassFeature';
 import { projectLonLatLines, type GridSpace } from './gridProjection';
 
 /**
- * Holds the ways downloaded for one OSM feature and projects them into the heightmap's grid space,
- * buffering the result so the work happens at most once. Immutable (ways + grid fixed per instance):
- * a fresh download or a new grid is a new `OsmVectorData` and cache invalidation is free. Replaces
- * the identical Tracks/Streets/Buildings holders.
+ * Holds the elements downloaded for one OSM feature and projects their geometry into the heightmap's
+ * grid space, buffering the result so the work happens at most once. Immutable (elements + grid fixed
+ * per instance): a fresh download, an edit (delete), or a new grid is a new `OsmVectorData` and cache
+ * invalidation is free.
  *
- * `grid` is optional so an instance can feed the map overlay (`list`/`count`) before a preview grid
- * is known; the derived getter requires it.
+ * `list` carries the full elements (id + name + coords) for the overlay and the object list; the
+ * processor only needs geometry, exposed as `gridWays` (projected `[col,row]` polylines). `grid` is
+ * optional so an instance can feed the overlay before a preview grid is known.
  */
 export class OsmVectorData {
-    private gridBuffer: OsmWay[] | null = null;
+    private gridBuffer: LonLat[][] | null = null;
 
-    constructor(private readonly ways: OsmWay[] = [], private readonly grid?: GridSpace) {}
+    constructor(private readonly elements: OsmElement[] = [], private readonly grid?: GridSpace) {}
 
-    /** The raw downloaded ways (lon/lat), for the map overlay. */
-    get list(): readonly OsmWay[] { return this.ways; }
-    get count(): number { return this.ways.length; }
-    isEmpty(): boolean { return this.ways.length === 0; }
+    /** The full elements (id/name/coords), for the map overlay and the object list. */
+    get list(): readonly OsmElement[] { return this.elements; }
+    get count(): number { return this.elements.length; }
+    isEmpty(): boolean { return this.elements.length === 0; }
 
-    /** A copy bound to a grid, so the overlay (gridless) and the preview (with a grid) can share
-     *  one download: `data.withGrid(grid).gridWays`. */
+    /** A copy bound to a grid, so the overlay (gridless) and the preview (with a grid) can share one
+     *  download: `data.withGrid(grid).gridWays`. */
     withGrid(grid: GridSpace): OsmVectorData {
-        return new OsmVectorData(this.ways, grid);
+        return new OsmVectorData(this.elements, grid);
     }
 
     /**
-     * The same ways, each lon/lat vertex converted to fractional `[col, row]` in the heightmap's
-     * sample space (see `projectLonLatLines`). Buffered: computed on first access only.
+     * Each element's geometry projected to fractional `[col, row]` in the heightmap's sample space
+     * (see `projectLonLatLines`) — the only thing the canvas processor needs. Buffered.
      */
-    get gridWays(): OsmWay[] {
+    get gridWays(): LonLat[][] {
         if (this.gridBuffer) return this.gridBuffer;
         if (!this.grid) throw new Error('OsmVectorData.gridWays needs a grid; construct with one or use withGrid()');
-        this.gridBuffer = projectLonLatLines(this.ways, this.grid);
+        this.gridBuffer = projectLonLatLines(this.elements.map(e => e.coords), this.grid);
         return this.gridBuffer;
     }
 }

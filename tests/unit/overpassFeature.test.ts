@@ -22,15 +22,22 @@ describe('buildQuery (registry-driven)', () => {
 });
 
 describe('parseWays', () => {
-    it('turns each geometry-carrying way into a [lon,lat] polyline', () => {
-        const json = { elements: [{ type: 'way', geometry: [{ lat: 50, lon: 9 }, { lat: 50.1, lon: 9.1 }] }] };
-        expect(parseWays(tracks, json)).toEqual([[[9, 50], [9.1, 50.1]]]);
+    it('turns each geometry-carrying way into an element with id, name and coords', () => {
+        const json = { elements: [
+            { type: 'way', id: 42, tags: { name: 'River Track' }, geometry: [{ lat: 50, lon: 9 }, { lat: 50.1, lon: 9.1 }] },
+        ] };
+        expect(parseWays(tracks, json)).toEqual([{ id: 42, name: 'River Track', coords: [[9, 50], [9.1, 50.1]] }]);
     });
 
-    it('honours the feature minPoints: a 2-point ring is too short for an area feature', () => {
-        const json = { elements: [{ type: 'way', geometry: [{ lat: 50, lon: 9 }, { lat: 50, lon: 9.1 }] }] };
-        expect(parseWays(tracks, json)).toEqual([[[9, 50], [9.1, 50]]]); // ok as a line (min 2)
-        expect(parseWays(buildings, json)).toEqual([]);                  // dropped as an area (min 3)
+    it('leaves name undefined when the way has no name tag', () => {
+        const json = { elements: [{ type: 'way', id: 7, geometry: [{ lat: 50, lon: 9 }, { lat: 50.1, lon: 9.1 }] }] };
+        expect(parseWays(tracks, json)).toEqual([{ id: 7, name: undefined, coords: [[9, 50], [9.1, 50.1]] }]);
+    });
+
+    it('honours the feature minPoints: a 2-point way is too short for an area feature', () => {
+        const json = { elements: [{ type: 'way', id: 1, geometry: [{ lat: 50, lon: 9 }, { lat: 50, lon: 9.1 }] }] };
+        expect(parseWays(tracks, json)).toHaveLength(1);   // ok as a line (min 2)
+        expect(parseWays(buildings, json)).toEqual([]);     // dropped as an area (min 3)
     });
 
     it('drops non-ways and is safe on empty / malformed input', () => {
@@ -42,22 +49,30 @@ describe('parseWays', () => {
 
 describe('waysFromJson', () => {
     it('parses a raw Overpass response (has .elements)', () => {
-        const json = { elements: [{ type: 'way', geometry: [{ lat: 50, lon: 9 }, { lat: 50.1, lon: 9.1 }] }] };
-        expect(waysFromJson(tracks, json)).toEqual([[[9, 50], [9.1, 50.1]]]);
+        const json = { elements: [{ type: 'way', id: 5, geometry: [{ lat: 50, lon: 9 }, { lat: 50.1, lon: 9.1 }] }] };
+        expect(waysFromJson(tracks, json)).toEqual([{ id: 5, name: undefined, coords: [[9, 50], [9.1, 50.1]] }]);
     });
 
-    it('accepts an already-parsed array, dropping ways under the feature minPoints', () => {
-        const lines = [
-            [[9, 50]],                                  // single point → too short for any feature
-            [[9, 50], [9.1, 50.1]],                     // 2 points
-            [[9, 50], [9.1, 50.1], [9.2, 50.2]],        // 3 points
+    it('accepts an array of saved OsmElement objects, keeping id + name', () => {
+        const saved = [{ id: 9, name: 'Lane', coords: [[9, 50], [9.1, 50.1]] }];
+        expect(waysFromJson(tracks, saved as any)).toEqual([{ id: 9, name: 'Lane', coords: [[9, 50], [9.1, 50.1]] }]);
+    });
+
+    it('accepts a legacy array of bare [lon,lat] polylines, assigning synthetic negative ids', () => {
+        const legacy = [[[9, 50], [9.1, 50.1]], [[8, 40], [8.1, 40.1]]];
+        const out = waysFromJson(tracks, legacy as any);
+        expect(out.map(e => e.coords)).toEqual(legacy);
+        expect(out.every(e => e.id < 0)).toBe(true);
+        expect(out[0].id).not.toBe(out[1].id); // unique
+    });
+
+    it('drops entries under the feature minPoints (lines need ≥2, areas ≥3)', () => {
+        const items = [
+            { id: 1, coords: [[9, 50]] },                          // too short
+            { id: 2, coords: [[9, 50], [9.1, 50.1]] },             // 2 points
+            { id: 3, coords: [[9, 50], [9.1, 50.1], [9.2, 50.2]] },// 3 points
         ];
-        expect(waysFromJson(tracks, lines as any)).toEqual([lines[1], lines[2]]); // lines need ≥2
-        expect(waysFromJson(buildings, lines as any)).toEqual([lines[2]]);        // areas need ≥3
-    });
-
-    it('drops malformed points from an array', () => {
-        const lines = [[[9, 50], ['x', 50.1]]];
-        expect(waysFromJson(tracks, lines as any)).toEqual([]);
+        expect(waysFromJson(tracks, items as any).map(e => e.id)).toEqual([2, 3]);
+        expect(waysFromJson(buildings, items as any).map(e => e.id)).toEqual([3]);
     });
 });
