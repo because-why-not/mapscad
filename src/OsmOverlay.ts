@@ -93,6 +93,16 @@ export class OsmOverlay {
         return geom ? geom.getExtent() : null;
     }
 
+    /** Element ids whose geometry intersects the given map-projection extent — for box-select. */
+    elementsInExtent(extent: number[]): number[] {
+        const ids: number[] = [];
+        this.source.forEachFeatureIntersectingExtent(extent, (feature) => {
+            const id = feature.get('osmElementId');
+            if (typeof id === 'number') ids.push(id);
+        });
+        return ids;
+    }
+
     /** Remove all drawn elements (e.g. when the selection changes or is cleared). */
     clear(): void {
         this.selectedId = null;

@@ -12,6 +12,7 @@ import { OpenLayersEngine } from './engine/OpenLayersEngine';
 import { MapLibreTerrainEngine } from './engine/MapLibreTerrainEngine';
 import { SelectionArea, LonLat } from './SelectionArea';
 import OlMap from 'ol/Map';
+import DragBox from 'ol/interaction/DragBox';
 import { OsmOverlay } from './OsmOverlay';
 import { fetchFeatureRaw, parseWays, waysFromJson, type OsmElement } from './osm/OverpassFeature';
 import { OsmVectorData } from './osm/OsmVectorData';
@@ -70,6 +71,9 @@ let selectedOsm: { featureId: string; elementId: number } | null = null;
 let osmPickEnabled = true;
 // The OpenLayers map, captured once it's ready, so the click hit-test can reach it.
 let olMap: OlMap | null = null;
+// Transient box-select tool for the Data tab: drag a blue box to mark all OSM elements under it.
+// It selects into the list marks only — nothing about it is persisted.
+let dataBox: DragBox | null = null;
 
 /** Compact toggle label for an elevation source name (drops the _elevation[_raw] tail). */
 function demLabel(name: string): string {
@@ -517,6 +521,12 @@ async function init(): Promise<void> {
             onDataModeChange: (active: boolean) => {
                 osmPickEnabled = active;
                 selection?.setViewOnly(active);
+                if (!active) dataBox?.setActive(false); // leaving Data turns the box tool off
+            },
+            // Toggle the transient box-select tool on the map (Data tab only).
+            onOsmBoxToggle: (active: boolean) => {
+                dataBox?.setActive(active);
+                olMap?.getTargetElement()?.classList.toggle('map-crosshair', active);
             },
             // The menu sections to render (one per registry feature), so the UI is data-driven.
             osmFeatures: OSM_FEATURES.map(f => ({ id: f.id, label: f.label, noun: f.noun, hasRadius: f.geometry === 'line' })),
@@ -636,6 +646,18 @@ async function init(): Promise<void> {
         }
         // Click an OSM element to select it (vector-editor style); Delete removes the selected one.
         map.on('singleclick', (e) => onMapClick(e.pixel));
+        // Box-select tool (Data tab): drag a box, mark every OSM element it intersects. Inactive
+        // until the tool is toggled on; suppresses pan while dragging (DragBox consumes the drag).
+        dataBox = new DragBox({ className: 'ol-dragbox data-box' });
+        dataBox.setActive(false);
+        dataBox.on('boxend', () => {
+            const extent = dataBox!.getGeometry().getExtent();
+            osmOverlays.forEach((overlay, featureId) => {
+                const ids = overlay.elementsInExtent(extent);
+                if (ids.length) appInstance?.addOsmMarks(featureId, ids);
+            });
+        });
+        map.addInteraction(dataBox);
         const savedCorners = config.get().selection;
         if (savedCorners) {
             const shape = config.get().model.shape;

@@ -72,3 +72,9 @@
 .map-crosshair canvas {
     cursor: crosshair;
 }
+
+/* Blue marquee for the Data-tab box-select tool (transient object selection). */
+.ol-dragbox.data-box {
+    border: 2px dashed #007bff;
+    background-color: rgba(0, 123, 255, 0.15);
+}

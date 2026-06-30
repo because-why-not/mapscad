@@ -25,6 +25,7 @@
         onOsmApplyDeletions = () => {},
         onOsmHoverElement = () => {},
         onOsmMarksChange = () => {},
+        onOsmBoxToggle = () => {},
         initialMapZoom = 0,
         // 3D-view menu (forwarded to PreviewPanel)
         previewDems = [],
@@ -79,6 +80,7 @@
     export function setOsmAvailable(id, has) { previewPanel?.setOsmAvailable(id, has); }
     export function setOsmElements(id, elements) { mapPanel?.setOsmElements(id, elements); }
     export function setOsmSelected(featureId, elementId) { mapPanel?.setOsmSelected(featureId, elementId); }
+    export function addOsmMarks(id, ids) { mapPanel?.addOsmMarks(id, ids); }
     export function setMapZoom(z) { mapPanel?.setZoom(z); }
     export function setPreviewStats(stats) { previewPanel?.setPreviewStats(stats); }
     export function setPreviewLoading(state) { previewPanel?.setPreviewLoading(state); }
@@ -159,6 +161,7 @@
         {onOsmApplyDeletions}
         {onOsmHoverElement}
         {onOsmMarksChange}
+        {onOsmBoxToggle}
         initialZoom={initialMapZoom}
         canCollapse={showBoth}
         onCollapse={collapseMap}

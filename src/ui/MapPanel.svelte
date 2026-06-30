@@ -24,6 +24,7 @@
         onOsmApplyDeletions = () => {},
         onOsmHoverElement = () => {},
         onOsmMarksChange = () => {},
+        onOsmBoxToggle = () => {},
         initialZoom = 0,
         canCollapse = false,
         onCollapse = () => {},
@@ -59,8 +60,12 @@
         if (!hasSelection) untrack(() => { if (activeTab === 'data') activeTab = 'selection'; });
     });
     // Tell the map to lock + dim the selection while the Data tab is active (view-only), so the
-    // user can't accidentally change the selection there.
-    $effect(() => { onDataModeChange(activeTab === 'data'); });
+    // user can't accidentally change the selection there. Leaving Data also turns the box tool off.
+    $effect(() => {
+        const inData = activeTab === 'data';
+        onDataModeChange(inData);
+        if (!inData) untrack(() => { if (osmBoxActive) { osmBoxActive = false; onOsmBoxToggle(false); } });
+    });
     // True once a download has returned tracks for the current selection, gating the
     // "Add to preview" button. Reset whenever the selection changes (tracks no longer match).
     // Per-feature download UI state, keyed by feature id: { busy, label, ready }. Generic over the
@@ -105,7 +110,20 @@
         if (m[id]) delete m[id]; else m[id] = true;
         osmMarked[fid] = m;
     }
-    function setMode(fid, mode) { osmMode[fid] = mode; osmMarked[fid] = {}; } // switching mode resets marks
+    function setMode(fid, mode) { osmMode[fid] = mode; } // keep the marked set when toggling Remove/Keep
+    // Merge ids into a feature's marked set — used by the map box-select tool to tick objects.
+    export function addOsmMarks(fid, ids) {
+        const m = { ...(osmMarked[fid] ?? {}) };
+        for (const id of ids) m[id] = true;
+        osmMarked[fid] = m;
+    }
+    // Clear every feature's marked set (the "Clear selection" button + box-select reset).
+    let anyMarks = $derived(osmFeatures.some(f => hasMarks(f.id)));
+    function clearAllMarks() { for (const f of osmFeatures) osmMarked[f.id] = {}; }
+
+    // The transient box-select tool (Data tab only). Toggling it routes to the map; it never persists.
+    let osmBoxActive = $state(false);
+    function toggleOsmBox() { osmBoxActive = !osmBoxActive; onOsmBoxToggle(osmBoxActive); }
     function applyEdits(fid) {
         const ids = (osmElements[fid] ?? []).filter(e => willDelete(fid, e.id)).map(e => e.id);
         if (ids.length) onOsmApplyDeletions(fid, ids);
@@ -408,6 +426,22 @@
     </div>
     {/if}
 
+    <!-- Data-mode tool: drag a box on the map to select (mark) all OSM objects under it. -->
+    {#if activeTab === 'data'}
+    <div class="absolute top-20 left-4 z-[1000] flex flex-col gap-2">
+        <button
+            class="btn btn-square shadow-md border-0 {osmBoxActive ? 'btn-primary' : 'bg-base-100'}"
+            title="Select objects by dragging a box"
+            aria-label="Box-select objects"
+            onclick={toggleOsmBox}
+        >
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-dasharray="3 2">
+                <rect x="3" y="3" width="18" height="18" rx="1"></rect>
+            </svg>
+        </button>
+    </div>
+    {/if}
+
     <!-- Mode tabs: switch the panel between Selection (tools + map sources/sun) and Data
          (OpenStreetMap download/edit). Each opens the right-hand drawer to its content. The
          Data tab is disabled until an area is selected. -->
@@ -492,6 +526,11 @@
             {#if !hasSelection}
                 <p class="px-4 py-2 text-sm opacity-60">Select an area on the map to download OpenStreetMap data for it.</p>
             {:else}
+                <!-- Box-select hint + a way to drop the whole marked set across all features. -->
+                <div class="px-4 py-2 flex items-center gap-2 border-b border-base-300">
+                    <span class="text-xs opacity-60 flex-1">Drag a box on the map to select objects.</span>
+                    <button class="btn btn-xs" disabled={!anyMarks} onclick={clearAllMarks}>Clear selection</button>
+                </div>
                 <!-- One section per registry feature; entirely data-driven from `osmFeatures`. -->
                 {#each osmFeatures as f (f.id)}
                     {@const st = osmState[f.id]}
