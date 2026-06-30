@@ -56,9 +56,10 @@
     const idleLabel = (f) => `Download ${f.noun}`;
     let osmState = $state(untrack(() =>
         Object.fromEntries(osmFeatures.map(f => [f.id, { busy: false, label: idleLabel(f), ready: false }]))));
-    // The object list per feature ({id,label}[]) and the single selected element (map ↔ list),
-    // both pushed in from index.ts. The list is a vector-editor-style object panel.
+    // The raw object list per feature ({id,name}[]) and the single selected element (map ↔ list),
+    // both pushed in from index.ts. Plus a per-feature name filter the user types.
     let osmElements = $state(untrack(() => Object.fromEntries(osmFeatures.map(f => [f.id, []]))));
+    let osmFilter = $state(untrack(() => Object.fromEntries(osmFeatures.map(f => [f.id, '']))));
     let osmSelected = $state(null); // { featureId, elementId } | null
     export function setOsmElements(id, elements) { osmElements[id] = elements; }
     export function setOsmSelected(featureId, elementId) {
@@ -68,6 +69,74 @@
         if (osmSelected) { menuOpen = true; activeTab = 'osm'; }
     }
     const isSelected = (fid, eid) => osmSelected?.featureId === fid && osmSelected?.elementId === eid;
+
+    // Turn the filter text into a case-insensitive matcher. A plain word like "Booth" is already a
+    // valid regex that matches anywhere, so simple substring filtering "just works"; power users can
+    // type full regex (e.g. "^Booth (St|Rd)$"). An invalid pattern falls back to a literal substring
+    // so a half-typed "[" never wipes the list.
+    function makeFilter(text) {
+        const t = (text ?? '').trim();
+        if (!t) return null;
+        try { return new RegExp(t, 'i'); }
+        catch { return new RegExp(t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i'); }
+    }
+
+    // Per-feature display rows: named elements first (alphabetical), unnamed after (numbered in
+    // their stored order), then the name filter applied. Derived so it recomputes on data/filter
+    // changes only — and is reused by the keyboard navigation below.
+    let visible = $derived.by(() => {
+        const out = {};
+        for (const f of osmFeatures) {
+            const raw = osmElements[f.id] ?? [];
+            const named = raw.filter(e => e.name).slice()
+                .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
+            const unnamed = raw.filter(e => !e.name);
+            let rows = [
+                ...named.map(e => ({ id: e.id, label: e.name })),
+                ...unnamed.map((e, i) => ({ id: e.id, label: `${f.label} #${i + 1}` })),
+            ];
+            const re = makeFilter(osmFilter[f.id]);
+            if (re) rows = rows.filter(r => re.test(r.label));
+            out[f.id] = rows;
+        }
+        return out;
+    });
+
+    // Keyboard navigation over the visible list (only when the OSM tab is open and not typing in a
+    // field): ↑/↓ move the selection, Delete/Backspace removes the selected element and steps on.
+    function moveSelection(dir) {
+        let fid = osmSelected?.featureId;
+        let rows = fid ? visible[fid] : null;
+        if (!rows || !rows.length) {
+            const first = osmFeatures.find(f => (visible[f.id] ?? []).length);
+            if (!first) return;
+            rows = visible[first.id];
+            onOsmSelectElement(first.id, (dir > 0 ? rows[0] : rows[rows.length - 1]).id);
+            return;
+        }
+        const idx = rows.findIndex(r => r.id === osmSelected.elementId);
+        const next = idx === -1 ? 0 : idx + dir;
+        if (next < 0 || next >= rows.length) return; // stay put at the ends
+        onOsmSelectElement(fid, rows[next].id);
+    }
+    function deleteSelected() {
+        const sel = osmSelected;
+        if (!sel) return;
+        const rows = visible[sel.featureId] ?? [];
+        const idx = rows.findIndex(r => r.id === sel.elementId);
+        const neighbour = idx >= 0 ? (rows[idx + 1] ?? rows[idx - 1]) : null;
+        onOsmDeleteElement(sel.featureId, sel.elementId);
+        if (neighbour) onOsmSelectElement(sel.featureId, neighbour.id); // keep stepping through
+    }
+    function onOsmKey(e) {
+        if (!menuOpen || activeTab !== 'osm') return;
+        const tag = e.target?.tagName;
+        if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return; // don't hijack typing
+        if (e.key === 'ArrowDown') { e.preventDefault(); moveSelection(1); }
+        else if (e.key === 'ArrowUp') { e.preventDefault(); moveSelection(-1); }
+        else if (e.key === 'Delete' || e.key === 'Backspace') { e.preventDefault(); deleteSelected(); }
+    }
+
     // Scroll the selected row into view once the menu/list has rendered (it stays in the DOM even
     // when the panel is slid off-screen, so the query works regardless of open state).
     $effect(() => {
@@ -80,7 +149,7 @@
     export function setHasSelection(has) {
         hasSelection = has;
         osmSelected = null;
-        for (const f of osmFeatures) { osmState[f.id].ready = false; osmElements[f.id] = []; }
+        for (const f of osmFeatures) { osmState[f.id].ready = false; osmElements[f.id] = []; osmFilter[f.id] = ''; }
     }
 
     async function fetchOsm(f) {
@@ -241,6 +310,8 @@
     }
 </script>
 
+<svelte:window onkeydown={onOsmKey} />
+
 <div class="panel panel-map" {style}>
     <div class="panel-mount" id="map-mount" bind:this={mountEl}></div>
 
@@ -393,9 +464,11 @@
                 <!-- One section per registry feature; entirely data-driven from `osmFeatures`. -->
                 {#each osmFeatures as f (f.id)}
                     {@const st = osmState[f.id]}
-                    {@const elements = osmElements[f.id] ?? []}
+                    {@const total = (osmElements[f.id] ?? []).length}
+                    {@const rows = visible[f.id] ?? []}
+                    {@const filtering = !!(osmFilter[f.id] ?? '').trim()}
                     <div class="px-4 py-1 mt-2 first:mt-0 text-xs font-bold uppercase tracking-wider opacity-50">
-                        {f.label}{#if elements.length}<span class="ml-1 font-normal normal-case opacity-70">({elements.length})</span>{/if}
+                        {f.label}{#if total}<span class="ml-1 font-normal normal-case opacity-70">({filtering ? `${rows.length}/${total}` : total})</span>{/if}
                     </div>
                     <div class="px-4 py-2 flex flex-col gap-2">
                         <button class="btn btn-sm btn-block" title="Download {f.noun} in the selected area" onclick={() => fetchOsm(f)} disabled={st.busy}>
@@ -406,17 +479,25 @@
                         <button class="btn btn-sm btn-block" title="Download the {f.noun} (with your deletions) as a JSON file" onclick={() => downloadJson(() => onOsmDownload(f.id), `${f.id}.json`)} disabled={!st.ready}>Download JSON</button>
                         <button class="btn btn-sm btn-block" title="Load {f.noun} from a previously downloaded JSON file" onclick={() => pickUpload(f.id)}>Upload JSON</button>
                     </div>
-                    <!-- Object list: click a row to select it on the map (and vice-versa); × deletes it. -->
-                    {#if elements.length}
-                        <ul class="mx-4 mb-1 max-h-48 overflow-y-auto rounded border border-base-300 divide-y divide-base-300 text-sm">
-                            {#each elements as el (el.id)}
-                                <li data-osm-el="{f.id}:{el.id}" class="flex items-center {isSelected(f.id, el.id) ? 'bg-primary text-primary-content' : 'hover:bg-base-300'}"
-                                    onmouseenter={() => onOsmHoverElement(f.id, el.id)} onmouseleave={() => onOsmHoverElement(null, null)}>
-                                    <button class="flex-1 text-left px-2 py-1 truncate bg-transparent border-0" title={el.label} onclick={() => onOsmSelectElement(f.id, el.id)}>{el.label}</button>
-                                    <button class="px-2 py-1 opacity-70 hover:opacity-100 bg-transparent border-0" title="Delete this {f.label.toLowerCase()} element" aria-label="Delete element" onclick={() => onOsmDeleteElement(f.id, el.id)}>✕</button>
-                                </li>
-                            {/each}
-                        </ul>
+                    <!-- Filter + object list. Type a word ("Booth") for a substring match, or full regex.
+                         Click a row to select on the map (and vice-versa); ↑/↓ navigate, Del removes. -->
+                    {#if total}
+                        <div class="px-4 pb-1">
+                            <input type="search" class="input input-xs input-bordered w-full" placeholder="Filter by name (regex)…" bind:value={osmFilter[f.id]} />
+                        </div>
+                        {#if rows.length}
+                            <ul class="mx-4 mb-1 max-h-48 overflow-y-auto rounded border border-base-300 divide-y divide-base-300 text-sm">
+                                {#each rows as el (el.id)}
+                                    <li data-osm-el="{f.id}:{el.id}" class="flex items-center {isSelected(f.id, el.id) ? 'bg-primary text-primary-content' : 'hover:bg-base-300'}"
+                                        onmouseenter={() => onOsmHoverElement(f.id, el.id)} onmouseleave={() => onOsmHoverElement(null, null)}>
+                                        <button class="flex-1 text-left px-2 py-1 truncate bg-transparent border-0" title={el.label} onclick={() => onOsmSelectElement(f.id, el.id)}>{el.label}</button>
+                                        <button class="px-2 py-1 opacity-70 hover:opacity-100 bg-transparent border-0" title="Delete this {f.label.toLowerCase()} element" aria-label="Delete element" onclick={() => onOsmDeleteElement(f.id, el.id)}>✕</button>
+                                    </li>
+                                {/each}
+                            </ul>
+                        {:else}
+                            <p class="px-4 pb-2 text-xs opacity-50">No matches.</p>
+                        {/if}
                     {/if}
                 {/each}
                 <input type="file" accept=".json,application/json" bind:this={osmFileInput} onchange={uploadOsm} class="hidden" />

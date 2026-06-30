@@ -173,8 +173,8 @@ function ingestOsm(id: string, elements: OsmElement[]): void {
  *  running number). */
 function pushOsmElements(id: string): void {
     const data = currentOsm.get(id);
-    const noun = osmFeature(id).label;
-    const elements = data ? data.list.map((e, i) => ({ id: e.id, label: e.name || `${noun} #${i + 1}` })) : [];
+    // Push the raw id + name; the UI does the ordering (by name), labelling and filtering.
+    const elements = data ? data.list.map(e => ({ id: e.id, name: e.name ?? '' })) : [];
     appInstance?.setOsmElements(id, elements);
 }
 
@@ -649,16 +649,6 @@ async function init(): Promise<void> {
 
     // Selection / DEM / model changes alter the `c=` slice → keep the URL live.
     config.subscribe(() => scheduleUrlSync());
-
-    // Delete / Backspace removes the selected OSM element (unless the user is typing in a field).
-    document.addEventListener('keydown', (e) => {
-        if (e.key !== 'Delete' && e.key !== 'Backspace') return;
-        if (!selectedOsm) return;
-        const tag = (e.target as HTMLElement)?.tagName;
-        if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
-        e.preventDefault();
-        deleteOsm(selectedOsm.featureId, selectedOsm.elementId);
-    });
 
     if (initialId) controller.select(initialId);
 }
