@@ -14,6 +14,7 @@
         onShadowsChange = () => {},
         onSelectToggle = () => {},
         onAspectChange = () => {},
+        onDataModeChange = () => {},
         // OSM data: the feature list to render + generic per-feature callbacks (keyed by id).
         osmFeatures = [],
         onOsmFetch = () => 0,
@@ -148,6 +149,7 @@
         {onShadowsChange}
         {onSelectToggle}
         {onAspectChange}
+        {onDataModeChange}
         {osmFeatures}
         {onOsmFetch}
         {onOsmAddToPreview}

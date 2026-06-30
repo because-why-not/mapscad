@@ -13,6 +13,7 @@
         onShadowsChange = () => {},
         onSelectToggle = () => {},
         onAspectChange = () => {},
+        onDataModeChange = () => {},
         // OSM data: the feature list to render ({id,label,noun,hasRadius}) + generic callbacks.
         osmFeatures = [],
         onOsmFetch = () => 0,
@@ -57,6 +58,9 @@
     $effect(() => {
         if (!hasSelection) untrack(() => { if (activeTab === 'data') activeTab = 'selection'; });
     });
+    // Tell the map to lock + dim the selection while the Data tab is active (view-only), so the
+    // user can't accidentally change the selection there.
+    $effect(() => { onDataModeChange(activeTab === 'data'); });
     // True once a download has returned tracks for the current selection, gating the
     // "Add to preview" button. Reset whenever the selection changes (tracks no longer match).
     // Per-feature download UI state, keyed by feature id: { busy, label, ready }. Generic over the

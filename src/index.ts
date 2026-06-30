@@ -511,6 +511,13 @@ async function init(): Promise<void> {
                 }
             },
             onAspectChange: (ratio: number | null) => selection?.setAspect(ratio),
+            // The Data tab locks the selection: view-only + a grey wash over everything outside it.
+            // It's also where the user works with tracks, so OSM element picking is on here and off
+            // while editing the area in the Selection tab (where map clicks edit the selection).
+            onDataModeChange: (active: boolean) => {
+                osmPickEnabled = active;
+                selection?.setViewOnly(active);
+            },
             // The menu sections to render (one per registry feature), so the UI is data-driven.
             osmFeatures: OSM_FEATURES.map(f => ({ id: f.id, label: f.label, noun: f.noun, hasRadius: f.geometry === 'line' })),
             // Download one OSM feature for the current selection and overlay it on the map. Returns

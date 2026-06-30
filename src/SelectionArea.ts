@@ -26,6 +26,13 @@ const MOVE_HIT_PX = 16;     // pixel radius for grabbing the (larger) move handl
 const MIN_HALF = 1;         // minimum half-extent (projection units) to avoid degenerate rects
 const ROTATE_PUSH = 1.25;   // how far past the top edge the rotation handle sits
 
+// View-only ("locked") mode: dim everything outside the selection with this grey wash, so the
+// selected area reads as a spotlight and it's clear the selection can't be edited from here.
+const DIM_STYLE = new Style({ fill: new Fill({ color: 'rgba(90, 90, 90, 0.45)' }) });
+// Half-extent of the dimming backdrop ring (projection units). Covers many wrapped world copies
+// (world is ~4e7 wide) so the wash fills the viewport at any zoom; the selection is its hole.
+const DIM_EXTENT = 1e8;
+
 type Mode = 'none' | 'create' | 'resize' | 'rotate' | 'move';
 
 // Centre handle: a four-way move arrow, so the whole selection can be dragged as one.
@@ -47,6 +54,19 @@ export class SelectionArea {
     private source = new VectorSource();
     private layer: VectorLayer<VectorSource>;
     private interaction: PointerInteraction;
+
+    // View-only mode (the Data tab): edit interaction off, handles hidden, normal cursor, and a
+    // grey wash over everything but the selection. `wasActive` remembers the editing state so it
+    // can be restored when returning to the Selection tab.
+    private viewOnly = false;
+    private wasActive = false;
+    // wrapX off: with world-wrap on, OL draws the huge backdrop once per world copy, and a
+    // neighbouring copy's backdrop still covers the centre while its hole is shifted away — so the
+    // overlapping copies repaint grey over the selection. One copy → the hole stays clear.
+    private dimSource = new VectorSource({ wrapX: false });
+    private dimLayer: VectorLayer<VectorSource>;
+    private dimFeature = new Feature<Polygon>();
+    private dimAdded = false;
 
     // rectangle state, in the map view projection
     private center: Coordinate | null = null;
@@ -85,8 +105,13 @@ export class SelectionArea {
         this.rotateFeature.set('role', 'rotate');
         this.moveFeature.set('role', 'move');
 
-        this.layer = new VectorLayer({ source: this.source, style: styleForFeature, zIndex: 1000 });
+        this.layer = new VectorLayer({ source: this.source, style: f => this.styleFor(f), zIndex: 1000 });
         map.addLayer(this.layer);
+
+        // Sits above the tiles + OSM overlays but below the selection outline (1000), so outside
+        // the selection everything greys out while the selection itself stays crisp on top.
+        this.dimLayer = new VectorLayer({ source: this.dimSource, style: DIM_STYLE, zIndex: 950, visible: false });
+        map.addLayer(this.dimLayer);
 
         this.interaction = new PointerInteraction({
             handleDownEvent: e => this.onDown(e),
@@ -108,6 +133,51 @@ export class SelectionArea {
         this.interaction.setActive(false);
         this.map.getTargetElement()?.classList.remove('map-crosshair');
         this.clear();
+    }
+
+    /** Enter/leave view-only ("locked") mode used by the Data tab: the selection stays drawn but
+     *  can't be edited — handles hidden, edit interaction off, normal cursor — and everything
+     *  outside it is dimmed grey so it reads as a spotlight. */
+    setViewOnly(on: boolean): void {
+        if (on === this.viewOnly) return;
+        this.viewOnly = on;
+        if (on) {
+            this.wasActive = this.interaction.getActive();
+            this.interaction.setActive(false);
+            this.map.getTargetElement()?.classList.remove('map-crosshair');
+            this.updateDim();
+            this.dimLayer.setVisible(true);
+        } else {
+            this.dimLayer.setVisible(false);
+            if (this.wasActive) {
+                this.interaction.setActive(true);
+                this.map.getTargetElement()?.classList.add('map-crosshair');
+            }
+        }
+        this.source.changed(); // restyle: show/hide handles and the rect fill
+    }
+
+    /** Build the grey wash: a huge backdrop ring with the selection outline punched out as a hole.
+     *  The hole ring is reversed so its winding opposes the backdrop (canvas nonzero fill → hole). */
+    private updateDim(): void {
+        if (!this.center) { this.dimSource.clear(); this.dimAdded = false; return; }
+        const L = DIM_EXTENT;
+        const backdrop: Coordinate[] = [[-L, -L], [L, -L], [L, L], [-L, L], [-L, -L]];
+        const hole = [...this.outline(this.corners())].reverse();
+        const polygon = new Polygon([backdrop, hole]);
+        this.dimFeature.setGeometry(polygon);
+        if (!this.dimAdded) { this.dimSource.addFeature(this.dimFeature); this.dimAdded = true; }
+    }
+
+    /** Per-feature style. In view-only mode the interactive handles are hidden and the rect shows
+     *  as an outline only (no fill) so the selected area keeps the map's normal colours. */
+    private styleFor(feature: any): Style | undefined {
+        const role = feature.get('role');
+        if (this.viewOnly) {
+            if (role === 'corner' || role === 'rotate' || role === 'move') return undefined;
+            return new Style({ stroke: new Stroke({ color: '#007bff', width: 2, lineDash: [5, 5] }) });
+        }
+        return styleForFeature(feature);
     }
 
     /** Rebuild a selection from four saved lon/lat corners (order TL, TR, BR, BL). */
@@ -299,10 +369,13 @@ export class SelectionArea {
             this.source.addFeatures([this.rectFeature, ...this.cornerFeatures, this.rotateFeature, this.moveFeature]);
             this.featuresAdded = true;
         }
+        if (this.viewOnly) this.updateDim();
     }
 
     private clear(): void {
         this.source.clear();
+        this.dimSource.clear();
+        this.dimAdded = false;
         this.featuresAdded = false;
         this.center = null;
         this.halfX = this.halfY = this.rotation = 0;
