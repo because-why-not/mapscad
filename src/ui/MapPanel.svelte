@@ -36,8 +36,9 @@
     export function setZoom(z) { mapZoom = z; }
 
     let menuOpen = $state(false);
-    // The combined right-hand menu has two tabs: 'map' (layers + sun) and 'osm' (OpenStreetMap data).
-    let activeTab = $state('map');
+    // Panel-level mode tabs: 'selection' (selection tools + map sources/sun) and 'data'
+    // (OpenStreetMap download/edit). The Data tab is gated on a selection existing — see dataEnabled.
+    let activeTab = $state('selection');
     let activeProviderId = $state(untrack(() => initialActiveProviderId));
     let providerList = $state(untrack(() => tileProviders));
     let customList = $state(untrack(() => customMaps));
@@ -49,6 +50,13 @@
     // True once a selection exists, so the "download tracks" button can appear. Pushed in
     // from index.ts as the selection is drawn / cleared / restored.
     let hasSelection = $state(false);
+    // The Data tab is only reachable once an area is selected.
+    let dataEnabled = $derived(hasSelection);
+    // If the selection is cleared while the user is in Data mode, don't strand them there —
+    // fall back to the Selection tab. untrack activeTab so this only fires on hasSelection flipping.
+    $effect(() => {
+        if (!hasSelection) untrack(() => { if (activeTab === 'data') activeTab = 'selection'; });
+    });
     // True once a download has returned tracks for the current selection, gating the
     // "Add to preview" button. Reset whenever the selection changes (tracks no longer match).
     // Per-feature download UI state, keyed by feature id: { busy, label, ready }. Generic over the
@@ -71,8 +79,9 @@
     export function setOsmSelected(featureId, elementId) {
         osmSelected = featureId !== null && elementId !== null ? { featureId, elementId } : null;
         // Selecting an element (e.g. by clicking it on the map) opens the OSM-data menu so the user
-        // sees the matching list entry highlighted — the map ↔ list connection.
-        if (osmSelected) { menuOpen = true; activeTab = 'osm'; }
+        // sees the matching list entry highlighted — the map ↔ list connection. An element selection
+        // implies a selection exists, so the Data tab is enabled.
+        if (osmSelected) { menuOpen = true; activeTab = 'data'; }
     }
     const isSelected = (fid, eid) => osmSelected?.featureId === fid && osmSelected?.elementId === eid;
 
@@ -154,7 +163,7 @@
         onOsmSelectElement(fid, rows[next].id);
     }
     function onOsmKey(e) {
-        if (!menuOpen || activeTab !== 'osm') return;
+        if (!menuOpen || activeTab !== 'data') return;
         const el = e.target;
         const tag = el?.tagName;
         // Block only real text entry (the filter box); arrows/space still work over the list when a
@@ -349,7 +358,9 @@
 <div class="panel panel-map" {style}>
     <div class="panel-mount" id="map-mount" bind:this={mountEl}></div>
 
-    <!-- Selection toolbar (below the map's zoom +/- control) -->
+    <!-- Selection toolbar (below the map's zoom +/- control). Hidden in Data mode so the
+         selection can't be changed while the user works with downloaded data. -->
+    {#if activeTab === 'selection'}
     <div class="absolute top-20 left-4 z-[1000] flex flex-col gap-2">
         <button
             class="btn btn-square shadow-md border-0 {activeTool === 'rectangle' ? 'btn-primary' : 'bg-base-100'}"
@@ -391,33 +402,22 @@
             {/if}
         {/if}
     </div>
+    {/if}
 
-    <!-- Menu buttons: both open the one combined menu, each on its tab -->
-    <div class="absolute top-4 right-4 z-[1000] flex flex-col gap-2">
+    <!-- Mode tabs: switch the panel between Selection (tools + map sources/sun) and Data
+         (OpenStreetMap download/edit). Each opens the right-hand drawer to its content. The
+         Data tab is disabled until an area is selected. -->
+    <div class="absolute top-4 left-1/2 -translate-x-1/2 z-[1000] join shadow-md">
         <button
-            class="btn btn-square bg-base-100 shadow-md border-0"
-            aria-label="Open map menu"
-            title="Map"
-            onclick={() => { menuOpen = true; activeTab = 'map'; }}
-        >
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <line x1="3" y1="6" x2="21" y2="6"></line>
-                <line x1="3" y1="12" x2="21" y2="12"></line>
-                <line x1="3" y1="18" x2="21" y2="18"></line>
-            </svg>
-        </button>
+            class="btn btn-sm join-item border-0 {activeTab === 'selection' ? 'btn-primary' : 'bg-base-100'}"
+            onclick={() => { activeTab = 'selection'; menuOpen = true; }}
+        >Selection</button>
         <button
-            class="btn btn-square bg-base-100 shadow-md border-0"
-            aria-label="Open OpenStreetMap data menu"
-            title="OpenStreetMap data"
-            onclick={() => { menuOpen = true; activeTab = 'osm'; }}
-        >
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <circle cx="6" cy="19" r="2"></circle>
-                <circle cx="18" cy="5" r="2"></circle>
-                <path d="M8 19h6a4 4 0 0 0 0-8H10a4 4 0 0 1 0-8h6"></path>
-            </svg>
-        </button>
+            class="btn btn-sm join-item border-0 {activeTab === 'data' ? 'btn-primary' : 'bg-base-100'}"
+            disabled={!dataEnabled}
+            title={dataEnabled ? 'OpenStreetMap data' : 'Select an area first'}
+            onclick={() => { activeTab = 'data'; menuOpen = true; }}
+        >Data</button>
     </div>
 
     <!-- Live zoom readout (sits above the OL scale line at the bottom-left) -->
@@ -430,20 +430,13 @@
     {/if}
 
     <div class="absolute inset-y-0 right-0 w-72 bg-base-200 shadow-2xl z-[2000] flex flex-col transition-transform duration-300 {menuOpen ? 'translate-x-0' : 'translate-x-full'}">
-        <!-- Tab header: switch between Map controls and OpenStreetMap data -->
-        <div class="flex items-stretch bg-primary text-primary-content">
-            <button
-                class="flex-1 px-4 py-3 text-sm font-semibold {activeTab === 'map' ? 'bg-base-200 text-base-content' : 'opacity-80 hover:opacity-100'}"
-                onclick={() => activeTab = 'map'}
-            >Map</button>
-            <button
-                class="flex-1 px-4 py-3 text-sm font-semibold {activeTab === 'osm' ? 'bg-base-200 text-base-content' : 'opacity-80 hover:opacity-100'}"
-                onclick={() => activeTab = 'osm'}
-            >OSM data</button>
+        <!-- Title reflects the active panel tab; the tab itself is switched on the map. -->
+        <div class="flex items-center bg-primary text-primary-content">
+            <span class="flex-1 px-4 py-3 text-sm font-semibold">{activeTab === 'data' ? 'OSM data' : 'Map'}</span>
             <button class="btn btn-ghost btn-sm btn-circle text-primary-content self-center mx-1" aria-label="Close menu" onclick={() => menuOpen = false}>✕</button>
         </div>
 
-        {#if activeTab === 'map'}
+        {#if activeTab === 'selection'}
         <div class="overflow-y-auto flex-1 py-2">
             {#each sections as section (section.title)}
                 {@const isOpen = openSection === section.title}
