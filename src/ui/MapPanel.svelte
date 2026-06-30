@@ -54,6 +54,17 @@
     let hasSelection = $state(false);
     // The Data tab is only reachable once an area is selected.
     let dataEnabled = $derived(hasSelection);
+    // True after the selection changed while away from the Data tab — the downloaded data is now
+    // stale, so the next switch to Data reopens the drawer (the user likely needs to re-download).
+    // Cleared once Data is opened. Plain switching between tabs otherwise leaves the drawer as-is.
+    let selectionDirty = $state(false);
+    // Tab clicks switch mode without forcing the drawer open; clicking the already-active tab toggles
+    // it. Switching to Data after the selection changed reopens it (see selectionDirty above).
+    function selectTab(tab) {
+        if (tab === activeTab) { menuOpen = !menuOpen; return; }
+        if (tab === 'data' && selectionDirty) { menuOpen = true; selectionDirty = false; }
+        activeTab = tab;
+    }
     // If the selection is cleared while the user is in Data mode, don't strand them there —
     // fall back to the Selection tab. untrack activeTab so this only fires on hasSelection flipping.
     $effect(() => {
@@ -213,6 +224,7 @@
     });
     export function setHasSelection(has) {
         hasSelection = has;
+        if (has) selectionDirty = true; // selection changed → Data should reopen so stale data gets re-downloaded
         osmSelected = null;
         for (const f of osmFeatures) { osmState[f.id].ready = false; osmElements[f.id] = []; osmFilter[f.id] = ''; osmMarked[f.id] = {}; osmMode[f.id] = 'remove'; }
     }
@@ -448,13 +460,13 @@
     <div class="absolute top-4 left-1/2 -translate-x-1/2 z-[1000] join shadow-md">
         <button
             class="btn btn-sm join-item border-0 {activeTab === 'selection' ? 'btn-primary' : 'bg-base-100'}"
-            onclick={() => { activeTab = 'selection'; menuOpen = true; }}
+            onclick={() => selectTab('selection')}
         >Selection</button>
         <button
             class="btn btn-sm join-item border-0 {activeTab === 'data' ? 'btn-primary' : 'bg-base-100'}"
             disabled={!dataEnabled}
             title={dataEnabled ? 'OpenStreetMap data' : 'Select an area first'}
-            onclick={() => { activeTab = 'data'; menuOpen = true; }}
+            onclick={() => selectTab('data')}
         >Data</button>
     </div>
 
