@@ -13,18 +13,12 @@
         onShadowsChange = () => {},
         onSelectToggle = () => {},
         onAspectChange = () => {},
-        onFetchTracks = () => {},
-        onAddTracksToPreview = () => {},
-        onDownloadTracks = () => null,
-        onUploadTracks = () => 0,
-        onFetchBuildings = () => {},
-        onAddBuildingsToPreview = () => {},
-        onDownloadBuildings = () => null,
-        onUploadBuildings = () => 0,
-        onFetchStreets = () => {},
-        onAddStreetsToPreview = () => {},
-        onDownloadStreets = () => null,
-        onUploadStreets = () => 0,
+        // OSM data: the feature list to render ({id,label,noun,hasRadius}) + generic callbacks.
+        osmFeatures = [],
+        onOsmFetch = () => 0,
+        onOsmAddToPreview = () => {},
+        onOsmDownload = () => null,
+        onOsmUpload = () => 0,
         initialZoom = 0,
         canCollapse = false,
         onCollapse = () => {},
@@ -54,37 +48,35 @@
     let hasSelection = $state(false);
     // True once a download has returned tracks for the current selection, gating the
     // "Add to preview" button. Reset whenever the selection changes (tracks no longer match).
-    let tracksReady = $state(false);
-    let buildingsReady = $state(false);
-    let streetsReady = $state(false);
-    export function setHasSelection(has) { hasSelection = has; tracksReady = false; buildingsReady = false; streetsReady = false; }
-    // Track-download button feedback: idle label, a busy flag, and a transient result note.
-    let tracksBusy = $state(false);
-    let tracksLabel = $state('Download tracks');
-    // Building-download button feedback (mirror of the track equivalents).
-    let buildingsBusy = $state(false);
-    let buildingsLabel = $state('Download buildings');
-    // Street-download button feedback (mirror of the track equivalents).
-    let streetsBusy = $state(false);
-    let streetsLabel = $state('Download streets');
+    // Per-feature download UI state, keyed by feature id: { busy, label, ready }. Generic over the
+    // registry so a new feature renders with no extra wiring. `ready` gates "Add to preview" and is
+    // reset whenever the selection changes (the download no longer matches the new area).
+    const idleLabel = (f) => `Download ${f.noun}`;
+    let osmState = $state(untrack(() =>
+        Object.fromEntries(osmFeatures.map(f => [f.id, { busy: false, label: idleLabel(f), ready: false }]))));
+    export function setHasSelection(has) {
+        hasSelection = has;
+        for (const f of osmFeatures) osmState[f.id].ready = false;
+    }
 
-    async function fetchTracks() {
-        if (tracksBusy) return;
-        tracksBusy = true;
-        tracksLabel = 'Downloading…';
+    async function fetchOsm(f) {
+        const st = osmState[f.id];
+        if (st.busy) return;
+        st.busy = true;
+        st.label = 'Downloading…';
         try {
-            const count = await onFetchTracks();
-            tracksReady = count > 0;
-            tracksLabel = count ? `${count} tracks` : 'No tracks found';
+            const count = await onOsmFetch(f.id);
+            st.ready = count > 0;
+            st.label = count ? `${count} ${f.noun}` : `No ${f.noun} found`;
         } catch {
-            tracksLabel = 'Download failed';
+            st.label = 'Download failed';
         } finally {
-            tracksBusy = false;
-            setTimeout(() => tracksLabel = 'Download tracks', 2500);
+            st.busy = false;
+            setTimeout(() => st.label = idleLabel(f), 2500);
         }
     }
 
-    // Save the raw downloaded JSON (tracks or buildings) to a file the user can keep and re-upload.
+    // Save the raw downloaded JSON to a file the user can keep and re-upload.
     function downloadJson(getJson, filename) {
         const json = getJson();
         if (!json) return;
@@ -97,88 +89,26 @@
         URL.revokeObjectURL(url);
     }
 
-    // Hidden file inputs behind the Upload buttons; reading a saved file re-ingests its data
-    // exactly like a fresh download (overlay + enables "Add to preview").
-    let trackFileInput = $state();
-    async function uploadTracks(e) {
+    // One hidden file input reused for every feature; `uploadTargetId` remembers which Upload button
+    // opened it. Reading a saved file re-ingests its data exactly like a fresh download.
+    let osmFileInput = $state();
+    let uploadTargetId = null;
+    function pickUpload(id) { uploadTargetId = id; osmFileInput.click(); }
+    async function uploadOsm(e) {
         const file = e.target.files?.[0];
         e.target.value = ''; // reset so re-selecting the same file fires onchange again
-        if (!file) return;
+        const f = osmFeatures.find(x => x.id === uploadTargetId);
+        if (!file || !f) return;
+        const st = osmState[f.id];
         try {
             const json = JSON.parse(await file.text());
-            const count = onUploadTracks(json);
-            tracksReady = count > 0;
-            tracksLabel = count ? `${count} tracks` : 'No tracks found';
+            const count = onOsmUpload(f.id, json);
+            st.ready = count > 0;
+            st.label = count ? `${count} ${f.noun}` : `No ${f.noun} found`;
         } catch {
-            tracksLabel = 'Upload failed';
+            st.label = 'Upload failed';
         } finally {
-            setTimeout(() => tracksLabel = 'Download tracks', 2500);
-        }
-    }
-
-    async function fetchBuildings() {
-        if (buildingsBusy) return;
-        buildingsBusy = true;
-        buildingsLabel = 'Downloading…';
-        try {
-            const count = await onFetchBuildings();
-            buildingsReady = count > 0;
-            buildingsLabel = count ? `${count} buildings` : 'No buildings found';
-        } catch {
-            buildingsLabel = 'Download failed';
-        } finally {
-            buildingsBusy = false;
-            setTimeout(() => buildingsLabel = 'Download buildings', 2500);
-        }
-    }
-
-    let buildingFileInput = $state();
-    async function uploadBuildings(e) {
-        const file = e.target.files?.[0];
-        e.target.value = '';
-        if (!file) return;
-        try {
-            const json = JSON.parse(await file.text());
-            const count = onUploadBuildings(json);
-            buildingsReady = count > 0;
-            buildingsLabel = count ? `${count} buildings` : 'No buildings found';
-        } catch {
-            buildingsLabel = 'Upload failed';
-        } finally {
-            setTimeout(() => buildingsLabel = 'Download buildings', 2500);
-        }
-    }
-
-    async function fetchStreets() {
-        if (streetsBusy) return;
-        streetsBusy = true;
-        streetsLabel = 'Downloading…';
-        try {
-            const count = await onFetchStreets();
-            streetsReady = count > 0;
-            streetsLabel = count ? `${count} streets` : 'No streets found';
-        } catch {
-            streetsLabel = 'Download failed';
-        } finally {
-            streetsBusy = false;
-            setTimeout(() => streetsLabel = 'Download streets', 2500);
-        }
-    }
-
-    let streetFileInput = $state();
-    async function uploadStreets(e) {
-        const file = e.target.files?.[0];
-        e.target.value = '';
-        if (!file) return;
-        try {
-            const json = JSON.parse(await file.text());
-            const count = onUploadStreets(json);
-            streetsReady = count > 0;
-            streetsLabel = count ? `${count} streets` : 'No streets found';
-        } catch {
-            streetsLabel = 'Upload failed';
-        } finally {
-            setTimeout(() => streetsLabel = 'Download streets', 2500);
+            setTimeout(() => st.label = idleLabel(f), 2500);
         }
     }
     // Aspect-ratio lock for drawing/resizing (session-only). 'free' or a 'w:h' preset, or
@@ -438,44 +368,21 @@
             {#if !hasSelection}
                 <p class="px-4 py-2 text-sm opacity-60">Select an area on the map to download OpenStreetMap data for it.</p>
             {:else}
-                <!-- Tracks -->
-                <div class="px-4 py-1 text-xs font-bold uppercase tracking-wider opacity-50">Tracks</div>
-                <div class="px-4 py-2 flex flex-col gap-2">
-                    <button class="btn btn-sm btn-block" title="Download tracks in the selected area" onclick={fetchTracks} disabled={tracksBusy}>
-                        {#if tracksBusy}<span class="loading loading-spinner loading-xs"></span>{/if}
-                        {tracksLabel}
-                    </button>
-                    <button class="btn btn-sm btn-block" title="Add the downloaded tracks to the 3D preview" onclick={onAddTracksToPreview} disabled={!tracksReady}>Add to preview</button>
-                    <button class="btn btn-sm btn-block" title="Download the raw track data as a JSON file" onclick={() => downloadJson(onDownloadTracks, 'tracks.json')} disabled={!tracksReady}>Download JSON</button>
-                    <button class="btn btn-sm btn-block" title="Load tracks from a previously downloaded JSON file" onclick={() => trackFileInput.click()}>Upload JSON</button>
-                    <input type="file" accept=".json,application/json" bind:this={trackFileInput} onchange={uploadTracks} class="hidden" />
-                </div>
-
-                <!-- Buildings -->
-                <div class="px-4 py-1 mt-2 text-xs font-bold uppercase tracking-wider opacity-50">Buildings</div>
-                <div class="px-4 py-2 flex flex-col gap-2">
-                    <button class="btn btn-sm btn-block" title="Download building footprints in the selected area" onclick={fetchBuildings} disabled={buildingsBusy}>
-                        {#if buildingsBusy}<span class="loading loading-spinner loading-xs"></span>{/if}
-                        {buildingsLabel}
-                    </button>
-                    <button class="btn btn-sm btn-block" title="Add the downloaded buildings to the 3D preview" onclick={onAddBuildingsToPreview} disabled={!buildingsReady}>Add to preview</button>
-                    <button class="btn btn-sm btn-block" title="Download the raw building data as a JSON file" onclick={() => downloadJson(onDownloadBuildings, 'buildings.json')} disabled={!buildingsReady}>Download JSON</button>
-                    <button class="btn btn-sm btn-block" title="Load buildings from a previously downloaded JSON file" onclick={() => buildingFileInput.click()}>Upload JSON</button>
-                    <input type="file" accept=".json,application/json" bind:this={buildingFileInput} onchange={uploadBuildings} class="hidden" />
-                </div>
-
-                <!-- Streets (car roads) -->
-                <div class="px-4 py-1 mt-2 text-xs font-bold uppercase tracking-wider opacity-50">Streets</div>
-                <div class="px-4 py-2 flex flex-col gap-2">
-                    <button class="btn btn-sm btn-block" title="Download streets (car roads) in the selected area" onclick={fetchStreets} disabled={streetsBusy}>
-                        {#if streetsBusy}<span class="loading loading-spinner loading-xs"></span>{/if}
-                        {streetsLabel}
-                    </button>
-                    <button class="btn btn-sm btn-block" title="Add the downloaded streets to the 3D preview" onclick={onAddStreetsToPreview} disabled={!streetsReady}>Add to preview</button>
-                    <button class="btn btn-sm btn-block" title="Download the raw street data as a JSON file" onclick={() => downloadJson(onDownloadStreets, 'streets.json')} disabled={!streetsReady}>Download JSON</button>
-                    <button class="btn btn-sm btn-block" title="Load streets from a previously downloaded JSON file" onclick={() => streetFileInput.click()}>Upload JSON</button>
-                    <input type="file" accept=".json,application/json" bind:this={streetFileInput} onchange={uploadStreets} class="hidden" />
-                </div>
+                <!-- One section per registry feature; entirely data-driven from `osmFeatures`. -->
+                {#each osmFeatures as f (f.id)}
+                    {@const st = osmState[f.id]}
+                    <div class="px-4 py-1 mt-2 first:mt-0 text-xs font-bold uppercase tracking-wider opacity-50">{f.label}</div>
+                    <div class="px-4 py-2 flex flex-col gap-2">
+                        <button class="btn btn-sm btn-block" title="Download {f.noun} in the selected area" onclick={() => fetchOsm(f)} disabled={st.busy}>
+                            {#if st.busy}<span class="loading loading-spinner loading-xs"></span>{/if}
+                            {st.label}
+                        </button>
+                        <button class="btn btn-sm btn-block" title="Add the downloaded {f.noun} to the 3D preview" onclick={() => onOsmAddToPreview(f.id)} disabled={!st.ready}>Add to preview</button>
+                        <button class="btn btn-sm btn-block" title="Download the raw {f.noun} data as a JSON file" onclick={() => downloadJson(() => onOsmDownload(f.id), `${f.id}.json`)} disabled={!st.ready}>Download JSON</button>
+                        <button class="btn btn-sm btn-block" title="Load {f.noun} from a previously downloaded JSON file" onclick={() => pickUpload(f.id)}>Upload JSON</button>
+                    </div>
+                {/each}
+                <input type="file" accept=".json,application/json" bind:this={osmFileInput} onchange={uploadOsm} class="hidden" />
             {/if}
         </div>
     </div>

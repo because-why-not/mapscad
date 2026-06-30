@@ -11,15 +11,10 @@ import { MapController } from './MapController';
 import { OpenLayersEngine } from './engine/OpenLayersEngine';
 import { MapLibreTerrainEngine } from './engine/MapLibreTerrainEngine';
 import { SelectionArea, LonLat } from './SelectionArea';
-import { TrackOverlay } from './TrackOverlay';
-import { BuildingOverlay } from './BuildingOverlay';
-import { StreetOverlay } from './StreetOverlay';
-import { fetchTracksRaw, parseTracks, tracksFromJson } from './osm/OverpassTracks';
-import { fetchBuildingsRaw, parseBuildings, buildingsFromJson } from './osm/OverpassBuildings';
-import { fetchStreetsRaw, parseStreets, streetsFromJson } from './osm/OverpassStreets';
-import { Tracks } from './osm/Tracks';
-import { Buildings } from './osm/Buildings';
-import { Streets } from './osm/Streets';
+import { OsmOverlay } from './OsmOverlay';
+import { fetchFeatureRaw, parseWays, waysFromJson } from './osm/OverpassFeature';
+import { OsmVectorData } from './osm/OsmVectorData';
+import { OSM_FEATURES, osmFeature } from './osm/osmFeatures';
 import { sampleSelectionHeights, rectExtent, groundResolution, tileCoverage } from './HeightSampler';
 import { TerrainPreview } from './TerrainPreview';
 import { MapModel, SelectionShape } from './MapModel';
@@ -56,22 +51,16 @@ const model = new MapModel();
 // config at construction.
 const config = new PreviewConfigStore();
 let currentCorners: LonLat[] | null = null;
-// OSM walking-track overlay on the OL 2D map; created once the OL map is ready.
-let trackOverlay: TrackOverlay | null = null;
-// The tracks last downloaded for the current selection (gridless, lon/lat). Kept so they can be
-// re-bound to the grid and handed to the model when added to the preview or on resample.
-let currentTracks: Tracks | null = null;
-// The raw Overpass JSON the current tracks came from, kept verbatim so Download can save the
-// exact server response (or the file an Upload was loaded from).
-let currentRawTracks: any = null;
-// Building overlay + state, mirroring the track equivalents above.
-let buildingOverlay: BuildingOverlay | null = null;
-let currentBuildings: Buildings | null = null;
-let currentRawBuildings: any = null;
-// Street (car-road) overlay + state, mirroring the track equivalents above.
-let streetOverlay: StreetOverlay | null = null;
-let currentStreets: Streets | null = null;
-let currentRawStreets: any = null;
+// OSM feature state, all keyed by feature id (see osm/osmFeatures.ts). Generic so adding a feature
+// needs no new variables here.
+//  - osmOverlays: the OL 2D-map overlays, created once the OL map is ready.
+//  - currentOsm:  the ways last downloaded for the current selection (gridless, lon/lat), kept so
+//    they can be re-bound to the grid and handed to the model on "Add to preview" / resample.
+//  - currentRawOsm: the raw Overpass JSON each came from, verbatim, so Download saves the exact
+//    server response (or the file an Upload was loaded from).
+const osmOverlays = new Map<string, OsmOverlay>();
+const currentOsm = new Map<string, OsmVectorData>();
+const currentRawOsm = new Map<string, any>();
 
 /** Compact toggle label for an elevation source name (drops the _elevation[_raw] tail). */
 function demLabel(name: string): string {
@@ -135,9 +124,7 @@ async function resample(): Promise<void> {
         });
         if (abort.signal.aborted) return;
         model.setGrid(grid); // notifies -> preview + stats rebuild from the model
-        syncTrackField(); // re-rasterise tracks (if any) to the new grid dimensions
-        syncBuildingField(); // re-rasterise buildings (if any) to the new grid dimensions
-        syncStreetField(); // re-rasterise streets (if any) to the new grid dimensions
+        for (const def of OSM_FEATURES) syncOsmField(def.id); // re-rasterise to the new grid dims
         Env.log(`[3d] terrain regenerated in ${Math.round(performance.now() - t0)} ms`);
     } catch (e) {
         if ((e as { name?: string })?.name === 'AbortError') Env.log('[3d] terrain build cancelled');
@@ -152,34 +139,14 @@ function cancelResample(): void {
     resampleAbort?.abort();
 }
 
-/** Bind the current tracks to the model's grid and hand them over (or clear them). Called
- *  whenever the tracks or the grid change; TrackCanvasProcessor paints them into the heights. */
-function syncTrackField(): void {
+/** Bind one OSM feature's downloaded ways to the model's grid and hand them over (or clear them).
+ *  Called whenever the data or the grid change; the matching OsmCanvasProcessor paints them in. */
+function syncOsmField(id: string): void {
     const grid = model.getGrid();
-    if (!currentTracks || !currentCorners || !grid) { model.setTracks(null); return; }
-    const bound = currentTracks.withGrid({
-        corners: currentCorners, cols: grid.cols, rows: grid.rows,
-        widthMeters: grid.widthMeters, heightMeters: grid.heightMeters,
-    });
-    model.setTracks(bound);
-}
-
-/** Bind the current buildings to the model's grid and hand them over (or clear them). Mirrors
- *  syncTrackField; BuildingCanvasProcessor paints each footprint into the heights. */
-function syncBuildingField(): void {
-    const grid = model.getGrid();
-    if (!currentBuildings || !currentCorners || !grid) { model.setBuildings(null); return; }
-    const bound = currentBuildings.withGrid({ corners: currentCorners, cols: grid.cols, rows: grid.rows });
-    model.setBuildings(bound);
-}
-
-/** Bind the current streets to the model's grid and hand them over (or clear them). Mirrors
- *  syncTrackField; StreetCanvasProcessor paints them into the heights. */
-function syncStreetField(): void {
-    const grid = model.getGrid();
-    if (!currentStreets || !currentCorners || !grid) { model.setStreets(null); return; }
-    const bound = currentStreets.withGrid({ corners: currentCorners, cols: grid.cols, rows: grid.rows });
-    model.setStreets(bound);
+    const data = currentOsm.get(id);
+    if (!data || !currentCorners || !grid) { model.setOsmData(id, null); return; }
+    const bound = data.withGrid({ corners: currentCorners, cols: grid.cols, rows: grid.rows });
+    model.setOsmData(id, bound);
 }
 
 // Resampling hits the network, so changes to zoom / resolution limit are debounced.
@@ -219,24 +186,16 @@ function onModelChange(): void {
 function onSelectionChange(corners: LonLat[] | null): void {
     config.update({ selection: corners });
     appInstance?.setPreviewVisible(!!corners); // App shows/hides the 3D panel
-    appInstance?.setHasSelection(!!corners);   // map panel shows/hides the track button
+    appInstance?.setHasSelection(!!corners);   // map panel shows/hides the OSM-data button
     currentCorners = corners;
-    // Any downloaded tracks no longer match the new area: drop them + the preview section.
-    trackOverlay?.clear();
-    currentTracks = null;
-    currentRawTracks = null;
-    model.setTracks(null);
-    appInstance?.setTracksAvailable(false);
-    buildingOverlay?.clear();
-    currentBuildings = null;
-    currentRawBuildings = null;
-    model.setBuildings(null);
-    appInstance?.setBuildingsAvailable(false);
-    streetOverlay?.clear();
-    currentStreets = null;
-    currentRawStreets = null;
-    model.setStreets(null);
-    appInstance?.setStreetsAvailable(false);
+    // Any downloaded OSM features no longer match the new area: drop them + their preview sections.
+    for (const def of OSM_FEATURES) {
+        osmOverlays.get(def.id)?.clear();
+        currentOsm.delete(def.id);
+        currentRawOsm.delete(def.id);
+        model.setOsmData(def.id, null);
+        appInstance?.setOsmAvailable(def.id, false);
+    }
     if (corners) resample();
     else model.setGrid(null); // notifies -> preview clears, stats null
 }
@@ -456,81 +415,39 @@ async function init(): Promise<void> {
                 }
             },
             onAspectChange: (ratio: number | null) => selection?.setAspect(ratio),
-            // Download OSM walking tracks for the current selection and overlay them on the
-            // map. Returns the count so the button can report it; throws bubble to the panel.
-            onFetchTracks: async () => {
+            // The menu sections to render (one per registry feature), so the UI is data-driven.
+            osmFeatures: OSM_FEATURES.map(f => ({ id: f.id, label: f.label, noun: f.noun, hasRadius: f.geometry === 'line' })),
+            // Download one OSM feature for the current selection and overlay it on the map. Returns
+            // the way count so the button can report it; throws bubble to the panel.
+            onOsmFetch: async (id: string) => {
                 if (!currentCorners) return 0;
-                const json = await fetchTracksRaw(currentCorners);
-                const fetched = parseTracks(json);
-                currentRawTracks = json;
-                currentTracks = new Tracks(fetched);
-                trackOverlay?.setTracks(fetched);
+                const def = osmFeature(id);
+                const json = await fetchFeatureRaw(def, currentCorners);
+                const fetched = parseWays(def, json);
+                currentRawOsm.set(id, json);
+                currentOsm.set(id, new OsmVectorData(fetched));
+                osmOverlays.get(id)?.setWays(fetched);
                 return fetched.length;
             },
-            // Save the raw Overpass response verbatim so the same tracks can be reused later
-            // without re-querying. Returns the JSON (or null if nothing's been downloaded).
-            onDownloadTracks: () => currentRawTracks,
-            // Reuse tracks from a previously downloaded file: ingest + overlay them exactly like
-            // a fresh download, so "Add to preview" then works. Returns the track count.
-            onUploadTracks: (json: any) => {
-                const fetched = tracksFromJson(json);
-                currentRawTracks = json;
-                currentTracks = new Tracks(fetched);
-                trackOverlay?.setTracks(fetched);
+            // The raw Overpass response, verbatim, so it can be saved and re-ingested (null if none).
+            onOsmDownload: (id: string) => currentRawOsm.get(id) ?? null,
+            // Reuse a feature from a previously downloaded file: ingest + overlay it exactly like a
+            // fresh download, so "Add to preview" then works. Returns the way count.
+            onOsmUpload: (id: string, json: any) => {
+                const def = osmFeature(id);
+                const fetched = waysFromJson(def, json);
+                currentRawOsm.set(id, json);
+                currentOsm.set(id, new OsmVectorData(fetched));
+                osmOverlays.get(id)?.setWays(fetched);
                 return fetched.length;
             },
-            // Push the downloaded tracks into the model: bind them to the grid and reveal the
-            // preview's Tracks section so the raise can be configured.
-            onAddTracksToPreview: () => {
-                if (!currentTracks || currentTracks.isEmpty()) return;
-                syncTrackField();
-                appInstance?.setTracksAvailable(true);
-            },
-            // Building equivalents of the track callbacks above (same lifecycle).
-            onFetchBuildings: async () => {
-                if (!currentCorners) return 0;
-                const json = await fetchBuildingsRaw(currentCorners);
-                const fetched = parseBuildings(json);
-                currentRawBuildings = json;
-                currentBuildings = new Buildings(fetched);
-                buildingOverlay?.setBuildings(fetched);
-                return fetched.length;
-            },
-            onDownloadBuildings: () => currentRawBuildings,
-            onUploadBuildings: (json: any) => {
-                const fetched = buildingsFromJson(json);
-                currentRawBuildings = json;
-                currentBuildings = new Buildings(fetched);
-                buildingOverlay?.setBuildings(fetched);
-                return fetched.length;
-            },
-            onAddBuildingsToPreview: () => {
-                if (!currentBuildings || currentBuildings.isEmpty()) return;
-                syncBuildingField();
-                appInstance?.setBuildingsAvailable(true);
-            },
-            // Street equivalents of the track callbacks above (same lifecycle).
-            onFetchStreets: async () => {
-                if (!currentCorners) return 0;
-                const json = await fetchStreetsRaw(currentCorners);
-                const fetched = parseStreets(json);
-                currentRawStreets = json;
-                currentStreets = new Streets(fetched);
-                streetOverlay?.setStreets(fetched);
-                return fetched.length;
-            },
-            onDownloadStreets: () => currentRawStreets,
-            onUploadStreets: (json: any) => {
-                const fetched = streetsFromJson(json);
-                currentRawStreets = json;
-                currentStreets = new Streets(fetched);
-                streetOverlay?.setStreets(fetched);
-                return fetched.length;
-            },
-            onAddStreetsToPreview: () => {
-                if (!currentStreets || currentStreets.isEmpty()) return;
-                syncStreetField();
-                appInstance?.setStreetsAvailable(true);
+            // Push the downloaded feature into the model: bind it to the grid and reveal the
+            // preview's section so its raise can be configured.
+            onOsmAddToPreview: (id: string) => {
+                const data = currentOsm.get(id);
+                if (!data || data.isEmpty()) return;
+                syncOsmField(id);
+                appInstance?.setOsmAvailable(id, true);
             },
             previewDems,
             initialPreviewDemId: initialDemId,
@@ -600,9 +517,11 @@ async function init(): Promise<void> {
     const olEngine = new OpenLayersEngine(maps, olMap => {
         if (selection) return;
         selection = new SelectionArea(olMap, { onChange: onUserSelectionChange });
-        buildingOverlay = new BuildingOverlay(olMap);
-        streetOverlay = new StreetOverlay(olMap);
-        trackOverlay = new TrackOverlay(olMap);
+        // One overlay per registry feature, in zIndex order (the registry sets each zIndex).
+        for (const def of OSM_FEATURES) {
+            const overlay = new OsmOverlay(olMap, def);
+            osmOverlays.set(def.id, overlay);
+        }
         const savedCorners = config.get().selection;
         if (savedCorners) {
             const shape = config.get().model.shape;

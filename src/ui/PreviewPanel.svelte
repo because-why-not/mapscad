@@ -6,6 +6,7 @@
         canCollapse = false,
         onCollapse = () => {},
         dems = [],
+        osmFeatures = [],
         initialDemId = '',
         onDemChange = () => {},
         zoomMin = 0,
@@ -70,28 +71,26 @@
     let waterLevel = $state(untrack(() => initialSettings.waterLevel ?? 0));
     let lowCutEnabled = $state(untrack(() => initialSettings.lowCutEnabled ?? false));
     let lowCutLevel = $state(untrack(() => initialSettings.lowCutLevel ?? 0));
-    let tracksEnabled = $state(untrack(() => initialSettings.tracksEnabled ?? false));
-    let trackRaise = $state(untrack(() => initialSettings.trackRaise ?? 2));
-    let trackRadius = $state(untrack(() => initialSettings.trackRadius ?? 10));
-    let buildingsEnabled = $state(untrack(() => initialSettings.buildingsEnabled ?? false));
-    let buildingRaise = $state(untrack(() => initialSettings.buildingRaise ?? 6));
-    let streetsEnabled = $state(untrack(() => initialSettings.streetsEnabled ?? false));
-    let streetRaise = $state(untrack(() => initialSettings.streetRaise ?? 2));
-    let streetRadius = $state(untrack(() => initialSettings.streetRadius ?? 12));
     let smoothShading = $state(untrack(() => initialSettings.smoothShading ?? true));
 
-    // Whether OSM tracks have been added from the map; gates the Tracks section's visibility.
-    let tracksAvailable = $state(false);
-    export function setTracksAvailable(has) { tracksAvailable = has; }
-    // Same for buildings.
-    let buildingsAvailable = $state(false);
-    export function setBuildingsAvailable(has) { buildingsAvailable = has; }
-    // Same for streets.
-    let streetsAvailable = $state(false);
-    export function setStreetsAvailable(has) { streetsAvailable = has; }
+    // Per-OSM-feature raise settings, keyed by feature id, seeded from the sanitized model settings
+    // (initialSettings.osm always has every registry feature). Generic so a new feature needs no
+    // new state here. `osmAvailable[id]` gates each section: true once the feature is added from the
+    // map. Mutated in place, so deep $state reactivity tracks the nested fields.
+    let osmSettings = $state(untrack(() => {
+        const src = initialSettings.osm ?? {};
+        const out = {};
+        for (const f of osmFeatures) {
+            const s = src[f.id] ?? {};
+            out[f.id] = { enabled: s.enabled ?? false, raise: s.raise ?? 0, radius: s.radius ?? 0 };
+        }
+        return out;
+    }));
+    let osmAvailable = $state(untrack(() => Object.fromEntries(osmFeatures.map(f => [f.id, false]))));
+    export function setOsmAvailable(id, has) { if (id in osmAvailable) osmAvailable[id] = has; }
 
     function settings() {
-        return { heightZoom, resolutionLimit, heightScale, socketEnabled, socketSize, tilesEnabled, tilesX, tilesY, waterEnabled, waterCutoff, waterLevel, lowCutEnabled, lowCutLevel, tracksEnabled, trackRaise, trackRadius, buildingsEnabled, buildingRaise, streetsEnabled, streetRaise, streetRadius, smoothShading };
+        return { heightZoom, resolutionLimit, heightScale, socketEnabled, socketSize, tilesEnabled, tilesX, tilesY, waterEnabled, waterCutoff, waterLevel, lowCutEnabled, lowCutLevel, osm: $state.snapshot(osmSettings), smoothShading };
     }
     function emit() { onSettingsChange(settings()); }
     function selectAll(e) { e.target.select(); }
@@ -273,69 +272,34 @@
                 {/if}
             </div>
 
-            <!-- Tracks (only once OSM tracks have been added from the map) -->
-            {#if tracksAvailable}
-                <div class="px-4 py-1 mt-2 text-xs font-bold uppercase tracking-wider opacity-50">Tracks</div>
-                <div class="px-4 py-2">
-                    <label class="flex items-center gap-2 cursor-pointer">
-                        <input type="checkbox" class="checkbox checkbox-sm" bind:checked={tracksEnabled} onchange={emit} />
-                        <span class="text-sm">Raise along tracks</span>
-                    </label>
-                    {#if tracksEnabled}
-                        <div class="mt-2 flex items-center gap-2">
-                            <span class="text-sm flex-1">Raise by</span>
-                            <input type="number" step="0.5" class="input input-sm input-bordered w-24" bind:value={trackRaise} onfocus={selectAll} onchange={emit} />
-                            <span class="text-sm opacity-60">m</span>
-                        </div>
-                        <div class="mt-2 flex items-center gap-2">
-                            <span class="text-sm flex-1">Within</span>
-                            <input type="number" min="0" step="1" class="input input-sm input-bordered w-24" bind:value={trackRadius} onfocus={selectAll} onchange={emit} />
-                            <span class="text-sm opacity-60">m</span>
-                        </div>
-                    {/if}
-                </div>
-            {/if}
-
-            <!-- Buildings (only once OSM buildings have been added from the map) -->
-            {#if buildingsAvailable}
-                <div class="px-4 py-1 mt-2 text-xs font-bold uppercase tracking-wider opacity-50">Buildings</div>
-                <div class="px-4 py-2">
-                    <label class="flex items-center gap-2 cursor-pointer">
-                        <input type="checkbox" class="checkbox checkbox-sm" bind:checked={buildingsEnabled} onchange={emit} />
-                        <span class="text-sm">Raise buildings</span>
-                    </label>
-                    {#if buildingsEnabled}
-                        <div class="mt-2 flex items-center gap-2">
-                            <span class="text-sm flex-1">Raise by</span>
-                            <input type="number" step="0.5" class="input input-sm input-bordered w-24" bind:value={buildingRaise} onfocus={selectAll} onchange={emit} />
-                            <span class="text-sm opacity-60">m</span>
-                        </div>
-                    {/if}
-                </div>
-            {/if}
-
-            <!-- Streets (only once OSM streets have been added from the map) -->
-            {#if streetsAvailable}
-                <div class="px-4 py-1 mt-2 text-xs font-bold uppercase tracking-wider opacity-50">Streets</div>
-                <div class="px-4 py-2">
-                    <label class="flex items-center gap-2 cursor-pointer">
-                        <input type="checkbox" class="checkbox checkbox-sm" bind:checked={streetsEnabled} onchange={emit} />
-                        <span class="text-sm">Raise along streets</span>
-                    </label>
-                    {#if streetsEnabled}
-                        <div class="mt-2 flex items-center gap-2">
-                            <span class="text-sm flex-1">Raise by</span>
-                            <input type="number" step="0.5" class="input input-sm input-bordered w-24" bind:value={streetRaise} onfocus={selectAll} onchange={emit} />
-                            <span class="text-sm opacity-60">m</span>
-                        </div>
-                        <div class="mt-2 flex items-center gap-2">
-                            <span class="text-sm flex-1">Within</span>
-                            <input type="number" min="0" step="1" class="input input-sm input-bordered w-24" bind:value={streetRadius} onfocus={selectAll} onchange={emit} />
-                            <span class="text-sm opacity-60">m</span>
-                        </div>
-                    {/if}
-                </div>
-            {/if}
+            <!-- One raise section per OSM feature, shown once that feature has been added from the
+                 map. Entirely data-driven from `osmFeatures` + `osmSettings`. -->
+            {#each osmFeatures as f (f.id)}
+                {#if osmAvailable[f.id]}
+                    {@const os = osmSettings[f.id]}
+                    <div class="px-4 py-1 mt-2 text-xs font-bold uppercase tracking-wider opacity-50">{f.label}</div>
+                    <div class="px-4 py-2">
+                        <label class="flex items-center gap-2 cursor-pointer">
+                            <input type="checkbox" class="checkbox checkbox-sm" bind:checked={os.enabled} onchange={emit} />
+                            <span class="text-sm">{f.hasRadius ? `Raise along ${f.noun}` : `Raise ${f.noun}`}</span>
+                        </label>
+                        {#if os.enabled}
+                            <div class="mt-2 flex items-center gap-2">
+                                <span class="text-sm flex-1">Raise by</span>
+                                <input type="number" step="0.5" class="input input-sm input-bordered w-24" bind:value={os.raise} onfocus={selectAll} onchange={emit} />
+                                <span class="text-sm opacity-60">m</span>
+                            </div>
+                            {#if f.hasRadius}
+                                <div class="mt-2 flex items-center gap-2">
+                                    <span class="text-sm flex-1">Within</span>
+                                    <input type="number" min="0" step="1" class="input input-sm input-bordered w-24" bind:value={os.radius} onfocus={selectAll} onchange={emit} />
+                                    <span class="text-sm opacity-60">m</span>
+                                </div>
+                            {/if}
+                        {/if}
+                    </div>
+                {/if}
+            {/each}
 
             <!-- Preview (display only; does not affect the exported model) -->
             <div class="px-4 py-1 mt-2 text-xs font-bold uppercase tracking-wider opacity-50">Preview</div>

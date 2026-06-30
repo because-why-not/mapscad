@@ -14,18 +14,12 @@
         onShadowsChange = () => {},
         onSelectToggle = () => {},
         onAspectChange = () => {},
-        onFetchTracks = () => {},
-        onAddTracksToPreview = () => {},
-        onDownloadTracks = () => null,
-        onUploadTracks = () => 0,
-        onFetchBuildings = () => {},
-        onAddBuildingsToPreview = () => {},
-        onDownloadBuildings = () => null,
-        onUploadBuildings = () => 0,
-        onFetchStreets = () => {},
-        onAddStreetsToPreview = () => {},
-        onDownloadStreets = () => null,
-        onUploadStreets = () => 0,
+        // OSM data: the feature list to render + generic per-feature callbacks (keyed by id).
+        osmFeatures = [],
+        onOsmFetch = () => 0,
+        onOsmAddToPreview = () => {},
+        onOsmDownload = () => null,
+        onOsmUpload = () => 0,
         initialMapZoom = 0,
         // 3D-view menu (forwarded to PreviewPanel)
         previewDems = [],
@@ -77,9 +71,7 @@
     export function setSelectActive(active) { mapPanel?.setSelectActive(active); }
     export function setSelectTool(tool) { mapPanel?.setSelectTool(tool); }
     export function setHasSelection(has) { mapPanel?.setHasSelection(has); }
-    export function setTracksAvailable(has) { previewPanel?.setTracksAvailable(has); }
-    export function setBuildingsAvailable(has) { previewPanel?.setBuildingsAvailable(has); }
-    export function setStreetsAvailable(has) { previewPanel?.setStreetsAvailable(has); }
+    export function setOsmAvailable(id, has) { previewPanel?.setOsmAvailable(id, has); }
     export function setMapZoom(z) { mapPanel?.setZoom(z); }
     export function setPreviewStats(stats) { previewPanel?.setPreviewStats(stats); }
     export function setPreviewLoading(state) { previewPanel?.setPreviewLoading(state); }
@@ -150,18 +142,11 @@
         {onShadowsChange}
         {onSelectToggle}
         {onAspectChange}
-        {onFetchTracks}
-        {onAddTracksToPreview}
-        {onDownloadTracks}
-        {onUploadTracks}
-        {onFetchBuildings}
-        {onAddBuildingsToPreview}
-        {onDownloadBuildings}
-        {onUploadBuildings}
-        {onFetchStreets}
-        {onAddStreetsToPreview}
-        {onDownloadStreets}
-        {onUploadStreets}
+        {osmFeatures}
+        {onOsmFetch}
+        {onOsmAddToPreview}
+        {onOsmDownload}
+        {onOsmUpload}
         initialZoom={initialMapZoom}
         canCollapse={showBoth}
         onCollapse={collapseMap}
@@ -183,6 +168,7 @@
         canCollapse={showBoth}
         onCollapse={collapsePreview}
         dems={previewDems}
+        {osmFeatures}
         initialDemId={initialPreviewDemId}
         onDemChange={onPreviewDemChange}
         zoomMin={previewZoomMin}

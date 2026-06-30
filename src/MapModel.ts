@@ -4,12 +4,9 @@ import {
     type ElevationValueProcessor, type ElevationContext, HeightScaleProcessor, WaterProcessor, LowCutProcessor,
     type VertexProcessor, type VertexMesh, SocketProcessor,
 } from './model/processors';
-import { TrackCanvasProcessor } from './model/TrackCanvasProcessor';
-import { BuildingCanvasProcessor } from './model/BuildingCanvasProcessor';
-import { StreetCanvasProcessor } from './model/StreetCanvasProcessor';
-import type { Tracks } from './osm/Tracks';
-import type { Buildings } from './osm/Buildings';
-import type { Streets } from './osm/Streets';
+import { OsmCanvasProcessor } from './model/OsmCanvasProcessor';
+import type { OsmVectorData } from './osm/OsmVectorData';
+import { OSM_FEATURES } from './osm/osmFeatures';
 import { pushQuadOriented, weldIndexed } from './model/geometry';
 
 /**
@@ -23,6 +20,13 @@ import { pushQuadOriented, weldIndexed } from './model/geometry';
  * Height exaggeration (heightScale) is baked into the geometry so the preview and the
  * exported STL are always the exact same solid.
  */
+
+/** Per-feature OSM raise config (radius is ignored for `area` features like buildings). */
+export interface OsmFeatureSettings {
+    enabled: boolean;
+    raise: number;
+    radius: number;
+}
 
 export interface ModelSettings {
     heightZoom: number;      // DEM tile zoom to sample at — drives mesh detail/density
@@ -38,14 +42,9 @@ export interface ModelSettings {
     waterLevel: number;      // metres: height water is rendered at (e.g. -50 for a clear step)
     lowCutEnabled: boolean;  // replace everything below lowCutLevel with no-data (carve a hole)
     lowCutLevel: number;     // metres (running height, after water, before scale): below this → a hole
-    tracksEnabled: boolean;  // raise terrain along downloaded OSM tracks (needs a track field set)
-    trackRaise: number;      // metres to raise cells near a track by
-    trackRadius: number;     // metres: cells within this distance of a track are raised
-    buildingsEnabled: boolean; // raise terrain over downloaded OSM building footprints
-    buildingRaise: number;   // metres to raise (or carve, if negative) each footprint by
-    streetsEnabled: boolean; // raise terrain along downloaded OSM streets (car roads)
-    streetRaise: number;     // metres to raise cells near a street by
-    streetRadius: number;    // metres: cells within this distance of a street are raised
+    // Per-OSM-feature raise settings, keyed by feature id (see osm/osmFeatures.ts). Generic so
+    // adding a feature (tracks, streets, buildings, future cycleways) needs no new field here.
+    osm: Record<string, OsmFeatureSettings>;
     shape: SelectionShape;   // footprint cut from the (still rectangular) sampled grid
 }
 
@@ -91,16 +90,17 @@ export const DEFAULT_MODEL_SETTINGS: ModelSettings = {
     waterLevel: 0,
     lowCutEnabled: false,
     lowCutLevel: 0,
-    tracksEnabled: false,
-    trackRaise: 2,
-    trackRadius: 10,
-    buildingsEnabled: false,
-    buildingRaise: 6,
-    streetsEnabled: false,
-    streetRaise: 2,
-    streetRadius: 12,
+    osm: defaultOsmSettings(),
     shape: SelectionShape.Rectangle,
 };
+
+/** Default per-feature OSM settings from the registry: disabled, with each feature's default
+ *  raise/radius. The shape stays generic so a new registry entry needs no change here. */
+function defaultOsmSettings(): Record<string, OsmFeatureSettings> {
+    const osm: Record<string, OsmFeatureSettings> = {};
+    for (const def of OSM_FEATURES) osm[def.id] = { enabled: false, raise: def.raise, radius: def.radius };
+    return osm;
+}
 
 // Minimum socket thickness, so a "size 0" socket is still a handleable solid.
 const SOCKET_FLOOR_OFFSET = 0.1;
@@ -134,15 +134,10 @@ const SOCKET_FLOOR_OFFSET = 0.1;
  */
 export class MapModel {
     private grid: HeightGrid | null = null;
-    // OSM tracks bound to the current grid (lon/lat → [col,row]); feeds TrackCanvasProcessor.
-    // null = no tracks loaded. index.ts keeps it in sync with the grid.
-    private tracks: Tracks | null = null;
-    // OSM building footprints bound to the current grid; feeds BuildingCanvasProcessor. Same
-    // lifecycle as `tracks`.
-    private buildings: Buildings | null = null;
-    // OSM streets (car roads) bound to the current grid; feeds StreetCanvasProcessor. Same
-    // lifecycle as `tracks`.
-    private streets: Streets | null = null;
+    // Downloaded OSM features bound to the current grid (lon/lat → [col,row]), keyed by feature id;
+    // each feeds an OsmCanvasProcessor. A missing/empty entry means that feature isn't loaded.
+    // index.ts keeps these in sync with the grid via setOsmData().
+    private osmData = new Map<string, OsmVectorData>();
     private settings: ModelSettings;
     private listeners = new Set<() => void>();
     private cache: ModelGeometry | null = null;
@@ -178,27 +173,11 @@ export class MapModel {
         return this.grid;
     }
 
-    /** Set the OSM tracks (grid-bound, see Tracks.withGrid), or null to clear them. Rebuilds so
-     *  the TrackCanvasProcessor picks them up. */
-    setTracks(tracks: Tracks | null): void {
-        if (this.tracks === tracks) return; // no-op (covers clearing already-empty tracks)
-        this.tracks = tracks;
-        this.notify();
-    }
-
-    /** Set the OSM building footprints (grid-bound, see Buildings.withGrid), or null to clear them.
-     *  Rebuilds so the BuildingCanvasProcessor picks them up. */
-    setBuildings(buildings: Buildings | null): void {
-        if (this.buildings === buildings) return;
-        this.buildings = buildings;
-        this.notify();
-    }
-
-    /** Set the OSM streets (grid-bound, see Streets.withGrid), or null to clear them. Rebuilds so
-     *  the StreetCanvasProcessor picks them up. */
-    setStreets(streets: Streets | null): void {
-        if (this.streets === streets) return;
-        this.streets = streets;
+    /** Set one OSM feature's downloaded data (grid-bound, see OsmVectorData.withGrid), or null to
+     *  clear it. Rebuilds so the matching OsmCanvasProcessor picks it up. */
+    setOsmData(id: string, data: OsmVectorData | null): void {
+        if ((this.osmData.get(id) ?? null) === data) return; // no-op (covers clearing already-empty)
+        if (data) this.osmData.set(id, data); else this.osmData.delete(id);
         this.notify();
     }
 
@@ -325,24 +304,21 @@ export class MapModel {
     // --- processor chains ----------------------------------------------------
 
     /** Grid-reshaping tools, applied to the whole grid before any value processing or geometry.
-     *  Some may change its dimensions (tile dividers). Today: track raise (OSM tracks, when a
-     *  distance field is set) then tiling; future reshapers (crop, resample, composite sources)
-     *  slot into this same list. */
+     *  Some may change its dimensions (tile dividers). Today: OSM-feature raises (tracks, streets,
+     *  buildings — painted onto the freshly sampled grid) then tiling; future reshapers (crop,
+     *  resample, composite sources) slot into this same list. */
     private gridProcessors(): ElevationGridProcessor[] {
         const s = this.settings;
         const list: ElevationGridProcessor[] = [];
-        // Track raise runs FIRST, on the freshly sampled grid (its dims match the tracks' bound
-        // grid), before tiling injects dividers and before the value chain.
-        if (s.tracksEnabled && this.tracks && !this.tracks.isEmpty()) {
-            list.push(new TrackCanvasProcessor(this.tracks, s.trackRaise, s.trackRadius));
-        }
-        // Building raise runs on the same freshly sampled grid (after tracks, before tiling).
-        if (s.buildingsEnabled && this.buildings && !this.buildings.isEmpty()) {
-            list.push(new BuildingCanvasProcessor(this.buildings, s.buildingRaise));
-        }
-        // Street raise: same freshly sampled grid, painted like tracks (after buildings, before tiling).
-        if (s.streetsEnabled && this.streets && !this.streets.isEmpty()) {
-            list.push(new StreetCanvasProcessor(this.streets, s.streetRaise, s.streetRadius));
+        // OSM-feature raises run FIRST, on the freshly sampled grid (its dims match each feature's
+        // bound grid), before tiling injects dividers and before the value chain. Registry order
+        // is preserved so overlapping features composite deterministically.
+        for (const def of OSM_FEATURES) {
+            const fs = s.osm[def.id];
+            const data = this.osmData.get(def.id);
+            if (fs?.enabled && data && !data.isEmpty()) {
+                list.push(new OsmCanvasProcessor(data, def, fs.raise, fs.radius));
+            }
         }
         // Tiling is expressed as a grid reshape: inject no-data divider lines so the hole
         // path walls each block into its own body. Replaces the old per-block buildTile loop.
@@ -537,16 +513,33 @@ function sanitize(s: ModelSettings): ModelSettings {
         waterLevel: num(s.waterLevel, 0),
         lowCutEnabled: !!s.lowCutEnabled,
         lowCutLevel: num(s.lowCutLevel, 0),
-        tracksEnabled: !!s.tracksEnabled,
-        trackRaise: num(s.trackRaise, 2),
-        trackRadius: Math.max(0, num(s.trackRadius, 10)),
-        buildingsEnabled: !!s.buildingsEnabled,
-        buildingRaise: num(s.buildingRaise, 6),
-        streetsEnabled: !!s.streetsEnabled,
-        streetRaise: num(s.streetRaise, 2),
-        streetRadius: Math.max(0, num(s.streetRadius, 12)),
+        osm: sanitizeOsm(s),
         shape: s.shape === SelectionShape.Oval ? SelectionShape.Oval : SelectionShape.Rectangle,
     };
+}
+
+// Old flat per-feature setting keys (pre-registry share links / saved configs) → feature id, so a
+// user's saved raise/radius survive the move to the nested `osm` map.
+const LEGACY_OSM_KEYS: Record<string, { enabled: string; raise: string; radius?: string }> = {
+    tracks: { enabled: 'tracksEnabled', raise: 'trackRaise', radius: 'trackRadius' },
+    streets: { enabled: 'streetsEnabled', raise: 'streetRaise', radius: 'streetRadius' },
+    buildings: { enabled: 'buildingsEnabled', raise: 'buildingRaise' },
+};
+
+/** Build the nested `osm` settings from the registry, reading the new `s.osm[id]` if present and
+ *  otherwise falling back to the legacy flat keys, then to each feature's defaults. */
+function sanitizeOsm(s: any): Record<string, OsmFeatureSettings> {
+    const out: Record<string, OsmFeatureSettings> = {};
+    for (const def of OSM_FEATURES) {
+        const cur = s?.osm?.[def.id];
+        const legacy = LEGACY_OSM_KEYS[def.id];
+        const enabled = cur ? !!cur.enabled : !!(legacy && s?.[legacy.enabled]);
+        const raise = cur ? num(cur.raise, def.raise) : num(legacy && s?.[legacy.raise], def.raise);
+        const radius = cur ? num(cur.radius, def.radius)
+            : num(legacy?.radius ? s?.[legacy.radius] : undefined, def.radius);
+        out[def.id] = { enabled, raise, radius: Math.max(0, radius) };
+    }
+    return out;
 }
 
 function num(v: unknown, fallback: number): number {
