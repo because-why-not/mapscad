@@ -9,8 +9,9 @@ import { fromLonLat } from 'ol/proj';
 import type { OsmElement } from './osm/OverpassFeature';
 import type { OsmFeatureDef } from './osm/osmFeatures';
 
-/** Highlight colour for the selected element (shared across features). */
+/** Highlight colour for the selected element, and for elements the user has ticked (marked). */
 const SELECT_COLOR = '#ffd400';
+const MARK_COLOR = '#22c55e';
 
 /** A read-only overlay of one OSM feature on the OpenLayers 2D map. `line` features draw as stroked
  *  polylines, `area` features as filled polygons; the feature's `zIndex` orders them under the
@@ -22,8 +23,10 @@ export class OsmOverlay {
     readonly layer: VectorLayer<VectorSource>;
     private selectedId: number | null = null;
     private hoveredId: number | null = null;
+    private markedIds = new Set<number>();
     private base: Style;
     private selected: Style;
+    private marked: Style;
 
     constructor(map: OlMap, private def: OsmFeatureDef) {
         const fill = def.fillColor ? new Fill({ color: def.fillColor }) : undefined;
@@ -33,11 +36,16 @@ export class OsmOverlay {
             stroke: new Stroke({ color: SELECT_COLOR, width: width + 2 }),
             fill: def.fillColor ? new Fill({ color: 'rgba(255, 212, 0, 0.45)' }) : undefined,
         });
+        this.marked = new Style({
+            stroke: new Stroke({ color: MARK_COLOR, width: width + 1 }),
+            fill: def.fillColor ? new Fill({ color: 'rgba(34, 197, 94, 0.4)' }) : undefined,
+        });
         this.layer = new VectorLayer({
             source: this.source,
             style: (feature) => {
                 const id = feature.get('osmElementId');
-                return id === this.selectedId || id === this.hoveredId ? this.selected : this.base;
+                if (id === this.selectedId || id === this.hoveredId) return this.selected; // focus wins
+                return this.markedIds.has(id) ? this.marked : this.base;
             },
             zIndex: def.zIndex,
         });
@@ -73,6 +81,12 @@ export class OsmOverlay {
         this.source.changed();
     }
 
+    /** Highlight the set of ticked (marked) elements — the user's staged edit selection. */
+    setMarked(ids: readonly number[]): void {
+        this.markedIds = new Set(ids);
+        this.source.changed();
+    }
+
     /** The map-projection extent of one element's geometry, for fitting the view to it. */
     extentOf(elementId: number): number[] | null {
         const geom = this.source.getFeatureById(elementId)?.getGeometry();
@@ -83,6 +97,7 @@ export class OsmOverlay {
     clear(): void {
         this.selectedId = null;
         this.hoveredId = null;
+        this.markedIds.clear();
         this.source.clear();
     }
 }

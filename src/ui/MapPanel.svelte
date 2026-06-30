@@ -20,8 +20,9 @@
         onOsmDownload = () => null,
         onOsmUpload = () => 0,
         onOsmSelectElement = () => {},
-        onOsmDeleteElement = () => {},
+        onOsmApplyDeletions = () => {},
         onOsmHoverElement = () => {},
+        onOsmMarksChange = () => {},
         initialZoom = 0,
         canCollapse = false,
         onCollapse = () => {},
@@ -61,7 +62,12 @@
     let osmElements = $state(untrack(() => Object.fromEntries(osmFeatures.map(f => [f.id, []]))));
     let osmFilter = $state(untrack(() => Object.fromEntries(osmFeatures.map(f => [f.id, '']))));
     let osmSelected = $state(null); // { featureId, elementId } | null
-    export function setOsmElements(id, elements) { osmElements[id] = elements; }
+    // Staged edit per feature: marked element ids ({id:true}) + a mode saying what Apply does with
+    // them — 'remove' deletes the marked, 'keep' deletes everything EXCEPT the marked. Nothing on
+    // the map/preview changes until Apply; Cancel discards the marks.
+    let osmMarked = $state(untrack(() => Object.fromEntries(osmFeatures.map(f => [f.id, {}]))));
+    let osmMode = $state(untrack(() => Object.fromEntries(osmFeatures.map(f => [f.id, 'remove']))));
+    export function setOsmElements(id, elements) { osmElements[id] = elements; osmMarked[id] = {}; }
     export function setOsmSelected(featureId, elementId) {
         osmSelected = featureId !== null && elementId !== null ? { featureId, elementId } : null;
         // Selecting an element (e.g. by clicking it on the map) opens the OSM-data menu so the user
@@ -69,6 +75,34 @@
         if (osmSelected) { menuOpen = true; activeTab = 'osm'; }
     }
     const isSelected = (fid, eid) => osmSelected?.featureId === fid && osmSelected?.elementId === eid;
+
+    // --- staged deletion: mark elements, then Apply (commit) or Cancel (discard) ---
+    const isMarked = (fid, id) => !!osmMarked[fid]?.[id];
+    const hasMarks = (fid) => Object.keys(osmMarked[fid] ?? {}).length > 0;
+    /** Whether a row will be removed on Apply, given the feature's mode + marks. */
+    function willDelete(fid, id) {
+        if (osmMode[fid] === 'keep') return hasMarks(fid) && !isMarked(fid, id); // keep marked, drop rest
+        return isMarked(fid, id);                                                // remove marked
+    }
+    function deleteCount(fid) {
+        return (osmElements[fid] ?? []).reduce((n, e) => n + (willDelete(fid, e.id) ? 1 : 0), 0);
+    }
+    function toggleMark(fid, id) {
+        const m = { ...(osmMarked[fid] ?? {}) };
+        if (m[id]) delete m[id]; else m[id] = true;
+        osmMarked[fid] = m;
+    }
+    function setMode(fid, mode) { osmMode[fid] = mode; osmMarked[fid] = {}; } // switching mode resets marks
+    function applyEdits(fid) {
+        const ids = (osmElements[fid] ?? []).filter(e => willDelete(fid, e.id)).map(e => e.id);
+        if (ids.length) onOsmApplyDeletions(fid, ids);
+        osmMarked[fid] = {}; osmMode[fid] = 'remove';
+    }
+    function cancelEdits(fid) { osmMarked[fid] = {}; osmMode[fid] = 'remove'; }
+    // Push the ticked set to the map so marked elements are highlighted there too.
+    $effect(() => {
+        for (const f of osmFeatures) onOsmMarksChange(f.id, Object.keys(osmMarked[f.id] ?? {}).map(Number));
+    });
 
     // Turn the filter text into a case-insensitive matcher. A plain word like "Booth" is already a
     // valid regex that matches anywhere, so simple substring filtering "just works"; power users can
@@ -119,22 +153,22 @@
         if (next < 0 || next >= rows.length) return; // stay put at the ends
         onOsmSelectElement(fid, rows[next].id);
     }
-    function deleteSelected() {
-        const sel = osmSelected;
-        if (!sel) return;
-        const rows = visible[sel.featureId] ?? [];
-        const idx = rows.findIndex(r => r.id === sel.elementId);
-        const neighbour = idx >= 0 ? (rows[idx + 1] ?? rows[idx - 1]) : null;
-        onOsmDeleteElement(sel.featureId, sel.elementId);
-        if (neighbour) onOsmSelectElement(sel.featureId, neighbour.id); // keep stepping through
-    }
     function onOsmKey(e) {
         if (!menuOpen || activeTab !== 'osm') return;
-        const tag = e.target?.tagName;
-        if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return; // don't hijack typing
+        const el = e.target;
+        const tag = el?.tagName;
+        // Block only real text entry (the filter box); arrows/space still work over the list when a
+        // checkbox/button/the page has focus.
+        if (tag === 'TEXTAREA' || tag === 'SELECT' || (tag === 'INPUT' && el.type !== 'checkbox')) return;
         if (e.key === 'ArrowDown') { e.preventDefault(); moveSelection(1); }
         else if (e.key === 'ArrowUp') { e.preventDefault(); moveSelection(-1); }
-        else if (e.key === 'Delete' || e.key === 'Backspace') { e.preventDefault(); deleteSelected(); }
+        else if (e.key === ' ' || e.key === 'Spacebar') {
+            // Space ticks/unticks the selected element (staging it). If a checkbox itself has focus,
+            // let the browser toggle it natively instead so it isn't toggled twice.
+            if (tag === 'INPUT' && el.type === 'checkbox') return;
+            e.preventDefault();
+            if (osmSelected) toggleMark(osmSelected.featureId, osmSelected.elementId);
+        }
     }
 
     // Scroll the selected row into view once the menu/list has rendered (it stays in the DOM even
@@ -149,7 +183,7 @@
     export function setHasSelection(has) {
         hasSelection = has;
         osmSelected = null;
-        for (const f of osmFeatures) { osmState[f.id].ready = false; osmElements[f.id] = []; osmFilter[f.id] = ''; }
+        for (const f of osmFeatures) { osmState[f.id].ready = false; osmElements[f.id] = []; osmFilter[f.id] = ''; osmMarked[f.id] = {}; osmMode[f.id] = 'remove'; }
     }
 
     async function fetchOsm(f) {
@@ -480,24 +514,35 @@
                         <button class="btn btn-sm btn-block" title="Load {f.noun} from a previously downloaded JSON file" onclick={() => pickUpload(f.id)}>Upload JSON</button>
                     </div>
                     <!-- Filter + object list. Type a word ("Booth") for a substring match, or full regex.
-                         Click a row to select on the map (and vice-versa); ↑/↓ navigate, Del removes. -->
+                         Mark rows (checkbox / Space, ↑/↓ to move); the Remove/Keep toggle decides what Apply does with
+                         the marked set. Nothing changes on the map/preview until Apply; Cancel discards. -->
                     {#if total}
-                        <div class="px-4 pb-1">
-                            <input type="search" class="input input-xs input-bordered w-full" placeholder="Filter by name (regex)…" bind:value={osmFilter[f.id]} />
+                        {@const pending = deleteCount(f.id)}
+                        <div class="px-4 pb-1 flex items-center gap-2">
+                            <input type="search" class="input input-xs input-bordered flex-1 min-w-0" placeholder="Filter by name (regex)…" bind:value={osmFilter[f.id]} />
+                            <div class="join">
+                                <button class="btn btn-xs join-item {osmMode[f.id] === 'remove' ? 'btn-active' : ''}" title="Apply deletes the marked elements" onclick={() => setMode(f.id, 'remove')}>Remove</button>
+                                <button class="btn btn-xs join-item {osmMode[f.id] === 'keep' ? 'btn-active' : ''}" title="Apply keeps the marked elements and deletes the rest" onclick={() => setMode(f.id, 'keep')}>Keep</button>
+                            </div>
                         </div>
                         {#if rows.length}
                             <ul class="mx-4 mb-1 max-h-48 overflow-y-auto rounded border border-base-300 divide-y divide-base-300 text-sm">
                                 {#each rows as el (el.id)}
+                                    {@const doomed = willDelete(f.id, el.id)}
                                     <li data-osm-el="{f.id}:{el.id}" class="flex items-center {isSelected(f.id, el.id) ? 'bg-primary text-primary-content' : 'hover:bg-base-300'}"
                                         onmouseenter={() => onOsmHoverElement(f.id, el.id)} onmouseleave={() => onOsmHoverElement(null, null)}>
-                                        <button class="flex-1 text-left px-2 py-1 truncate bg-transparent border-0" title={el.label} onclick={() => onOsmSelectElement(f.id, el.id)}>{el.label}</button>
-                                        <button class="px-2 py-1 opacity-70 hover:opacity-100 bg-transparent border-0" title="Delete this {f.label.toLowerCase()} element" aria-label="Delete element" onclick={() => onOsmDeleteElement(f.id, el.id)}>✕</button>
+                                        <input type="checkbox" class="checkbox checkbox-xs ml-2" title="Mark this element" checked={isMarked(f.id, el.id)} onchange={() => toggleMark(f.id, el.id)} />
+                                        <button class="flex-1 text-left px-2 py-1 truncate bg-transparent border-0 {doomed ? 'line-through opacity-50' : ''}" title={el.label} onclick={() => onOsmSelectElement(f.id, el.id)}>{el.label}</button>
                                     </li>
                                 {/each}
                             </ul>
                         {:else}
                             <p class="px-4 pb-2 text-xs opacity-50">No matches.</p>
                         {/if}
+                        <div class="px-4 pb-2 flex gap-2">
+                            <button class="btn btn-xs btn-primary flex-1" disabled={pending === 0} onclick={() => applyEdits(f.id)}>Apply{#if pending} · delete {pending}{/if}</button>
+                            <button class="btn btn-xs flex-1" disabled={!hasMarks(f.id)} onclick={() => cancelEdits(f.id)}>Cancel</button>
+                        </div>
                     {/if}
                 {/each}
                 <input type="file" accept=".json,application/json" bind:this={osmFileInput} onchange={uploadOsm} class="hidden" />

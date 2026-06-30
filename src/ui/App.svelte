@@ -21,8 +21,9 @@
         onOsmDownload = () => null,
         onOsmUpload = () => 0,
         onOsmSelectElement = () => {},
-        onOsmDeleteElement = () => {},
+        onOsmApplyDeletions = () => {},
         onOsmHoverElement = () => {},
+        onOsmMarksChange = () => {},
         initialMapZoom = 0,
         // 3D-view menu (forwarded to PreviewPanel)
         previewDems = [],
@@ -153,8 +154,9 @@
         {onOsmDownload}
         {onOsmUpload}
         {onOsmSelectElement}
-        {onOsmDeleteElement}
+        {onOsmApplyDeletions}
         {onOsmHoverElement}
+        {onOsmMarksChange}
         initialZoom={initialMapZoom}
         canCollapse={showBoth}
         onCollapse={collapseMap}

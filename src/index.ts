@@ -207,15 +207,17 @@ function panToOsm(featureId: string, elementId: number): void {
     view.animate({ center: [cx, cy], duration: 250 });
 }
 
-/** Delete one element from a feature: drop it from the editable set, redraw, clear the selection if
- *  it was the deleted one, refresh the list, and re-sync the preview. */
-function deleteOsm(featureId: string, elementId: number): void {
+/** Commit a batch of deletions for a feature (the user's staged "Apply"): drop the given ids from
+ *  the editable set, redraw, clear the selection if it was removed, refresh the list, and re-sync
+ *  the preview. One pass so a large prune triggers a single geometry rebuild. */
+function applyOsmDeletions(featureId: string, ids: number[]): void {
     const data = currentOsm.get(featureId);
-    if (!data) return;
-    const kept = data.list.filter(e => e.id !== elementId);
+    if (!data || !ids.length) return;
+    const drop = new Set(ids);
+    const kept = data.list.filter(e => !drop.has(e.id));
     currentOsm.set(featureId, new OsmVectorData(kept));
     osmOverlays.get(featureId)?.setElements(kept);
-    if (selectedOsm?.featureId === featureId && selectedOsm.elementId === elementId) selectOsm(null, null);
+    if (selectedOsm?.featureId === featureId && drop.has(selectedOsm.elementId)) selectOsm(null, null);
     pushOsmElements(featureId);
     if (addedOsm.has(featureId)) syncOsmField(featureId);
 }
@@ -545,9 +547,12 @@ async function init(): Promise<void> {
             // Object-list interactions: select an element (highlight it + bring it into the map
             // view, since the list row may point off-screen) and delete one.
             onOsmSelectElement: (id: string, elementId: number) => { selectOsm(id, elementId); panToOsm(id, elementId); },
-            onOsmDeleteElement: (id: string, elementId: number) => deleteOsm(id, elementId),
+            // Commit the user's staged deletions for a feature (Apply in the menu).
+            onOsmApplyDeletions: (id: string, ids: number[]) => applyOsmDeletions(id, ids),
             // Hovering a list row highlights it on the map (no centring); null clears the highlight.
             onOsmHoverElement: (id: string | null, elementId: number | null) => hoverOsm(id, elementId),
+            // The user's ticked (marked) elements, highlighted on the map as they stage an edit.
+            onOsmMarksChange: (id: string, ids: number[]) => osmOverlays.get(id)?.setMarked(ids),
             previewDems,
             initialPreviewDemId: initialDemId,
             previewZoomMin,
