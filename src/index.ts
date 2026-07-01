@@ -56,19 +56,19 @@ let currentCorners: LonLat[] | null = null;
 // OSM feature state, all keyed by feature id (see osm/osmFeatures.ts). Generic so adding a feature
 // needs no new variables here.
 //  - osmOverlays: the OL 2D-map overlays, created once the OL map is ready.
-//  - currentOsm:  the editable element set per feature (gridless, lon/lat) — the source of truth for
+//  - osmData:  the editable element set per feature (gridless, lon/lat) — the source of truth for
 //    the overlay, the object list, the preview, and Download. Edits (delete) replace the entry.
 const osmOverlays = new Map<string, OsmOverlay>();
-const currentOsm = new Map<string, OsmVectorData>();
-// Feature ids that have been "Added to preview" (so their data is bound into the model). Gates the
-// model re-sync on fetch/upload/delete/resample so downloaded-but-not-added features stay map-only.
-const addedOsm = new Set<string>();
+const osmData = new Map<string, OsmVectorData>();
+// Feature ids that have been sent to the preview (so their data is bound into the model). Gates the
+// model re-sync on fetch/load/resample so downloaded-but-not-previewed features stay map-only.
+const previewOsm = new Set<string>();
 // The currently selected element on the map / in the object list (one at a time, vector-editor
-// style), or null. Drives the overlay highlight, the list highlight, and keyboard Delete.
-let selectedOsm: { featureId: string; elementId: number } | null = null;
+// style), or null. Drives the overlay highlight, the list highlight, and keyboard Space.
+let selectedOsmElement: { featureId: string; elementId: number } | null = null;
 // OSM element picking is disabled while an area-selection tool is active (those clicks draw/edit the
 // selection rectangle); re-enabled when no draw tool is active, like a vector app's Select tool.
-let osmPickEnabled = true;
+let osmPickActive = true;
 // The OpenLayers map, captured once it's ready, so the click hit-test can reach it.
 let olMap: OlMap | null = null;
 // Transient box-select tool for the Data tab: drag a blue box to mark all OSM elements under it.
@@ -137,7 +137,7 @@ async function resample(): Promise<void> {
         });
         if (abort.signal.aborted) return;
         model.setGrid(grid); // notifies -> preview + stats rebuild from the model
-        for (const id of addedOsm) syncOsmField(id); // re-rasterise added features to the new grid
+        for (const id of previewOsm) syncOsmField(id); // re-rasterise added features to the new grid
         Env.log(`[3d] terrain regenerated in ${Math.round(performance.now() - t0)} ms`);
     } catch (e) {
         if ((e as { name?: string })?.name === 'AbortError') Env.log('[3d] terrain build cancelled');
@@ -161,7 +161,7 @@ function cancelResample(): void {
  *  Called whenever the data or the grid change; the matching OsmCanvasProcessor paints them in. */
 function syncOsmField(id: string): void {
     const grid = model.getGrid();
-    const data = currentOsm.get(id);
+    const data = osmData.get(id);
     if (!data || !currentCorners || !grid) { model.setOsmData(id, null); return; }
     // Disabled elements stay in the list/overlay but are excluded from the printed model.
     const enabled = data.list.filter(e => !e.disabled);
@@ -175,16 +175,16 @@ function syncOsmField(id: string): void {
  *  preview) the model re-syncs — so downloading a large set just to view/edit it on the map doesn't
  *  trigger a geometry rebuild. */
 function ingestOsm(id: string, elements: OsmElement[]): void {
-    currentOsm.set(id, new OsmVectorData(elements));
+    osmData.set(id, new OsmVectorData(elements));
     osmOverlays.get(id)?.setElements(elements);
     pushOsmElements(id);
-    if (addedOsm.has(id)) syncOsmField(id);
+    if (previewOsm.has(id)) syncOsmField(id);
 }
 
 /** Push one feature's element list to the object-list UI: a stable id + a label (OSM name, else a
  *  running number). */
 function pushOsmElements(id: string): void {
-    const data = currentOsm.get(id);
+    const data = osmData.get(id);
     // Push the raw id + name; the UI does the ordering (by name), labelling and filtering.
     const elements = data ? data.list.map(e => ({ id: e.id, name: e.name ?? '', disabled: !!e.disabled })) : [];
     appInstance?.setOsmElements(id, elements);
@@ -192,9 +192,9 @@ function pushOsmElements(id: string): void {
 
 /** Select one element (map ↔ list), or pass null to clear. Highlights it on the map and in the list. */
 function selectOsm(featureId: string | null, elementId: number | null): void {
-    selectedOsm = featureId !== null && elementId !== null ? { featureId, elementId } : null;
-    osmOverlays.forEach((ov, id) => ov.setSelected(selectedOsm?.featureId === id ? selectedOsm.elementId : null));
-    appInstance?.setOsmSelected(selectedOsm?.featureId ?? null, selectedOsm?.elementId ?? null);
+    selectedOsmElement = featureId !== null && elementId !== null ? { featureId, elementId } : null;
+    osmOverlays.forEach((ov, id) => ov.setSelected(selectedOsmElement?.featureId === id ? selectedOsmElement.elementId : null));
+    appInstance?.setOsmSelected(selectedOsmElement?.featureId ?? null, selectedOsmElement?.elementId ?? null);
 }
 
 /** Transiently highlight an element on the map (from a list-row hover); null clears it. Does not
@@ -224,11 +224,11 @@ function panToOsm(featureId: string, elementId: number): void {
  *  list (struck-through). The preview is intentionally NOT re-synced here — disabling only affects
  *  the print on the next "Add to preview" press. */
 function applyOsmEnabled(featureId: string, ids: number[], enabled: boolean): void {
-    const data = currentOsm.get(featureId);
+    const data = osmData.get(featureId);
     if (!data || !ids.length) return;
     const set = new Set(ids);
     const next = data.list.map(e => set.has(e.id) ? { ...e, disabled: enabled ? undefined : true } : e);
-    currentOsm.set(featureId, new OsmVectorData(next));
+    osmData.set(featureId, new OsmVectorData(next));
     osmOverlays.get(featureId)?.setElements(next);
     pushOsmElements(featureId);
 }
@@ -236,7 +236,7 @@ function applyOsmEnabled(featureId: string, ids: number[], enabled: boolean): vo
 /** Map click handler (only while no draw tool is active): select the topmost OSM element under the
  *  click, or clear the selection when the click misses every OSM feature. */
 function onMapClick(pixel: number[]): void {
-    if (!osmPickEnabled || !olMap) return;
+    if (!osmPickActive || !olMap) return;
     let hit = false;
     olMap.forEachFeatureAtPixel(pixel, (feature, layer) => {
         const featureId = layer?.get('osmFeatureId');
@@ -365,10 +365,10 @@ function onSelectionChange(corners: LonLat[] | null): void {
     currentCorners = corners;
     // Any downloaded OSM features no longer match the new area: drop them + their preview sections.
     selectOsm(null, null);
-    addedOsm.clear();
+    previewOsm.clear();
     for (const def of OSM_FEATURES) {
         osmOverlays.get(def.id)?.clear();
-        currentOsm.delete(def.id);
+        osmData.delete(def.id);
         model.setOsmData(def.id, null);
         appInstance?.setOsmAvailable(def.id, false);
         pushOsmElements(def.id); // empties the object list
@@ -583,7 +583,7 @@ async function init(): Promise<void> {
             onSelectToggle: (active: boolean, shape: SelectionShape = SelectionShape.Rectangle) => {
                 if (!selection) return;
                 // While a draw tool is active, map clicks edit the area; OSM element picking is off.
-                osmPickEnabled = !active;
+                osmPickActive = !active;
                 if (active) {
                     selectOsm(null, null);                  // leave element-edit mode
                     selection.setShape(shape);              // redraw + (if a selection exists) keep it
@@ -599,20 +599,20 @@ async function init(): Promise<void> {
             // It's also where the user works with tracks, so OSM element picking is on here and off
             // while editing the area in the Selection tab (where map clicks edit the selection).
             onDataModeChange: (active: boolean) => {
-                osmPickEnabled = active;
+                osmPickActive = active;
                 selection?.setViewOnly(active);
                 if (!active) dataBox?.setActive(false); // leaving Data turns the box tool off
             },
             // Toggle the transient box-select tool on the map (Data tab only).
-            onOsmBoxToggle: (active: boolean) => {
+            onBoxSelectToggle: (active: boolean) => {
                 dataBox?.setActive(active);
                 olMap?.getTargetElement()?.classList.toggle('map-crosshair', active);
             },
             // The menu sections to render (one per registry feature), so the UI is data-driven.
-            osmFeatures: OSM_FEATURES.map(f => ({ id: f.id, label: f.label, noun: f.noun, hasRadius: f.geometry === 'line' })),
+            features: OSM_FEATURES.map(f => ({ id: f.id, label: f.label, noun: f.noun, hasRadius: f.geometry === 'line' })),
             // Download one OSM feature for the current selection and overlay it on the map. Returns
             // the element count so the button can report it; throws bubble to the panel.
-            onOsmFetch: async (id: string) => {
+            onDownload: async (id: string) => {
                 if (!currentCorners) return 0;
                 const def = osmFeature(id);
                 const json = await fetchFeatureRaw(def, currentCorners);
@@ -620,36 +620,34 @@ async function init(): Promise<void> {
                 ingestOsm(id, fetched);
                 return fetched.length;
             },
-            // The current (possibly edited) element set, as savable JSON. Null when nothing's loaded.
-            onOsmDownload: (id: string) => {
-                const data = currentOsm.get(id);
+            // The current element set as savable JSON. Null when nothing's loaded.
+            onSaveJson: (id: string) => {
+                const data = osmData.get(id);
                 return data && !data.isEmpty() ? data.list : null;
             },
-            // Reuse a feature from a previously saved file: ingest + overlay it exactly like a fresh
-            // download, so "Add to preview" then works. Returns the element count.
-            onOsmUpload: (id: string, json: any) => {
+            // Load a feature from a previously saved file: ingest + overlay exactly like a fresh download.
+            onLoadJson: (id: string, json: any) => {
                 const fetched = waysFromJson(osmFeature(id), json);
                 ingestOsm(id, fetched);
                 return fetched.length;
             },
             // Push the downloaded feature into the model: bind it to the grid and reveal the
             // preview's section so its raise can be configured.
-            onOsmAddToPreview: (id: string) => {
-                const data = currentOsm.get(id);
+            onUpdatePreview: (id: string) => {
+                const data = osmData.get(id);
                 if (!data || data.isEmpty()) return;
-                addedOsm.add(id);
+                previewOsm.add(id);
                 syncOsmField(id);
                 appInstance?.setOsmAvailable(id, true);
             },
-            // Object-list interactions: select an element (highlight it + bring it into the map
-            // view, since the list row may point off-screen) and delete one.
-            onOsmSelectElement: (id: string, elementId: number) => { selectOsm(id, elementId); panToOsm(id, elementId); },
+            // Select an element (highlight it + bring it into the map view, since the list row may be off-screen).
+            onSelectElement: (id: string, elementId: number) => { selectOsm(id, elementId); panToOsm(id, elementId); },
             // Enable/disable the user's marked elements for a feature (Enable/Disable in the menu).
-            onOsmSetEnabled: (id: string, ids: number[], enabled: boolean) => applyOsmEnabled(id, ids, enabled),
+            onSetEnabled: (id: string, ids: number[], enabled: boolean) => applyOsmEnabled(id, ids, enabled),
             // Hovering a list row highlights it on the map (no centring); null clears the highlight.
-            onOsmHoverElement: (id: string | null, elementId: number | null) => hoverOsm(id, elementId),
+            onHoverElement: (id: string | null, elementId: number | null) => hoverOsm(id, elementId),
             // The user's ticked (marked) elements, highlighted on the map as they stage an edit.
-            onOsmMarksChange: (id: string, ids: number[]) => osmOverlays.get(id)?.setMarked(ids),
+            onMarksChange: (id: string, ids: number[]) => osmOverlays.get(id)?.setMarked(ids),
             previewDems,
             initialPreviewDemId: initialDemId,
             previewZoomMin,

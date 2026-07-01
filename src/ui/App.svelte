@@ -16,16 +16,16 @@
         onAspectChange = () => {},
         onDataModeChange = () => {},
         // OSM data: the feature list to render + generic per-feature callbacks (keyed by id).
-        osmFeatures = [],
-        onOsmFetch = () => 0,
-        onOsmAddToPreview = () => {},
-        onOsmDownload = () => null,
-        onOsmUpload = () => 0,
-        onOsmSelectElement = () => {},
-        onOsmSetEnabled = () => {},
-        onOsmHoverElement = () => {},
-        onOsmMarksChange = () => {},
-        onOsmBoxToggle = () => {},
+        features = [],
+        onDownload = () => 0,
+        onUpdatePreview = () => {},
+        onSaveJson = () => null,
+        onLoadJson = () => 0,
+        onSelectElement = () => {},
+        onSetEnabled = () => {},
+        onHoverElement = () => {},
+        onMarksChange = () => {},
+        onBoxSelectToggle = () => {},
         initialMapZoom = 0,
         // 3D-view menu (forwarded to PreviewPanel)
         previewDems = [],
@@ -78,7 +78,7 @@
     export function setSelectTool(tool) { mapPanel?.setSelectTool(tool); }
     export function setHasSelection(has) { mapPanel?.setHasSelection(has); }
     export function setOsmAvailable(id, has) { previewPanel?.setOsmAvailable(id, has); }
-    export function setOsmElements(id, elements) { mapPanel?.setOsmElements(id, elements); }
+    export function setOsmElements(id, els) { mapPanel?.setOsmElements(id, els); }
     export function setOsmSelected(featureId, elementId) { mapPanel?.setOsmSelected(featureId, elementId); }
     export function addOsmMarks(id, ids) { mapPanel?.addOsmMarks(id, ids); }
     export function setMapZoom(z) { mapPanel?.setZoom(z); }
@@ -152,16 +152,16 @@
         {onSelectToggle}
         {onAspectChange}
         {onDataModeChange}
-        {osmFeatures}
-        {onOsmFetch}
-        {onOsmAddToPreview}
-        {onOsmDownload}
-        {onOsmUpload}
-        {onOsmSelectElement}
-        {onOsmSetEnabled}
-        {onOsmHoverElement}
-        {onOsmMarksChange}
-        {onOsmBoxToggle}
+        {features}
+        {onDownload}
+        {onUpdatePreview}
+        {onSaveJson}
+        {onLoadJson}
+        {onSelectElement}
+        {onSetEnabled}
+        {onHoverElement}
+        {onMarksChange}
+        {onBoxSelectToggle}
         initialZoom={initialMapZoom}
         canCollapse={showBoth}
         onCollapse={collapseMap}
@@ -183,7 +183,7 @@
         canCollapse={showBoth}
         onCollapse={collapsePreview}
         dems={previewDems}
-        {osmFeatures}
+        {features}
         initialDemId={initialPreviewDemId}
         onDemChange={onPreviewDemChange}
         zoomMin={previewZoomMin}

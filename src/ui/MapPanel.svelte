@@ -16,16 +16,16 @@
         onAspectChange = () => {},
         onDataModeChange = () => {},
         // OSM data: the feature list to render ({id,label,noun,hasRadius}) + generic callbacks.
-        osmFeatures = [],
-        onOsmFetch = () => 0,
-        onOsmAddToPreview = () => {},
-        onOsmDownload = () => null,
-        onOsmUpload = () => 0,
-        onOsmSelectElement = () => {},
-        onOsmSetEnabled = () => {},
-        onOsmHoverElement = () => {},
-        onOsmMarksChange = () => {},
-        onOsmBoxToggle = () => {},
+        features = [],
+        onDownload = () => 0,
+        onUpdatePreview = () => {},
+        onSaveJson = () => null,
+        onLoadJson = () => 0,
+        onSelectElement = () => {},
+        onSetEnabled = () => {},
+        onHoverElement = () => {},
+        onMarksChange = () => {},
+        onBoxSelectToggle = () => {},
         initialZoom = 0,
         canCollapse = false,
         onCollapse = () => {},
@@ -76,24 +76,24 @@
     $effect(() => {
         const inData = activeTab === 'data';
         onDataModeChange(inData);
-        if (!inData) untrack(() => { if (osmBoxActive) { osmBoxActive = false; onOsmBoxToggle(false); } });
+        if (!inData) untrack(() => { if (boxSelectActive) { boxSelectActive = false; onBoxSelectToggle(false); } });
     });
-    // The OSM data panel (child) owns all `osm*` state + the object list; index.ts's imperative
+    // The OSM data panel (child) owns all element state + the object list; index.ts's imperative
     // exports below just forward to it via this ref.
-    let osmPanel = $state();
-    export function setOsmElements(id, elements) { osmPanel?.setOsmElements(id, elements); }
-    export function setOsmSelected(featureId, elementId) { osmPanel?.setOsmSelected(featureId, elementId); }
-    export function addOsmMarks(fid, ids) { osmPanel?.addOsmMarks(fid, ids); }
+    let dataPanel = $state();
+    export function setOsmElements(id, els) { dataPanel?.setElements(id, els); }
+    export function setOsmSelected(featureId, elementId) { dataPanel?.setSelected(featureId, elementId); }
+    export function addOsmMarks(fid, ids) { dataPanel?.addMarks(fid, ids); }
 
     // The transient box-select tool (Data tab only). Toggling it routes to the map; it never persists.
     // Marks land back in the child via addOsmMarks (index.ts → App → here → child).
-    let osmBoxActive = $state(false);
-    function toggleOsmBox() { osmBoxActive = !osmBoxActive; onOsmBoxToggle(osmBoxActive); }
+    let boxSelectActive = $state(false);
+    function toggleBoxSelect() { boxSelectActive = !boxSelectActive; onBoxSelectToggle(boxSelectActive); }
 
     export function setHasSelection(has) {
         hasSelection = has;
         if (has) selectionDirty = true; // selection changed → Data should reopen so stale data gets re-downloaded
-        osmPanel?.reset();
+        dataPanel?.reset();
     }
 
     // Aspect-ratio lock for drawing/resizing (session-only). 'free' or a 'w:h' preset, or
@@ -255,10 +255,10 @@
     {#if activeTab === 'data'}
     <div class="absolute top-20 left-4 z-[1000] flex flex-col gap-2">
         <button
-            class="btn btn-square shadow-md border-0 {osmBoxActive ? 'btn-primary' : 'bg-base-100'}"
+            class="btn btn-square shadow-md border-0 {boxSelectActive ? 'btn-primary' : 'bg-base-100'}"
             title="Select objects by dragging a box"
             aria-label="Box-select objects"
-            onclick={toggleOsmBox}
+            onclick={toggleBoxSelect}
         >
             <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-dasharray="3 2">
                 <rect x="3" y="3" width="18" height="18" rx="1"></rect>
@@ -361,19 +361,19 @@
         </div>
         {:else}
         <OsmDataPanel
-            bind:this={osmPanel}
-            {osmFeatures}
+            bind:this={dataPanel}
+            {features}
             {hasSelection}
             active={menuOpen && activeTab === 'data'}
             onRequestOpen={() => { menuOpen = true; activeTab = 'data'; }}
-            {onOsmFetch}
-            {onOsmAddToPreview}
-            {onOsmDownload}
-            {onOsmUpload}
-            {onOsmSelectElement}
-            {onOsmSetEnabled}
-            {onOsmHoverElement}
-            {onOsmMarksChange}
+            {onDownload}
+            {onUpdatePreview}
+            {onSaveJson}
+            {onLoadJson}
+            {onSelectElement}
+            {onSetEnabled}
+            {onHoverElement}
+            {onMarksChange}
         />
         {/if}
     </div>

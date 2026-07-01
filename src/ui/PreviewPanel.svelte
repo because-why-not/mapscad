@@ -6,7 +6,7 @@
         canCollapse = false,
         onCollapse = () => {},
         dems = [],
-        osmFeatures = [],
+        features = [],
         initialDemId = '',
         onDemChange = () => {},
         zoomMin = 0,
@@ -81,13 +81,13 @@
     let osmSettings = $state(untrack(() => {
         const src = initialSettings.osm ?? {};
         const out = {};
-        for (const f of osmFeatures) {
+        for (const f of features) {
             const s = src[f.id] ?? {};
             out[f.id] = { enabled: s.enabled ?? false, raise: s.raise ?? 0, radius: s.radius ?? 0 };
         }
         return out;
     }));
-    let osmAvailable = $state(untrack(() => Object.fromEntries(osmFeatures.map(f => [f.id, false]))));
+    let osmAvailable = $state(untrack(() => Object.fromEntries(features.map(f => [f.id, false]))));
     export function setOsmAvailable(id, has) { if (id in osmAvailable) osmAvailable[id] = has; }
 
     function settings() {
@@ -282,8 +282,8 @@
             </div>
 
             <!-- One raise section per OSM feature, shown once that feature has been added from the
-                 map. Entirely data-driven from `osmFeatures` + `osmSettings`. -->
-            {#each osmFeatures as f (f.id)}
+                 map. Entirely data-driven from `features` + `osmSettings`. -->
+            {#each features as f (f.id)}
                 {#if osmAvailable[f.id]}
                     {@const os = osmSettings[f.id]}
                     <div class="px-4 py-1 mt-2 text-xs font-bold uppercase tracking-wider opacity-50">{f.label}</div>
