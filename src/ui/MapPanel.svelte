@@ -479,7 +479,7 @@
         <button class="collapse-btn btn btn-xs btn-circle bg-base-100 border-0 shadow" title="Hide map" onclick={onCollapse}>‹</button>
     {/if}
 
-    <div class="absolute inset-y-0 right-0 w-72 bg-base-200 shadow-2xl z-[2000] flex flex-col transition-transform duration-300 {menuOpen ? 'translate-x-0' : 'translate-x-full'}">
+    <div class="menu-drawer absolute inset-y-0 right-0 w-72 bg-base-200 shadow-2xl z-[2000] flex flex-col transition-transform duration-300 {menuOpen ? 'translate-x-0' : 'translate-x-full'}">
         <!-- Title reflects the active panel tab; the tab itself is switched on the map. -->
         <div class="flex items-center bg-primary text-primary-content">
             <span class="flex-1 px-4 py-3 text-sm font-semibold">{activeTab === 'data' ? 'OSM data' : 'Map'}</span>

@@ -73,6 +73,11 @@
     cursor: crosshair;
 }
 
+/* Thin border on drawer buttons so they stand out from the drawer background. */
+.menu-drawer .btn {
+    border: 1px solid oklch(var(--bc) / 0.3);
+}
+
 /* Blue marquee for the Data-tab box-select tool (transient object selection). */
 .ol-dragbox.data-box {
     border: 2px dashed #007bff;
