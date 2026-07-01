@@ -292,7 +292,7 @@ function onModelChange(): void {
 
 /** Kick off a build of the current model state in the worker, showing the progress bar. */
 function startBuild(): void {
-    const input = model.getBuildInput();
+    const input = model.prepareBuildInput();
     if (!input) return;
     buildBusy = true;
     buildPending = false;

@@ -201,26 +201,31 @@ export class MapModel {
     }
 
     private build(grid: HeightGrid): ModelGeometry {
-        // Run the DOM-bound OSM grid stage here (workers have no canvas), then hand the raised grid
-        // to the shared pure pipeline — the SAME code the build worker runs off-thread.
-        for (const gp of this.osmGridProcessors()) grid = gp.process(grid);
-        const input: BuildInput = { grid, settings: this.settings };
+        // Bake OSM in on this thread (the pre-pass needs a canvas), then hand the raised grid to
+        // the shared pure pipeline — the SAME code the build worker runs off-thread.
+        const input: BuildInput = { grid: this.rasterizeOsm(grid), settings: this.settings };
         return buildModelGeometry(input);
     }
 
-    /** Snapshot for an off-thread build: the OSM-raised grid + a settings copy. Runs only the
-     *  canvas-based OSM grid processors (the rest of the pipeline is pure and runs in the worker via
+    /** Snapshot for an off-thread build: the OSM-raised grid + a settings copy. Runs the DOM-bound
+     *  OSM pre-pass here (the rest of the pipeline is pure and runs in the worker via
      *  `buildModelGeometry`). Returns null when there's no grid. The returned grid is either a fresh
      *  array (OSM active) or `this.grid` itself (no OSM) — postMessage copies it, so either is safe. */
-    getBuildInput(): BuildInput | null {
+    prepareBuildInput(): BuildInput | null {
         if (!this.grid) return null;
-        let grid = this.grid;
-        for (const gp of this.osmGridProcessors()) grid = gp.process(grid);
-        return { grid, settings: this.getSettings() };
+        return { grid: this.rasterizeOsm(this.grid), settings: this.getSettings() };
     }
 
-    /** The DOM-bound grid stage: OSM-feature raises, painted onto the sampled grid before any value
-     *  processing or geometry. Registry order is preserved so overlapping features composite
+    /** The DOM-bound OSM pre-pass: paint each enabled feature's raise onto the grid before any value
+     *  processing or geometry. This is the ONE main-thread stage — `OsmCanvasProcessor` needs a
+     *  canvas, so it can't run in the build worker. Returns a fresh grid (OSM active) or the input
+     *  grid unchanged (no OSM). */
+    private rasterizeOsm(grid: HeightGrid): HeightGrid {
+        for (const gp of this.osmGridProcessors()) grid = gp.process(grid);
+        return grid;
+    }
+
+    /** The enabled OSM grid processors, in registry order so overlapping features composite
      *  deterministically. Tiling (a pure reshape) runs later, inside `buildModelGeometry`. */
     private osmGridProcessors(): ElevationGridProcessor[] {
         const s = this.settings;
