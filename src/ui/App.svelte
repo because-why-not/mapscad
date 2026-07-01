@@ -37,6 +37,7 @@
         onPreviewSettingsChange = () => {},
         onPreviewGenerate = () => {},
         onPreviewSave = () => {},
+        onPreviewSave3mf = () => {},
         onPreviewResetCamera = () => {},
         onPreviewShareLink = () => '',
         onPreviewCancel = () => {},
@@ -192,6 +193,7 @@
         onSettingsChange={onPreviewSettingsChange}
         onGenerate={onPreviewGenerate}
         onSave={onPreviewSave}
+        onSave3mf={onPreviewSave3mf}
         onResetCamera={onPreviewResetCamera}
         onShareLink={onPreviewShareLink}
         onCancel={onPreviewCancel}

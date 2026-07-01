@@ -1,5 +1,6 @@
 import type { HeightGrid } from './HeightSampler';
 import { OsmCanvasProcessor } from './model/OsmCanvasProcessor';
+import { addCoverageRaise } from './model/rasterRaise';
 import { buildModelGeometry, type BuildInput, type OsmBody } from './model/buildGeometry';
 import type { OsmVectorData } from './osm/OsmVectorData';
 import { OSM_FEATURES } from './osm/osmFeatures';
@@ -21,6 +22,7 @@ export interface OsmFeatureSettings {
     enabled: boolean;
     raise: number;
     radius: number;
+    separate: boolean;  // true → its own body/object (colourable); false → raise the terrain surface
 }
 
 export interface ModelSettings {
@@ -56,6 +58,7 @@ export interface ModelTile {
     indices: Uint32Array;     // 3 per triangle, outward-facing winding
     ix0: number;              // tile column index (for export filenames)
     iy0: number;              // tile row index
+    kind?: string;            // 'terrain' or an OSM feature id — groups bodies into named/coloured 3MF objects
 }
 
 export interface ModelGeometry {
@@ -93,7 +96,7 @@ export const DEFAULT_MODEL_SETTINGS: ModelSettings = {
  *  raise/radius. The shape stays generic so a new registry entry needs no change here. */
 function defaultOsmSettings(): Record<string, OsmFeatureSettings> {
     const osm: Record<string, OsmFeatureSettings> = {};
-    for (const def of OSM_FEATURES) osm[def.id] = { enabled: false, raise: def.raise, radius: def.radius };
+    for (const def of OSM_FEATURES) osm[def.id] = { enabled: false, raise: def.raise, radius: def.radius, separate: true };
     return osm;
 }
 
@@ -200,37 +203,40 @@ export class MapModel {
     }
 
     private build(grid: HeightGrid): ModelGeometry {
-        // Rasterise OSM coverage on this thread (the canvas pre-pass), then hand the pure terrain grid
-        // + those bodies to the shared pipeline — the SAME code the build worker runs off-thread.
-        const input: BuildInput = { grid, settings: this.settings, osmBodies: this.collectOsmBodies(grid) };
-        return buildModelGeometry(input);
+        const { grid: terrain, bodies } = this.prepareOsm(grid);
+        return buildModelGeometry({ grid: terrain, settings: this.settings, osmBodies: bodies });
     }
 
-    /** Snapshot for an off-thread build: the pure terrain grid + a settings copy + the OSM coverage
-     *  bodies (rasterised here, since `OsmCanvasProcessor` needs a canvas the worker lacks). Returns
-     *  null when there's no grid. Grid and coverage arrays are plain typed arrays — postMessage copies
-     *  them, so it's safe to hand over `this.grid` directly. */
+    /** Snapshot for an off-thread build: the terrain grid (with any "raise" features folded in) + a
+     *  settings copy + the "separate" OSM coverage bodies. The OSM rasterisation runs here, since
+     *  `OsmCanvasProcessor` needs a canvas the worker lacks; grid and coverage arrays are plain typed
+     *  arrays — postMessage copies them, so handing over `this.grid` directly is safe. */
     prepareBuildInput(): BuildInput | null {
         if (!this.grid) return null;
-        return { grid: this.grid, settings: this.getSettings(), osmBodies: this.collectOsmBodies(this.grid) };
+        const { grid, bodies } = this.prepareOsm(this.grid);
+        return { grid, settings: this.getSettings(), osmBodies: bodies };
     }
 
-    /** The DOM-bound OSM pre-pass: paint each enabled feature into a coverage mask over `grid`, to be
-     *  draped onto the terrain as its own body by `buildFeatureBody`. This is the ONE main-thread
-     *  stage — the canvas can't run in the build worker; the masks it produces are serialisable.
+    /** The DOM-bound OSM pre-pass. Each enabled feature is painted into a coverage mask over `grid`,
+     *  then routed by its `separate` flag: separate → its own draped body (`buildFeatureBody`, kept as
+     *  a serialisable coverage mask); not separate → folded straight into the terrain surface here
+     *  (`addCoverageRaise`). This is the ONE main-thread stage — the canvas can't run in the worker.
      *  Registry order is preserved so overlapping features stay deterministic. */
-    private collectOsmBodies(grid: HeightGrid): OsmBody[] {
+    private prepareOsm(grid: HeightGrid): { grid: HeightGrid; bodies: OsmBody[] } {
         const s = this.settings;
         const bodies: OsmBody[] = [];
+        let out = grid;
         for (const def of OSM_FEATURES) {
             const fs = s.osm[def.id];
             const data = this.osmData.get(def.id);
             if (!(fs?.enabled && fs.raise !== 0 && data && !data.isEmpty())) continue;
             const raster = new OsmCanvasProcessor(data, def, fs.radius);
             const coverage = raster.coverage(grid);
-            if (coverage) bodies.push({ id: def.id, coverage, raise: fs.raise });
+            if (!coverage) continue;
+            if (fs.separate) bodies.push({ id: def.id, coverage, raise: fs.raise });
+            else out = { ...out, heights: addCoverageRaise(out.heights, coverage, fs.raise) };
         }
-        return bodies;
+        return { grid: out, bodies };
     }
 
 }
@@ -274,7 +280,10 @@ function sanitizeOsm(s: any): Record<string, OsmFeatureSettings> {
         const raise = cur ? num(cur.raise, def.raise) : num(legacy && s?.[legacy.raise], def.raise);
         const radius = cur ? num(cur.radius, def.radius)
             : num(legacy?.radius ? s?.[legacy.radius] : undefined, def.radius);
-        out[def.id] = { enabled, raise, radius: Math.max(0, radius) };
+        // Default to a separate body (the colourable multi-object workflow); legacy configs with no
+        // flag opt in too. Set false to fold the feature back into the terrain surface.
+        const separate = cur && 'separate' in cur ? !!cur.separate : true;
+        out[def.id] = { enabled, raise, radius: Math.max(0, radius), separate };
     }
     return out;
 }

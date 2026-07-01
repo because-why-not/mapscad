@@ -15,6 +15,7 @@
         onSettingsChange = () => {},
         onGenerate = () => {},
         onSave = () => {},
+        onSave3mf = () => {},
         onResetCamera = () => {},
         onShareLink = () => '',
         onCancel = () => {},
@@ -83,7 +84,7 @@
         const out = {};
         for (const f of features) {
             const s = src[f.id] ?? {};
-            out[f.id] = { enabled: s.enabled ?? false, raise: s.raise ?? 0, radius: s.radius ?? 0 };
+            out[f.id] = { enabled: s.enabled ?? false, raise: s.raise ?? 0, radius: s.radius ?? 0, separate: s.separate ?? true };
         }
         return out;
     }));
@@ -305,6 +306,10 @@
                                     <span class="text-sm opacity-60">m</span>
                                 </div>
                             {/if}
+                            <label class="mt-2 flex items-center gap-2 cursor-pointer">
+                                <input type="checkbox" class="checkbox checkbox-sm" bind:checked={os.separate} onchange={emit} />
+                                <span class="text-sm">Separate object <span class="opacity-60">(own colour; else raises terrain)</span></span>
+                            </label>
                         {/if}
                     </div>
                 {/if}
@@ -322,7 +327,10 @@
             <!-- Actions -->
             <div class="px-4 py-3 flex flex-col gap-2">
                 <button class="btn btn-sm btn-primary" onclick={() => onGenerate(settings())}>Generate</button>
-                <button class="btn btn-sm btn-outline" onclick={() => onSave(settings())}>Save</button>
+                <div class="flex gap-2">
+                    <button class="btn btn-sm btn-outline flex-1" onclick={() => onSave(settings())}>Save STL</button>
+                    <button class="btn btn-sm btn-outline flex-1" onclick={() => onSave3mf(settings())}>Save 3MF</button>
+                </div>
                 <button class="btn btn-sm btn-ghost bg-base-100" onclick={shareLink}>{shareLabel}</button>
             </div>
         </div>

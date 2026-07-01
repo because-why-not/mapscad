@@ -22,6 +22,7 @@ import { TerrainPreview } from './TerrainPreview';
 import { MapModel, SelectionShape, type ModelGeometry } from './MapModel';
 import { PreviewConfigStore } from './PreviewConfig';
 import { exportModelStl } from './StlMaker';
+import { exportModel3mf } from './ThreeMFMaker';
 import { estimateMemory, measureMemory, formatBytes, memoryLevel, isOverBudget } from './memory';
 import type { GeoView, MapEngine } from './engine/MapEngine';
 
@@ -680,6 +681,7 @@ async function init(): Promise<void> {
             },
             onPreviewGenerate: (s: Record<string, any>) => { model.applySettings(s); config.update({ model: model.getSettings() }); resample(); },
             onPreviewSave: (s: Record<string, any>) => { model.applySettings(s); config.update({ model: model.getSettings() }); exportModelStl(model); },
+            onPreviewSave3mf: (s: Record<string, any>) => { model.applySettings(s); config.update({ model: model.getSettings() }); exportModel3mf(model); },
             onPreviewResetCamera: () => preview?.resetCamera(),
             onPreviewShareLink: () => composeShareUrl(),
             onPreviewCancel: cancelResample,

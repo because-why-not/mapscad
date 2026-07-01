@@ -60,6 +60,7 @@ export function buildModelGeometry(input: BuildInput, hooks: BuildHooks = {}): M
     report(0.2);
 
     const terrain = buildTerrain(grid, s);
+    for (const t of terrain.tiles) t.kind = 'terrain';
     report(0.9);
 
     // OSM features ride on top of the terrain as their own draped solids, appended as extra bodies.
@@ -139,6 +140,7 @@ function appendOsmBodies(
     for (const body of bodies) {
         const built = buildFeatureBody(originalGrid, surface, body);
         if (!built) continue;
+        built.tile.kind = body.id;
         tiles.push(built.tile);
         vertexCount += built.tile.positions.length / 3;
         triangleCount += built.tile.indices.length / 3;
