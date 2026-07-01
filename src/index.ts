@@ -352,7 +352,9 @@ function updatePreviewStats(geo: ModelGeometry | null): void {
         maxHeight: grid.maxHeight,
         gridCols: grid.cols,
         gridRows: grid.rows,
-        metersPerVertex: (grid.widthMeters * grid.heightMeters) / surfaceVerts,
+        // Side length of the square area a vertex represents (√ of the per-vertex area) — more
+        // intuitive than the raw area.
+        vertexSpacing: Math.sqrt((grid.widthMeters * grid.heightMeters) / surfaceVerts),
         memoryText: formatBytes(mem.totalBytes),
         memoryLevel: memoryLevel(mem.totalBytes),
     });
