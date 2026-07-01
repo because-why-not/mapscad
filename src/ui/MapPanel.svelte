@@ -471,6 +471,20 @@
         >Data</button>
     </div>
 
+    <!-- Menu button: opens/closes the right-hand drawer for the active tab's content. -->
+    <button
+        class="btn btn-square shadow-md border-0 absolute top-4 right-4 z-[1000] {menuOpen ? 'btn-primary' : 'bg-base-100'}"
+        title={menuOpen ? 'Close menu' : 'Open menu'}
+        aria-label="Toggle menu"
+        onclick={() => menuOpen = !menuOpen}
+    >
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+            <line x1="4" y1="7" x2="20" y2="7"></line>
+            <line x1="4" y1="12" x2="20" y2="12"></line>
+            <line x1="4" y1="17" x2="20" y2="17"></line>
+        </svg>
+    </button>
+
     <!-- Live zoom readout (sits above the OL scale line at the bottom-left) -->
     <div class="absolute bottom-8 left-2 z-[1000] bg-base-100/90 shadow-md rounded px-2 py-0.5 text-xs font-mono tabular-nums pointer-events-none">
         z{mapZoom.toFixed(1)}
