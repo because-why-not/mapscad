@@ -27,6 +27,7 @@ export class TerrainPreview {
     private raycaster = new THREE.Raycaster();
     private pointer = new THREE.Vector2();
     private pivot = new THREE.Vector3();
+    private pickPlane = new THREE.Plane(); // horizontal pivot plane at the model's mid-elevation
     private lastX = 0;
     private lastY = 0;
 
@@ -188,7 +189,9 @@ export class TerrainPreview {
         window.removeEventListener('pointerup', this.onPointerUp);
     };
 
-    /** World-space point of the front-most mesh under the cursor, or null. */
+    /** Point under the cursor on the model's mid-elevation plane, or null (ray parallel).
+     *  We intersect a flat plane instead of the mesh: the terrain is rebuilt constantly and a
+     *  per-triangle raycast over the whole solid blocks the main thread for hundreds of ms. */
     private pickPoint(e: PointerEvent): THREE.Vector3 | null {
         const rect = this.renderer.domElement.getBoundingClientRect();
         this.pointer.set(
@@ -196,8 +199,9 @@ export class TerrainPreview {
             -((e.clientY - rect.top) / rect.height) * 2 + 1,
         );
         this.raycaster.setFromCamera(this.pointer, this.camera);
-        const hits = this.raycaster.intersectObjects(this.group.children, false);
-        return hits.length ? hits[0].point.clone() : null;
+        this.pickPlane.set(new THREE.Vector3(0, 1, 0), -this.lastCY);
+        const hit = new THREE.Vector3();
+        return this.raycaster.ray.intersectPlane(this.pickPlane, hit) ? hit : null;
     }
 
     /** Orbit camera and target rigidly around the pivot, preserving the view offset. */
