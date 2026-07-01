@@ -4,8 +4,9 @@ import './ui/app.css';
 import { Env } from './Env';
 import { fetchTileMapManifest, ManifestMap } from './TileMapManifest';
 import { EXTERNAL_DEMS } from './externalDems';
+import { EXTERNAL_MAPS } from './externalMaps';
 import { PROVIDER_CATEGORY } from './mapCategories';
-import { prettifyMapName, iconForMapType } from './mapMeta';
+import { prettifyMapName, iconForMapType, LOCAL_MAP_PREFIX, stripLocalPrefix } from './mapMeta';
 import { availableCustomMaps, isSunCapable } from './customMaps';
 import { MapController } from './MapController';
 import { OpenLayersEngine } from './engine/OpenLayersEngine';
@@ -495,32 +496,40 @@ async function init(): Promise<void> {
     }
 
     const serverMaps = await fetchTileMapManifest();
-    if (serverMaps.length === 0) {
-        Env.warn('No maps returned by manifest — check tile server / network.');
-    }
-    // Append the public internet-hosted DEMs (Mapterhorn, AWS) so they appear as ordinary
-    // elevation sources alongside whatever the server advertises.
-    const maps = [...serverMaps, ...EXTERNAL_DEMS];
+    // Namespace the self-hosted tile server's maps with LOCAL_MAP_PREFIX so their ids can't
+    // collide with the public sources (a shared id would break the menu keys + layer lookups),
+    // and so they sink to the bottom of the source list under "Custom Maps".
+    for (const m of serverMaps) m.name = LOCAL_MAP_PREFIX + m.name;
+    // Append the public internet-hosted base maps (OpenStreetMap, OpenTopoMap) and DEMs
+    // (Mapterhorn, AWS) so the app is fully usable with no self-hosted tile server.
+    const maps = [...serverMaps, ...EXTERNAL_MAPS, ...EXTERNAL_DEMS];
     mapsById = Object.fromEntries(maps.map(m => [m.name, m]));
+    // Resolve a bare source name to the actual map id (public bare, or server-prefixed).
+    const resolveSource = (name: string): string | null =>
+        mapsById[name] ? name : (mapsById[LOCAL_MAP_PREFIX + name] ? LOCAL_MAP_PREFIX + name : null);
     const customSpecs = availableCustomMaps(mapsById);
     // Resolve any active map source to the DEM it represents (used to default the preview
     // source when a brand-new selection is drawn). Raw DEM layers map to themselves; custom
     // maps to their demSource; server hillshade layers via PROVIDER_CATEGORY.dem.
     for (const m of maps) if (m.mmapsrv.type === 'elevation') demBySource[m.name] = m.name;
     for (const s of customSpecs) demBySource[s.id] = s.demSource;
-    for (const [name, cat] of Object.entries(PROVIDER_CATEGORY)) if (cat.dem) demBySource[name] = cat.dem;
+    for (const [name, cat] of Object.entries(PROVIDER_CATEGORY)) {
+        if (!cat.dem) continue;
+        const src = resolveSource(name), dem = resolveSource(cat.dem);
+        if (src && dem) demBySource[src] = dem;
+    }
     // The 3D preview can be built from any elevation DEM the server advertises (the
     // manifest tags those with mmapsrv.type === 'elevation'). Expose them all as a source
     // toggle; each DEM has its own zoom range, so switching also moves the zoom.
     const previewDems = maps
         .filter(m => m.mmapsrv.type === 'elevation')
-        .map(m => ({ id: m.name, name: demLabel(m.name) }));
+        .map(m => ({ id: m.name, name: demLabel(stripLocalPrefix(m.name)) }));
     // Resolve the DEM from the saved/shared config, falling back to the default elevation
     // source (or whatever the manifest offers).
     const cfg = config.get();
     const initialDemId = (cfg.demId && mapsById[cfg.demId]?.mmapsrv.type === 'elevation')
         ? cfg.demId
-        : (mapsById[PREVIEW_DEM] ? PREVIEW_DEM : (previewDems[0]?.id ?? ''));
+        : (resolveSource(PREVIEW_DEM) ?? previewDems[0]?.id ?? '');
     previewDem = mapsById[initialDemId];
 
     const { min: previewZoomMin, max: previewZoomMax } = demZoomRange(previewDem);
@@ -532,14 +541,15 @@ async function init(): Promise<void> {
     const initialPreviewSettings: Record<string, any> = { ...model.getSettings(), smoothShading: cfg.display.smoothShading };
 
     const tileProviders = maps.map(m => {
-        const cat = PROVIDER_CATEGORY[m.name]; // undefined for ordinary, ungrouped maps
+        const cat = PROVIDER_CATEGORY[stripLocalPrefix(m.name)]; // undefined for ungrouped maps
         return {
             id: m.name,
             // Inside a source category the header already names the source, so entries use a
             // short label (Raw / 2D Hillshade); ungrouped maps keep their prettified name.
-            name: cat ? cat.label : prettifyMapName(m.name),
+            name: cat ? cat.label : prettifyMapName(stripLocalPrefix(m.name)),
             icon: cat?.icon ?? iconForMapType(m.mmapsrv.type),
             category: cat?.category,
+            server: m.name.startsWith(LOCAL_MAP_PREFIX),
         };
     });
     const customMaps = customSpecs.map(s => ({

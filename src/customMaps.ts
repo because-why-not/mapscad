@@ -1,4 +1,5 @@
 import type { ManifestMap } from './TileMapManifest';
+import { LOCAL_MAP_PREFIX } from './mapMeta';
 
 /**
  * Custom maps are not served by the manifest directly — we synthesize them by
@@ -121,13 +122,29 @@ const CUSTOM_MAPS: CustomMapSpec[] = [
     },
 ];
 
-/** Only expose custom maps whose underlying manifest sources actually exist today. */
+/**
+ * Only expose custom maps whose underlying manifest sources actually exist today. The specs
+ * reference sources by their bare name; a self-hosted-server source lives under the
+ * `LOCAL_MAP_PREFIX`, so resolve each reference to the actual map id (bare or prefixed) and
+ * return a spec carrying the resolved ids, so everything downstream (demBySource, the engines)
+ * looks up the map that really exists.
+ */
 export function availableCustomMaps(mapsById: Record<string, ManifestMap>): CustomMapSpec[] {
-    return CUSTOM_MAPS.filter(c => {
-        if (!mapsById[c.demSource]) return false;
-        if (c.surface.type === 'imagery' && !mapsById[c.surface.source]) return false;
-        return true;
-    });
+    const resolve = (name: string): string | null =>
+        mapsById[name] ? name : (mapsById[LOCAL_MAP_PREFIX + name] ? LOCAL_MAP_PREFIX + name : null);
+    const out: CustomMapSpec[] = [];
+    for (const c of CUSTOM_MAPS) {
+        const demSource = resolve(c.demSource);
+        if (!demSource) continue;
+        if (c.surface.type === 'imagery') {
+            const source = resolve(c.surface.source);
+            if (!source) continue;
+            out.push({ ...c, demSource, surface: { ...c.surface, source } });
+        } else {
+            out.push({ ...c, demSource });
+        }
+    }
+    return out;
 }
 
 /** Whether a custom map is lit by the sun (so the Sun date/time controls apply). */

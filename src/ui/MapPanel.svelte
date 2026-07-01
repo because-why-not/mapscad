@@ -114,9 +114,10 @@
     let shadowsCapable = $derived(!!customList.find(c => c.id === activeProviderId)?.shadows);
     let timeLabel = $derived(formatTime(minutesOfDay));
 
-    // Group the menu into sections: ungrouped tile layers under "Map Source", then one
-    // section per named category (e.g. Mapterhorn, AWS Terrain) holding that source's raw
-    // layer + its 3D maps, then any ungrouped custom maps under "Custom Maps".
+    // Group the menu into sections: ungrouped public tile layers under "Map Source", then one
+    // section per named category (public categories like Mapterhorn / AWS Terrain first, then
+    // self-hosted-server categories), then everything from the local server that isn't in a
+    // named category — plus any ungrouped custom maps — at the bottom under "Custom Maps".
     let sections = $derived(buildSections(providerList, customList));
 
     function buildSections(providers, customs) {
@@ -125,18 +126,29 @@
             if (e.category && !order.includes(e.category)) order.push(e.category);
         }
         const result = [];
-        const looseProviders = providers.filter(p => !p.category);
-        if (looseProviders.length) result.push({ title: 'Map Source', items: looseProviders });
+        // Ungrouped public sources head the list; server-origin maps sink to the bottom.
+        const loosePublic = providers.filter(p => !p.category && !p.server);
+        if (loosePublic.length) result.push({ title: 'Map Source', items: loosePublic });
         const rank = (name) => name === 'Raw' ? 0 : name.startsWith('2D Hillshade') ? 1 : name.startsWith('3D Hillshade') ? 2 : 3;
-        for (const cat of order) {
-            const items = [
-                ...providers.filter(p => p.category === cat),
-                ...customs.filter(c => c.category === cat),
-            ].sort((a, b) => rank(a.name) - rank(b.name));
-            result.push({ title: cat, items });
-        }
+        // A category is "server" if any of its provider layers come from the local server.
+        const catIsServer = (cat) => providers.some(p => p.category === cat && p.server);
+        const pushCategories = (server) => {
+            for (const cat of order) {
+                if (catIsServer(cat) !== server) continue;
+                const items = [
+                    ...providers.filter(p => p.category === cat),
+                    ...customs.filter(c => c.category === cat),
+                ].sort((a, b) => rank(a.name) - rank(b.name));
+                result.push({ title: cat, items });
+            }
+        };
+        pushCategories(false); // public categories
+        pushCategories(true);  // then server categories
+        // Ungrouped server maps + ungrouped custom maps land at the bottom under "Custom Maps".
+        const looseServer = providers.filter(p => !p.category && p.server);
         const looseCustoms = customs.filter(c => !c.category);
-        if (looseCustoms.length) result.push({ title: 'Custom Maps', items: looseCustoms });
+        const bottom = [...looseServer, ...looseCustoms];
+        if (bottom.length) result.push({ title: 'Custom Maps', items: bottom });
         return result;
     }
 

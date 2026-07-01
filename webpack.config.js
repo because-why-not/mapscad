@@ -4,7 +4,9 @@ const webpack = require('webpack');
 const dotenv = require('dotenv');
 
 const env = dotenv.config().parsed || {};
-const TILE_SERVER_URL = env.LOCAL_TILE_SERVER_URL || env.TILE_SERVER_URL || 'https://xxxxx.net:8080';
+// Optional self-hosted tile server. Unset => '' (the app falls back to the public
+// OpenStreetMap / OpenTopoMap base maps + public elevation DEMs; see src/externalMaps.ts).
+const TILE_SERVER_URL = env.LOCAL_TILE_SERVER_URL || env.TILE_SERVER_URL || '';
 
 module.exports = {
     mode: 'development',
