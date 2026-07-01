@@ -282,16 +282,16 @@
                 {/if}
             </div>
 
-            <!-- One raise section per OSM feature, shown once that feature has been added from the
+            <!-- OSM features under one "Objects" heading, each shown once it's been added from the
                  map. Entirely data-driven from `features` + `osmSettings`. -->
+            <div class="px-4 py-1 mt-2 text-xs font-bold uppercase tracking-wider opacity-50">Include objects / data</div>
             {#each features as f (f.id)}
                 {#if osmAvailable[f.id]}
                     {@const os = osmSettings[f.id]}
-                    <div class="px-4 py-1 mt-2 text-xs font-bold uppercase tracking-wider opacity-50">{f.label}</div>
                     <div class="px-4 py-2">
                         <label class="flex items-center gap-2 cursor-pointer">
                             <input type="checkbox" class="checkbox checkbox-sm" bind:checked={os.enabled} onchange={emit} />
-                            <span class="text-sm">{f.hasRadius ? `Raise along ${f.noun}` : `Raise ${f.noun}`}</span>
+                            <span class="text-sm">Include {f.noun}</span>
                         </label>
                         {#if os.enabled}
                             <div class="mt-2 flex items-center gap-2">
@@ -308,7 +308,7 @@
                             {/if}
                             <label class="mt-2 flex items-center gap-2 cursor-pointer">
                                 <input type="checkbox" class="checkbox checkbox-sm" bind:checked={os.separate} onchange={emit} />
-                                <span class="text-sm">Separate object <span class="opacity-60">(own colour; else raises terrain)</span></span>
+                                <span class="text-sm">Separate objects <span class="opacity-60">(multicolor printing)</span></span>
                             </label>
                         {/if}
                     </div>
