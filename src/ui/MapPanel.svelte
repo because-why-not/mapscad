@@ -558,8 +558,10 @@
                             {st.label}
                         </button>
                         <button class="btn btn-sm btn-block" title="Add the downloaded {f.noun} to the 3D preview" onclick={() => onOsmAddToPreview(f.id)} disabled={!st.ready}>Add to preview</button>
-                        <button class="btn btn-sm btn-block" title="Download the {f.noun} (with your deletions) as a JSON file" onclick={() => downloadJson(() => onOsmDownload(f.id), `${f.id}.json`)} disabled={!st.ready}>Download JSON</button>
-                        <button class="btn btn-sm btn-block" title="Load {f.noun} from a previously downloaded JSON file" onclick={() => pickUpload(f.id)}>Upload JSON</button>
+                        <div class="flex gap-2">
+                            <button class="btn btn-sm flex-1" title="Save the {f.noun} (with your deletions) as a JSON file" onclick={() => downloadJson(() => onOsmDownload(f.id), `${f.id}.json`)} disabled={!st.ready}>Save</button>
+                            <button class="btn btn-sm flex-1" title="Load {f.noun} from a previously saved JSON file" onclick={() => pickUpload(f.id)}>Load</button>
+                        </div>
                     </div>
                     <!-- Filter + object list. Type a word ("Booth") for a substring match, or full regex.
                          Mark rows (checkbox / Space, ↑/↓ to move); the Remove/Keep toggle decides what Apply does with
