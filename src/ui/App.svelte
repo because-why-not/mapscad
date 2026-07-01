@@ -22,7 +22,7 @@
         onOsmDownload = () => null,
         onOsmUpload = () => 0,
         onOsmSelectElement = () => {},
-        onOsmApplyDeletions = () => {},
+        onOsmSetEnabled = () => {},
         onOsmHoverElement = () => {},
         onOsmMarksChange = () => {},
         onOsmBoxToggle = () => {},
@@ -158,7 +158,7 @@
         {onOsmDownload}
         {onOsmUpload}
         {onOsmSelectElement}
-        {onOsmApplyDeletions}
+        {onOsmSetEnabled}
         {onOsmHoverElement}
         {onOsmMarksChange}
         {onOsmBoxToggle}

@@ -12,6 +12,7 @@ import type { OsmFeatureDef } from './osm/osmFeatures';
 /** Highlight colour for the selected element, and for elements the user has ticked (marked). */
 const SELECT_COLOR = '#ffd400';
 const MARK_COLOR = '#22c55e';
+const DISABLED_COLOR = '#9ca3af';
 
 /** A read-only overlay of one OSM feature on the OpenLayers 2D map. `line` features draw as stroked
  *  polylines, `area` features as filled polygons; the feature's `zIndex` orders them under the
@@ -27,6 +28,7 @@ export class OsmOverlay {
     private base: Style;
     private selected: Style;
     private marked: Style;
+    private disabledStyle: Style;
 
     constructor(map: OlMap, private def: OsmFeatureDef) {
         const fill = def.fillColor ? new Fill({ color: def.fillColor }) : undefined;
@@ -40,12 +42,16 @@ export class OsmOverlay {
             stroke: new Stroke({ color: MARK_COLOR, width: width + 1 }),
             fill: def.fillColor ? new Fill({ color: 'rgba(34, 197, 94, 0.4)' }) : undefined,
         });
+        // Disabled: a thin grey line, no fill — visibly "switched off" but still pickable so it can
+        // be re-enabled. Focus/marked still win so the user can find and act on it.
+        this.disabledStyle = new Style({ stroke: new Stroke({ color: DISABLED_COLOR, width: 1 }) });
         this.layer = new VectorLayer({
             source: this.source,
             style: (feature) => {
                 const id = feature.get('osmElementId');
                 if (id === this.selectedId || id === this.hoveredId) return this.selected; // focus wins
-                return this.markedIds.has(id) ? this.marked : this.base;
+                if (this.markedIds.has(id)) return this.marked;
+                return feature.get('osmDisabled') ? this.disabledStyle : this.base;
             },
             zIndex: def.zIndex,
         });
@@ -62,6 +68,7 @@ export class OsmOverlay {
             const feature = new Feature(geom);
             feature.setId(el.id);
             feature.set('osmElementId', el.id);
+            feature.set('osmDisabled', !!el.disabled);
             return feature;
         });
         this.source.addFeatures(features);

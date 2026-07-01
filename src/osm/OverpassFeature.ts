@@ -19,6 +19,9 @@ export interface OsmElement {
     id: number;
     name?: string;
     coords: LonLat[];
+    /** User-disabled: kept in the list (shown struck-through / grey on the map) but excluded from
+     *  the preview. Absent/false = enabled. Persisted in the saved JSON so it round-trips. */
+    disabled?: boolean;
 }
 
 function coordsFromGeometry(geometry: any[]): LonLat[] {
@@ -60,7 +63,8 @@ export function waysFromJson(def: OsmFeatureDef, json: any): OsmElement[] {
             } else if (item && validCoords(item.coords, def.minPoints)) { // OsmElement object
                 const id = Number.isFinite(item.id) ? item.id : synthetic--;
                 const name = typeof item.name === 'string' ? item.name : undefined;
-                out.push({ id, name, coords: item.coords });
+                const disabled = item.disabled === true ? true : undefined;
+                out.push({ id, name, coords: item.coords, disabled });
             }
         }
         return out;

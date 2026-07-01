@@ -163,7 +163,10 @@ function syncOsmField(id: string): void {
     const grid = model.getGrid();
     const data = currentOsm.get(id);
     if (!data || !currentCorners || !grid) { model.setOsmData(id, null); return; }
-    const bound = data.withGrid({ corners: currentCorners, cols: grid.cols, rows: grid.rows });
+    // Disabled elements stay in the list/overlay but are excluded from the printed model.
+    const enabled = data.list.filter(e => !e.disabled);
+    const enabledData = new OsmVectorData(enabled);
+    const bound = enabledData.withGrid({ corners: currentCorners, cols: grid.cols, rows: grid.rows });
     model.setOsmData(id, bound);
 }
 
@@ -183,7 +186,7 @@ function ingestOsm(id: string, elements: OsmElement[]): void {
 function pushOsmElements(id: string): void {
     const data = currentOsm.get(id);
     // Push the raw id + name; the UI does the ordering (by name), labelling and filtering.
-    const elements = data ? data.list.map(e => ({ id: e.id, name: e.name ?? '' })) : [];
+    const elements = data ? data.list.map(e => ({ id: e.id, name: e.name ?? '', disabled: !!e.disabled })) : [];
     appInstance?.setOsmElements(id, elements);
 }
 
@@ -216,19 +219,18 @@ function panToOsm(featureId: string, elementId: number): void {
     view.animate({ center: [cx, cy], duration: 250 });
 }
 
-/** Commit a batch of deletions for a feature (the user's staged "Apply"): drop the given ids from
- *  the editable set, redraw, clear the selection if it was removed, refresh the list, and re-sync
- *  the preview. One pass so a large prune triggers a single geometry rebuild. */
-function applyOsmDeletions(featureId: string, ids: number[]): void {
+/** Enable/disable a batch of elements for a feature (the user's Enable/Disable button): flip the
+ *  `disabled` flag on the given ids, redraw the overlay (disabled ones go grey), and refresh the
+ *  list (struck-through). The preview is intentionally NOT re-synced here — disabling only affects
+ *  the print on the next "Add to preview" press. */
+function applyOsmEnabled(featureId: string, ids: number[], enabled: boolean): void {
     const data = currentOsm.get(featureId);
     if (!data || !ids.length) return;
-    const drop = new Set(ids);
-    const kept = data.list.filter(e => !drop.has(e.id));
-    currentOsm.set(featureId, new OsmVectorData(kept));
-    osmOverlays.get(featureId)?.setElements(kept);
-    if (selectedOsm?.featureId === featureId && drop.has(selectedOsm.elementId)) selectOsm(null, null);
+    const set = new Set(ids);
+    const next = data.list.map(e => set.has(e.id) ? { ...e, disabled: enabled ? undefined : true } : e);
+    currentOsm.set(featureId, new OsmVectorData(next));
+    osmOverlays.get(featureId)?.setElements(next);
     pushOsmElements(featureId);
-    if (addedOsm.has(featureId)) syncOsmField(featureId);
 }
 
 /** Map click handler (only while no draw tool is active): select the topmost OSM element under the
@@ -642,8 +644,8 @@ async function init(): Promise<void> {
             // Object-list interactions: select an element (highlight it + bring it into the map
             // view, since the list row may point off-screen) and delete one.
             onOsmSelectElement: (id: string, elementId: number) => { selectOsm(id, elementId); panToOsm(id, elementId); },
-            // Commit the user's staged deletions for a feature (Apply in the menu).
-            onOsmApplyDeletions: (id: string, ids: number[]) => applyOsmDeletions(id, ids),
+            // Enable/disable the user's marked elements for a feature (Enable/Disable in the menu).
+            onOsmSetEnabled: (id: string, ids: number[], enabled: boolean) => applyOsmEnabled(id, ids, enabled),
             // Hovering a list row highlights it on the map (no centring); null clears the highlight.
             onOsmHoverElement: (id: string | null, elementId: number | null) => hoverOsm(id, elementId),
             // The user's ticked (marked) elements, highlighted on the map as they stage an edit.

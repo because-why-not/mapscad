@@ -21,7 +21,7 @@
         onOsmDownload = () => null,
         onOsmUpload = () => 0,
         onOsmSelectElement = () => {},
-        onOsmApplyDeletions = () => {},
+        onOsmSetEnabled = () => {},
         onOsmHoverElement = () => {},
         onOsmMarksChange = () => {},
         onOsmBoxToggle = () => {},
@@ -90,11 +90,10 @@
     let osmElements = $state(untrack(() => Object.fromEntries(osmFeatures.map(f => [f.id, []]))));
     let osmFilter = $state(untrack(() => Object.fromEntries(osmFeatures.map(f => [f.id, '']))));
     let osmSelected = $state(null); // { featureId, elementId } | null
-    // Staged edit per feature: marked element ids ({id:true}) + a mode saying what Apply does with
-    // them — 'remove' deletes the marked, 'keep' deletes everything EXCEPT the marked. Nothing on
-    // the map/preview changes until Apply; Cancel discards the marks.
+    // Marked element ids ({id:true}) per feature — the working selection the Enable/Disable buttons
+    // act on. Marking highlights on the map (see the $effect below) but changes nothing until a
+    // button is pressed; Cancel just clears the marks.
     let osmMarked = $state(untrack(() => Object.fromEntries(osmFeatures.map(f => [f.id, {}]))));
-    let osmMode = $state(untrack(() => Object.fromEntries(osmFeatures.map(f => [f.id, 'remove']))));
     export function setOsmElements(id, elements) { osmElements[id] = elements; osmMarked[id] = {}; }
     export function setOsmSelected(featureId, elementId) {
         osmSelected = featureId !== null && elementId !== null ? { featureId, elementId } : null;
@@ -105,23 +104,23 @@
     }
     const isSelected = (fid, eid) => osmSelected?.featureId === fid && osmSelected?.elementId === eid;
 
-    // --- staged deletion: mark elements, then Apply (commit) or Cancel (discard) ---
+    // --- mark elements, then Enable / Disable (apply) or Cancel (discard the marks) ---
     const isMarked = (fid, id) => !!osmMarked[fid]?.[id];
     const hasMarks = (fid) => Object.keys(osmMarked[fid] ?? {}).length > 0;
-    /** Whether a row will be removed on Apply, given the feature's mode + marks. */
-    function willDelete(fid, id) {
-        if (osmMode[fid] === 'keep') return hasMarks(fid) && !isMarked(fid, id); // keep marked, drop rest
-        return isMarked(fid, id);                                                // remove marked
-    }
-    function deleteCount(fid) {
-        return (osmElements[fid] ?? []).reduce((n, e) => n + (willDelete(fid, e.id) ? 1 : 0), 0);
-    }
     function toggleMark(fid, id) {
         const m = { ...(osmMarked[fid] ?? {}) };
         if (m[id]) delete m[id]; else m[id] = true;
         osmMarked[fid] = m;
     }
-    function setMode(fid, mode) { osmMode[fid] = mode; } // keep the marked set when toggling Remove/Keep
+    // Select All / Invert act on the WHOLE feature list, not just the filtered rows.
+    function selectAll(fid) {
+        osmMarked[fid] = Object.fromEntries((osmElements[fid] ?? []).map(e => [e.id, true]));
+    }
+    function invertSelection(fid) {
+        const m = { ...(osmMarked[fid] ?? {}) };
+        for (const e of osmElements[fid] ?? []) { if (m[e.id]) delete m[e.id]; else m[e.id] = true; }
+        osmMarked[fid] = m;
+    }
     // Merge ids into a feature's marked set — used by the map box-select tool to tick objects.
     export function addOsmMarks(fid, ids) {
         const m = { ...(osmMarked[fid] ?? {}) };
@@ -135,12 +134,14 @@
     // The transient box-select tool (Data tab only). Toggling it routes to the map; it never persists.
     let osmBoxActive = $state(false);
     function toggleOsmBox() { osmBoxActive = !osmBoxActive; onOsmBoxToggle(osmBoxActive); }
-    function applyEdits(fid) {
-        const ids = (osmElements[fid] ?? []).filter(e => willDelete(fid, e.id)).map(e => e.id);
-        if (ids.length) onOsmApplyDeletions(fid, ids);
-        osmMarked[fid] = {}; osmMode[fid] = 'remove';
+    // Enable/disable the marked set, then clear the marks. Map + list update instantly; the preview
+    // only changes on the next "Add to preview" (index.ts doesn't re-sync on enable/disable).
+    function setEnabled(fid, enabled) {
+        const ids = Object.keys(osmMarked[fid] ?? {}).map(Number);
+        if (ids.length) onOsmSetEnabled(fid, ids, enabled);
+        osmMarked[fid] = {};
     }
-    function cancelEdits(fid) { osmMarked[fid] = {}; osmMode[fid] = 'remove'; }
+    function cancelMarks(fid) { osmMarked[fid] = {}; }
     // Push the ticked set to the map so marked elements are highlighted there too.
     $effect(() => {
         for (const f of osmFeatures) onOsmMarksChange(f.id, Object.keys(osmMarked[f.id] ?? {}).map(Number));
@@ -168,8 +169,8 @@
                 .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
             const unnamed = raw.filter(e => !e.name);
             let rows = [
-                ...named.map(e => ({ id: e.id, label: e.name })),
-                ...unnamed.map((e, i) => ({ id: e.id, label: `${f.label} #${i + 1}` })),
+                ...named.map(e => ({ id: e.id, label: e.name, disabled: !!e.disabled })),
+                ...unnamed.map((e, i) => ({ id: e.id, label: `${f.label} #${i + 1}`, disabled: !!e.disabled })),
             ];
             const re = makeFilter(osmFilter[f.id]);
             if (re) rows = rows.filter(r => re.test(r.label));
@@ -226,7 +227,7 @@
         hasSelection = has;
         if (has) selectionDirty = true; // selection changed → Data should reopen so stale data gets re-downloaded
         osmSelected = null;
-        for (const f of osmFeatures) { osmState[f.id].ready = false; osmElements[f.id] = []; osmFilter[f.id] = ''; osmMarked[f.id] = {}; osmMode[f.id] = 'remove'; }
+        for (const f of osmFeatures) { osmState[f.id].ready = false; osmElements[f.id] = []; osmFilter[f.id] = ''; osmMarked[f.id] = {}; }
     }
 
     async function fetchOsm(f) {
@@ -557,32 +558,31 @@
                             {#if st.busy}<span class="loading loading-spinner loading-xs"></span>{/if}
                             {st.label}
                         </button>
-                        <button class="btn btn-sm btn-block" title="Add the downloaded {f.noun} to the 3D preview" onclick={() => onOsmAddToPreview(f.id)} disabled={!st.ready}>Add to preview</button>
+                        <button class="btn btn-sm btn-block" title="Update the 3D preview with the enabled {f.noun}" onclick={() => onOsmAddToPreview(f.id)} disabled={!st.ready}>Update preview</button>
                         <div class="flex gap-2">
                             <button class="btn btn-sm flex-1" title="Save the {f.noun} (with your deletions) as a JSON file" onclick={() => downloadJson(() => onOsmDownload(f.id), `${f.id}.json`)} disabled={!st.ready}>Save</button>
                             <button class="btn btn-sm flex-1" title="Load {f.noun} from a previously saved JSON file" onclick={() => pickUpload(f.id)}>Load</button>
                         </div>
                     </div>
                     <!-- Filter + object list. Type a word ("Booth") for a substring match, or full regex.
-                         Mark rows (checkbox / Space, ↑/↓ to move); the Remove/Keep toggle decides what Apply does with
-                         the marked set. Nothing changes on the map/preview until Apply; Cancel discards. -->
+                         Mark rows (checkbox / Space, ↑/↓ to move) — Select All / Invert help build the set.
+                         Enable/Disable applies to the marked set (map + list update at once; the preview
+                         changes on the next Add to preview). Disabled rows show struck-through. -->
                     {#if total}
-                        {@const pending = deleteCount(f.id)}
                         <div class="px-4 pb-1 flex items-center gap-2">
                             <input type="search" class="input input-xs input-bordered flex-1 min-w-0" placeholder="Filter by name (regex)…" bind:value={osmFilter[f.id]} />
                             <div class="join">
-                                <button class="btn btn-xs join-item {osmMode[f.id] === 'remove' ? 'btn-active' : ''}" title="Apply deletes the marked elements" onclick={() => setMode(f.id, 'remove')}>Remove</button>
-                                <button class="btn btn-xs join-item {osmMode[f.id] === 'keep' ? 'btn-active' : ''}" title="Apply keeps the marked elements and deletes the rest" onclick={() => setMode(f.id, 'keep')}>Keep</button>
+                                <button class="btn btn-xs join-item" title="Mark every {f.noun} (ignores the filter)" onclick={() => selectAll(f.id)}>Select All</button>
+                                <button class="btn btn-xs join-item" title="Flip the marked state of every {f.noun} (ignores the filter)" onclick={() => invertSelection(f.id)}>Invert</button>
                             </div>
                         </div>
                         {#if rows.length}
                             <ul class="mx-4 mb-1 max-h-48 overflow-y-auto rounded border border-base-300 divide-y divide-base-300 text-sm">
                                 {#each rows as el (el.id)}
-                                    {@const doomed = willDelete(f.id, el.id)}
                                     <li data-osm-el="{f.id}:{el.id}" class="flex items-center {isSelected(f.id, el.id) ? 'bg-primary text-primary-content' : 'hover:bg-base-300'}"
                                         onmouseenter={() => onOsmHoverElement(f.id, el.id)} onmouseleave={() => onOsmHoverElement(null, null)}>
                                         <input type="checkbox" class="checkbox checkbox-xs ml-2" title="Mark this element" checked={isMarked(f.id, el.id)} onchange={() => toggleMark(f.id, el.id)} />
-                                        <button class="flex-1 text-left px-2 py-1 truncate bg-transparent border-0 {doomed ? 'line-through opacity-50' : ''}" title={el.label} onclick={() => onOsmSelectElement(f.id, el.id)}>{el.label}</button>
+                                        <button class="flex-1 text-left px-2 py-1 truncate bg-transparent border-0 {el.disabled ? 'line-through opacity-50' : ''}" title={el.label} onclick={() => onOsmSelectElement(f.id, el.id)}>{el.label}</button>
                                     </li>
                                 {/each}
                             </ul>
@@ -590,8 +590,9 @@
                             <p class="px-4 pb-2 text-xs opacity-50">No matches.</p>
                         {/if}
                         <div class="px-4 pb-2 flex gap-2">
-                            <button class="btn btn-xs btn-primary flex-1" disabled={pending === 0} onclick={() => applyEdits(f.id)}>Apply{#if pending} · delete {pending}{/if}</button>
-                            <button class="btn btn-xs flex-1" disabled={!hasMarks(f.id)} onclick={() => cancelEdits(f.id)}>Cancel</button>
+                            <button class="btn btn-xs flex-1" disabled={!hasMarks(f.id)} onclick={() => setEnabled(f.id, true)}>Enable</button>
+                            <button class="btn btn-xs flex-1" disabled={!hasMarks(f.id)} onclick={() => setEnabled(f.id, false)}>Disable</button>
+                            <button class="btn btn-xs flex-1" disabled={!hasMarks(f.id)} onclick={() => cancelMarks(f.id)}>Cancel</button>
                         </div>
                     {/if}
                 {/each}
