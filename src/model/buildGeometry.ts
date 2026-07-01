@@ -22,9 +22,23 @@ import { pushQuadOriented, weldIndexed } from './geometry';
 // Minimum socket thickness, so a "size 0" socket is still a handleable solid.
 const SOCKET_FLOOR_OFFSET = 0.1;
 
+// A cell joins an OSM body when any of its four corners carries at least this coverage (0..1). Just
+// above zero, so the body reaches every cell the painted way touches, ramp shoulders included.
+const OSM_COVERAGE_THRESHOLD = 0.02;
+
+/** One OSM feature to emit as its OWN body draped on the terrain (roads/buildings as separate solids
+ *  for multi-part / multi-colour printing). The coverage raster is painted on the main thread (needs
+ *  a canvas) against the ORIGINAL sampled grid, so it's a plain, serialisable Float32Array. */
+export interface OsmBody {
+    id: string;
+    coverage: Float32Array;  // cols×rows, 0..1, aligned with the ORIGINAL (pre-tiling) grid
+    raise: number;           // metres added on top of the terrain surface at full coverage
+}
+
 export interface BuildInput {
-    grid: HeightGrid;        // already reshaped by the DOM-bound OSM grid processors (if any)
+    grid: HeightGrid;        // pure terrain heights; OSM features ride on top as separate bodies
     settings: ModelSettings;
+    osmBodies?: OsmBody[];   // enabled OSM features, emitted as extra bodies after the terrain
 }
 
 export interface BuildHooks {
@@ -36,6 +50,7 @@ export interface BuildHooks {
 export function buildModelGeometry(input: BuildInput, hooks: BuildHooks = {}): ModelGeometry {
     const s = input.settings;
     let grid = input.grid;
+    const originalGrid = input.grid; // pre-tiling; OSM bodies co-register with this (see appendOsmBodies)
     const report = hooks.onProgress ?? (() => {});
     report(0);
 
@@ -44,29 +59,34 @@ export function buildModelGeometry(input: BuildInput, hooks: BuildHooks = {}): M
     for (const gp of pureGridProcessors(s)) grid = gp.process(grid);
     report(0.2);
 
+    const terrain = buildTerrain(grid, s);
+    report(0.9);
+
+    // OSM features ride on top of the terrain as their own draped solids, appended as extra bodies.
+    const geo = appendOsmBodies(terrain, originalGrid, s, input.osmBodies);
+    report(1);
+    return geo;
+}
+
+/** The terrain body (surface + optional socket), one `ModelGeometry`. Splits three ways by shape /
+ *  no-data, exactly as before OSM features became separate bodies. */
+function buildTerrain(grid: HeightGrid, s: ModelSettings): ModelGeometry {
     // The oval footprint masks the sampled rectangle, so it gets its own builder (per-cell solid
     // with a boundary-following wall); the rectangle path is untouched. Compare the string value
     // (SelectionShape.Oval === 'oval') to avoid a runtime import cycle with MapModel.
-    if (s.shape === 'oval') {
-        const geo = buildOval(grid, s);
-        report(1);
-        return geo;
-    }
+    if (s.shape === 'oval') return buildOval(grid, s);
 
     const { cols, rows, widthMeters, heightMeters } = grid;
 
     // Elevation stage: run the per-cell processor chain (exaggeration, water, …) once, up front,
     // into a model-space height field both the surface and the socket read.
     const processed = applyElevation(grid, s);
-    report(0.5);
 
     // No-data carves holes: real gaps OR the tile dividers injected above. Route through the masked
     // builder — one solid whose disconnected bodies ARE the tiles, each walled.
     if (hasNoData(processed)) {
         const keep = (cc: number, cr: number) => cellHasData(processed, cols, rows, cc, cr);
-        const geo = buildKept(grid, processed, keep, s);
-        report(1);
-        return geo;
+        return buildKept(grid, processed, keep, s);
     }
 
     // Lowest model-space surface (incl. water), so the socket floor sits below the water.
@@ -91,7 +111,6 @@ export function buildModelGeometry(input: BuildInput, hooks: BuildHooks = {}): M
         maxThickness = highY - baseY;
     }
 
-    report(1);
     return {
         tiles: [tile], widthMeters, heightMeters,
         vertexCount: tile.positions.length / 3,
@@ -100,6 +119,90 @@ export function buildModelGeometry(input: BuildInput, hooks: BuildHooks = {}): M
         socketStartY: s.socketEnabled ? minY : null,
         minThickness, maxThickness,
     };
+}
+
+/** Append each OSM feature as its OWN body draped on the terrain surface, so a slicer's "split to
+ *  objects" separates terrain / tracks / streets / buildings for multi-part / multi-colour printing.
+ *  Bodies OVERLAP the terrain (the base sinks below the surface) rather than carving it — the simplest
+ *  representation; a watertight carve-and-inlay can come later. Built against `originalGrid` (the
+ *  pre-tiling sampled grid the coverage rasters align with); tiling reshapes the terrain but features
+ *  stay whole, mirroring how ovals ignore tiling. */
+function appendOsmBodies(
+    terrain: ModelGeometry, originalGrid: HeightGrid, s: ModelSettings, bodies: OsmBody[] | undefined,
+): ModelGeometry {
+    if (!bodies || bodies.length === 0) return terrain;
+    // The surface features ride on: the same per-cell elevation chain the terrain used, over the
+    // original (un-tiled) grid so heights line up with the coverage rasters.
+    const surface = applyElevation(originalGrid, s);
+    const tiles = terrain.tiles.slice();
+    let { vertexCount, triangleCount, minY, maxY } = terrain;
+    for (const body of bodies) {
+        const built = buildFeatureBody(originalGrid, surface, body);
+        if (!built) continue;
+        tiles.push(built.tile);
+        vertexCount += built.tile.positions.length / 3;
+        triangleCount += built.tile.indices.length / 3;
+        minY = Math.min(minY, built.minY);
+        maxY = Math.max(maxY, built.maxY);
+    }
+    return { ...terrain, tiles, vertexCount, triangleCount, minY, maxY };
+}
+
+/** One OSM feature as a closed solid draped on the terrain: top = surface + coverage·raise (so
+ *  shoulders ramp smoothly to ground where coverage tapers), base sunk a little below the surface so
+ *  the body fuses into the terrain (overlap union). A cell is emitted when any corner passes the
+ *  coverage threshold and all four corners carry terrain data; every boundary edge is walled. Returns
+ *  null when nothing is covered. */
+function buildFeatureBody(
+    grid: HeightGrid, surface: Float32Array, body: OsmBody,
+): { tile: ModelTile; minY: number; maxY: number } | null {
+    const { cols, rows, widthMeters, heightMeters } = grid;
+    const cov = body.coverage;
+    const X = (c: number) => -widthMeters / 2 + (c / (cols - 1)) * widthMeters;
+    const Z = (r: number) => heightMeters / 2 - (r / (rows - 1)) * heightMeters;
+    // Sink the base below the surface so the body always overlaps the terrain solid (robust union, no
+    // coplanar z-fighting). Proportional to the raise so it scales with the feature's own height.
+    const fuse = Math.max(SOCKET_FLOOR_OFFSET, Math.abs(body.raise) * 0.5);
+    const hasData = (c: number, r: number) => { const v = surface[r * cols + c]; return v === v; }; // !NaN
+    const inside = (cc: number, cr: number): boolean => {
+        if (cc < 0 || cr < 0 || cc >= cols - 1 || cr >= rows - 1) return false;
+        if (!(hasData(cc, cr) && hasData(cc + 1, cr) && hasData(cc, cr + 1) && hasData(cc + 1, cr + 1))) return false;
+        const m = Math.max(cov[cr * cols + cc], cov[cr * cols + cc + 1], cov[(cr + 1) * cols + cc], cov[(cr + 1) * cols + cc + 1]);
+        return m > OSM_COVERAGE_THRESHOLD;
+    };
+
+    type V = [number, number, number];
+    const top = (c: number, r: number): V => [X(c), surface[r * cols + c] + body.raise * cov[r * cols + c], Z(r)];
+    const bot = (c: number, r: number): V => [X(c), surface[r * cols + c] - fuse, Z(r)];
+
+    const positions: number[] = [];
+    const indices: number[] = [];
+    const quad = (p0: V, p1: V, p2: V, p3: V, ox: number, oy: number, oz: number) =>
+        pushQuadOriented(positions, indices, p0, p1, p2, p3, ox, oy, oz);
+
+    for (let cr = 0; cr < rows - 1; cr++) {
+        for (let cc = 0; cc < cols - 1; cc++) {
+            if (!inside(cc, cr)) continue;
+            const A = top(cc, cr), B = top(cc + 1, cr), C = top(cc, cr + 1), D = top(cc + 1, cr + 1);
+            const a = bot(cc, cr), b = bot(cc + 1, cr), c = bot(cc, cr + 1), d = bot(cc + 1, cr + 1);
+            quad(A, B, D, C, 0, 1, 0);   // top faces +Y
+            quad(a, b, d, c, 0, -1, 0);  // base faces -Y
+            if (!inside(cc, cr - 1)) quad(A, B, b, a, 0, 0, 1);  // south edge → +Z
+            if (!inside(cc, cr + 1)) quad(C, D, d, c, 0, 0, -1); // north edge → -Z
+            if (!inside(cc - 1, cr)) quad(A, C, c, a, -1, 0, 0); // west edge  → -X
+            if (!inside(cc + 1, cr)) quad(B, D, d, b, 1, 0, 0);  // east edge  → +X
+        }
+    }
+    if (positions.length === 0) return null;
+
+    let minY = Infinity, maxY = -Infinity;
+    for (let i = 1; i < positions.length; i += 3) {
+        if (positions[i] < minY) minY = positions[i];
+        if (positions[i] > maxY) maxY = positions[i];
+    }
+    const welded = weldIndexed(positions, indices);
+    const tile: ModelTile = { positions: welded.positions, indices: welded.indices, ix0: 0, iy0: 0 };
+    return { tile, minY, maxY };
 }
 
 /** Build one independent solid spanning grid columns c0..c1 and rows r0..r1. */

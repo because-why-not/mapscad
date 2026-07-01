@@ -13,9 +13,9 @@ const ctx = self as unknown as Worker;
 interface BuildRequest extends BuildInput { id: number; }
 
 ctx.onmessage = (e: MessageEvent<BuildRequest>) => {
-    const { id, grid, settings } = e.data;
+    const { id, grid, settings, osmBodies } = e.data;
     try {
-        const geo = buildModelGeometry({ grid, settings }, {
+        const geo = buildModelGeometry({ grid, settings, osmBodies }, {
             onProgress: (fraction) => ctx.postMessage({ type: 'progress', id, fraction }),
         });
         // Transfer the tile buffers (positions + indices) back — they're freshly built here, so the

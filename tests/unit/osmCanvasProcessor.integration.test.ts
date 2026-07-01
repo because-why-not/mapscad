@@ -1,10 +1,10 @@
 // @vitest-environment jsdom
 //
-// Integration coverage for the DOM-coupled OsmCanvasProcessor: process() paints a feature's ways
-// onto a real <canvas> and reads the coverage back. Opts into jsdom + node-canvas so getContext('2d')
-// is real. Covers BOTH geometry kinds the registry drives: 'line' (stroke + blur + radius, e.g.
-// tracks/streets) and 'area' (solid fill, e.g. buildings). The pure pixels→heights step is the
-// shared, separately-tested addRasterRaise (rasterRaise.test.ts).
+// Integration coverage for the DOM-coupled OsmCanvasProcessor: coverage() paints a feature's ways
+// onto a real <canvas> and reads the 0..1 coverage mask back. Opts into jsdom + node-canvas so
+// getContext('2d') is real. Covers BOTH geometry kinds the registry drives: 'line' (stroke + blur +
+// radius, e.g. tracks/streets) and 'area' (solid fill, e.g. buildings). The mask is then draped onto
+// the terrain as its own body by buildFeatureBody (tested via mapModel/geometry).
 import { describe, it, expect, beforeAll, vi } from 'vitest';
 import { OsmCanvasProcessor } from '../../src/model/OsmCanvasProcessor';
 import { OsmVectorData } from '../../src/osm/OsmVectorData';
@@ -35,43 +35,32 @@ const MID_ROW_LINE: LonLat[] = [[0.05, 0.55], [0.95, 0.55]];
 // A square ring covering grid cols/rows 2..7 (lon/lat .25→2, .75→7; v = 1−lat).
 const SQUARE: LonLat[] = [[0.25, 0.75], [0.75, 0.75], [0.75, 0.25], [0.25, 0.25]];
 
-describe('OsmCanvasProcessor.process (real canvas)', () => {
+describe('OsmCanvasProcessor.coverage (real canvas)', () => {
     beforeAll(() => {
         const ctx = document.createElement('canvas').getContext('2d');
         if (!ctx) throw new Error('no real 2d canvas — is the `canvas` package installed?');
     });
 
-    it('line: raises along the painted way, leaves far cells flat, carves on negative', () => {
+    it('line: full coverage along the painted way, zero on far cells', () => {
         const data = vd([MID_ROW_LINE]);
-        const up = new OsmCanvasProcessor(data, LINE, 50, 100).process(flatGrid(100));
-        expect(up.heights).not.toBe(flatGrid(100).heights);
-        expect(up.heights[idx(5, 4)]).toBeGreaterThan(130);
-        expect(up.heights[idx(0, 0)]).toBe(100);
-        const down = new OsmCanvasProcessor(data, LINE, -50, 100).process(flatGrid(100));
-        expect(down.heights[idx(5, 4)]).toBeLessThan(70);
+        const cov = new OsmCanvasProcessor(data, LINE, 100).coverage(flatGrid(100));
+        expect(cov).not.toBeNull();
+        expect(cov![idx(5, 4)]).toBeGreaterThan(0.6); // on the line
+        expect(cov![idx(0, 0)]).toBe(0);              // far corner
     });
 
-    it('area: raises cells inside the footprint, leaves outside cells flat (radius ignored)', () => {
+    it('area: full coverage inside the footprint, zero outside (radius ignored)', () => {
         const data = vd([SQUARE]);
-        const out = new OsmCanvasProcessor(data, AREA, 20, 0).process(flatGrid(100));
-        expect(out.heights[idx(5, 5)]).toBe(120); // interior → full +20
-        expect(out.heights[idx(0, 0)]).toBe(100); // far corner → unchanged
+        const cov = new OsmCanvasProcessor(data, AREA, 0).coverage(flatGrid(100));
+        expect(cov![idx(5, 5)]).toBeGreaterThan(0.9); // interior → ~1
+        expect(cov![idx(0, 0)]).toBe(0);              // far corner → 0
     });
 
-    it('is a no-op for raise 0, empty data, or (line) radius 0', () => {
-        const grid = flatGrid(100);
-        expect(new OsmCanvasProcessor(vd([MID_ROW_LINE]), LINE, 0, 100).process(grid)).toBe(grid);
-        expect(new OsmCanvasProcessor(vd([MID_ROW_LINE]), LINE, 50, 0).process(grid)).toBe(grid);
-        expect(new OsmCanvasProcessor(vd([]), LINE, 50, 100).process(grid)).toBe(grid);
+    it('returns null for empty data or (line) radius 0, but not for an area with radius 0', () => {
+        expect(new OsmCanvasProcessor(vd([MID_ROW_LINE]), LINE, 0).coverage(flatGrid(100))).toBeNull();
+        expect(new OsmCanvasProcessor(vd([]), LINE, 100).coverage(flatGrid(100))).toBeNull();
         // radius 0 is NOT a no-op for an area feature (it ignores radius):
-        expect(new OsmCanvasProcessor(vd([SQUARE]), AREA, 20, 0).process(grid)).not.toBe(grid);
-    });
-
-    it('preserves no-data (NaN) cells even when a way covers them', () => {
-        const grid = flatGrid(100);
-        grid.heights[idx(5, 4)] = NaN;
-        const out = new OsmCanvasProcessor(vd([MID_ROW_LINE]), LINE, 50, 100).process(grid);
-        expect(Number.isNaN(out.heights[idx(5, 4)])).toBe(true);
+        expect(new OsmCanvasProcessor(vd([SQUARE]), AREA, 0).coverage(flatGrid(100))).not.toBeNull();
     });
 
     it('paints ALL ways in a single draw call (no per-way blur layer → no OOM)', () => {
@@ -83,7 +72,7 @@ describe('OsmCanvasProcessor.process (real canvas)', () => {
                 const lat = 0.1 + (i / 50) * 0.8;
                 return [[0.05, lat], [0.95, lat]] as LonLat[];
             });
-            new OsmCanvasProcessor(vd(lines), LINE, 50, 100).process(flatGrid(100));
+            new OsmCanvasProcessor(vd(lines), LINE, 100).coverage(flatGrid(100));
             expect(strokeSpy).toHaveBeenCalledTimes(1);
             strokeSpy.mockClear();
             fillSpy.mockClear();
@@ -91,7 +80,7 @@ describe('OsmCanvasProcessor.process (real canvas)', () => {
                 const lon = 0.05 + (i / 20) * 0.04;
                 return [[lon, 0.6], [lon + 0.01, 0.6], [lon + 0.01, 0.5], [lon, 0.5]] as LonLat[];
             });
-            new OsmCanvasProcessor(vd(rings), AREA, 20, 0).process(flatGrid(100));
+            new OsmCanvasProcessor(vd(rings), AREA, 0).coverage(flatGrid(100));
             expect(fillSpy).toHaveBeenCalledTimes(1);
         } finally {
             strokeSpy.mockRestore();

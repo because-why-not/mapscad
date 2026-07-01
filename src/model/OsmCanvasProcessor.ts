@@ -1,40 +1,41 @@
 import type { HeightGrid } from '../HeightSampler';
-import type { ElevationGridProcessor } from './processors';
 import type { OsmVectorData } from '../osm/OsmVectorData';
 import type { OsmFeatureDef } from '../osm/osmFeatures';
-import { addRasterRaise } from './rasterRaise';
 
 /**
- * Raises (or lowers) terrain over one OSM feature by PAINTING its ways onto a `cols × rows` canvas
- * and reading the coverage back. Replaces the identical Track/Street/Building canvas processors;
- * the only difference between them was line-vs-area, which `def.geometry` now drives:
+ * Rasterises one OSM feature into a `cols × rows` COVERAGE mask (0..1) by PAINTING its ways onto a
+ * canvas and reading the red channel back. The mask aligns cell-for-cell with the sampled grid; the
+ * geometry stage (`buildFeatureBody`) then drapes it onto the terrain as its own solid. Replaces the
+ * identical Track/Street/Building canvas processors; the only difference between them is line-vs-area,
+ * which `def.geometry` drives:
  *   - 'line'  → blurred white stroke, `radius` (metres) → brush width; coverage tapers off the
- *               centreline so a cell on the line gets the full `raise` and the shoulders less.
- *   - 'area'  → solid white fill, crisp edges; every covered cell steps up by the full `raise`.
- * Coverage (red channel, 0..255 → 0..1) scales `raise` into a signed whole-metre delta via the
- * shared, unit-tested `addRasterRaise`; a NEGATIVE `raise` carves down.
+ *               centreline so a cell on the line reads ~1 and the shoulders less (→ smooth ramp).
+ *   - 'area'  → solid white fill, crisp edges; every covered cell reads ~1 (→ vertical walls).
  *
  * Everything is painted in ONE draw call (one `stroke()` or one `fill()`): a canvas `filter`
  * allocates a full-canvas layer per draw, so per-way drawing over a dense network exhausts GPU
  * memory and crashes the shared WebGL context (the original track-processor OOM lesson). DOM-coupled
- * (needs a canvas), so it lives outside the pure `processors.ts`.
+ * (needs a canvas), so it stays on the main thread — the mask it returns is a plain, serialisable
+ * Float32Array that crosses to the build worker.
  */
-export class OsmCanvasProcessor implements ElevationGridProcessor {
+export class OsmCanvasProcessor {
     readonly id: string;
-    constructor(private data: OsmVectorData, private def: OsmFeatureDef, private raise: number, private radius: number) {
+    constructor(private data: OsmVectorData, private def: OsmFeatureDef, private radius: number) {
         this.id = `osm:${def.id}`;
     }
 
-    process(grid: HeightGrid): HeightGrid {
-        const { cols, rows, heights, widthMeters, heightMeters } = grid;
+    /** Paint the feature's ways and return a `cols × rows` coverage mask (0..1), or null when there's
+     *  nothing to paint (empty data, or a line with no width). */
+    coverage(grid: HeightGrid): Float32Array | null {
+        const { cols, rows, widthMeters, heightMeters } = grid;
         const isLine = this.def.geometry === 'line';
-        if (this.raise === 0 || this.data.isEmpty() || (isLine && this.radius <= 0)) return grid;
+        if (this.data.isEmpty() || (isLine && this.radius <= 0)) return null;
 
         const canvas = document.createElement('canvas');
         canvas.width = cols;
         canvas.height = rows;
         const ctx = canvas.getContext('2d');
-        if (!ctx) return grid; // no 2d context (very old/headless env) → leave heights untouched
+        if (!ctx) return null; // no 2d context (very old/headless env) → no coverage
 
         ctx.fillStyle = '#000';
         ctx.fillRect(0, 0, cols, rows);
@@ -66,6 +67,8 @@ export class OsmCanvasProcessor implements ElevationGridProcessor {
         if (isLine) ctx.stroke(); else ctx.fill();
 
         const image = ctx.getImageData(0, 0, cols, rows).data;
-        return { ...grid, heights: addRasterRaise(image, heights, this.raise) };
+        const out = new Float32Array(cols * rows);
+        for (let i = 0; i < out.length; i++) out[i] = image[i * 4] / 255; // red channel → 0..1
+        return out;
     }
 }

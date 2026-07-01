@@ -1,7 +1,6 @@
 import type { HeightGrid } from './HeightSampler';
-import type { ElevationGridProcessor } from './model/processors';
 import { OsmCanvasProcessor } from './model/OsmCanvasProcessor';
-import { buildModelGeometry, type BuildInput } from './model/buildGeometry';
+import { buildModelGeometry, type BuildInput, type OsmBody } from './model/buildGeometry';
 import type { OsmVectorData } from './osm/OsmVectorData';
 import { OSM_FEATURES } from './osm/osmFeatures';
 
@@ -201,44 +200,37 @@ export class MapModel {
     }
 
     private build(grid: HeightGrid): ModelGeometry {
-        // Bake OSM in on this thread (the pre-pass needs a canvas), then hand the raised grid to
-        // the shared pure pipeline — the SAME code the build worker runs off-thread.
-        const input: BuildInput = { grid: this.rasterizeOsm(grid), settings: this.settings };
+        // Rasterise OSM coverage on this thread (the canvas pre-pass), then hand the pure terrain grid
+        // + those bodies to the shared pipeline — the SAME code the build worker runs off-thread.
+        const input: BuildInput = { grid, settings: this.settings, osmBodies: this.collectOsmBodies(grid) };
         return buildModelGeometry(input);
     }
 
-    /** Snapshot for an off-thread build: the OSM-raised grid + a settings copy. Runs the DOM-bound
-     *  OSM pre-pass here (the rest of the pipeline is pure and runs in the worker via
-     *  `buildModelGeometry`). Returns null when there's no grid. The returned grid is either a fresh
-     *  array (OSM active) or `this.grid` itself (no OSM) — postMessage copies it, so either is safe. */
+    /** Snapshot for an off-thread build: the pure terrain grid + a settings copy + the OSM coverage
+     *  bodies (rasterised here, since `OsmCanvasProcessor` needs a canvas the worker lacks). Returns
+     *  null when there's no grid. Grid and coverage arrays are plain typed arrays — postMessage copies
+     *  them, so it's safe to hand over `this.grid` directly. */
     prepareBuildInput(): BuildInput | null {
         if (!this.grid) return null;
-        return { grid: this.rasterizeOsm(this.grid), settings: this.getSettings() };
+        return { grid: this.grid, settings: this.getSettings(), osmBodies: this.collectOsmBodies(this.grid) };
     }
 
-    /** The DOM-bound OSM pre-pass: paint each enabled feature's raise onto the grid before any value
-     *  processing or geometry. This is the ONE main-thread stage — `OsmCanvasProcessor` needs a
-     *  canvas, so it can't run in the build worker. Returns a fresh grid (OSM active) or the input
-     *  grid unchanged (no OSM). */
-    private rasterizeOsm(grid: HeightGrid): HeightGrid {
-        for (const gp of this.osmGridProcessors()) grid = gp.process(grid);
-        return grid;
-    }
-
-    /** The enabled OSM grid processors, in registry order so overlapping features composite
-     *  deterministically. Tiling (a pure reshape) runs later, inside `buildModelGeometry`. */
-    private osmGridProcessors(): ElevationGridProcessor[] {
+    /** The DOM-bound OSM pre-pass: paint each enabled feature into a coverage mask over `grid`, to be
+     *  draped onto the terrain as its own body by `buildFeatureBody`. This is the ONE main-thread
+     *  stage — the canvas can't run in the build worker; the masks it produces are serialisable.
+     *  Registry order is preserved so overlapping features stay deterministic. */
+    private collectOsmBodies(grid: HeightGrid): OsmBody[] {
         const s = this.settings;
-        const list: ElevationGridProcessor[] = [];
+        const bodies: OsmBody[] = [];
         for (const def of OSM_FEATURES) {
             const fs = s.osm[def.id];
             const data = this.osmData.get(def.id);
-            if (fs?.enabled && data && !data.isEmpty()) {
-                const proc = new OsmCanvasProcessor(data, def, fs.raise, fs.radius);
-                list.push(proc);
-            }
+            if (!(fs?.enabled && fs.raise !== 0 && data && !data.isEmpty())) continue;
+            const raster = new OsmCanvasProcessor(data, def, fs.radius);
+            const coverage = raster.coverage(grid);
+            if (coverage) bodies.push({ id: def.id, coverage, raise: fs.raise });
         }
-        return list;
+        return bodies;
     }
 
 }

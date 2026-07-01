@@ -298,8 +298,8 @@ function startBuild(): void {
     buildPending = false;
     const id = ++buildSeq;
     appInstance?.setPreviewLoading({ phase: 'build', percent: 0 });
-    // Copy (no transfer): `input.grid` may be the model's own grid — don't detach it.
-    getBuildWorker().postMessage({ id, grid: input.grid, settings: input.settings });
+    // Copy (no transfer): `input.grid` / OSM coverage may be the model's own arrays — don't detach them.
+    getBuildWorker().postMessage({ id, grid: input.grid, settings: input.settings, osmBodies: input.osmBodies });
 }
 
 function onBuildMessage(e: MessageEvent): void {
