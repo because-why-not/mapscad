@@ -578,14 +578,21 @@ async function init(): Promise<void> {
 
     // The zoom slider's range + default. With a restored selection, cap it to the resolution the
     // mesh needs (as when drawing a new one); otherwise it's just the DEM's full range until a
-    // selection is drawn. A saved heightZoom is kept but clamped down into the capped range; an
-    // unset one (0) opens at the resolution-based default (or the DEM max with no selection).
+    // selection is drawn. A saved heightZoom is capped to the light resolution-based default
+    // (`zr.def`, the same value a fresh draw opens at) — NEVER the range max — so a reload can't
+    // silently refetch far finer DEM detail (many more tiles) than the default; an unset one (0)
+    // opens at that default too. The user can still slide up to `zr.max` afterwards.
     const savedSelection = cfg.selection;
-    const zr = (savedSelection && previewDem)
-        ? resolutionZoomRange(savedSelection, previewDem, cfg.model.resolutionLimit)
-        : { ...demZoomRange(previewDem), def: demZoomRange(previewDem).max };
+    let zr: { min: number; max: number; def: number };
+    if (savedSelection && previewDem) {
+        zr = resolutionZoomRange(savedSelection, previewDem, cfg.model.resolutionLimit);
+    } else {
+        const range = demZoomRange(previewDem);
+        zr = { ...range, def: range.max };
+    }
     const previewZoomMin = zr.min, previewZoomMax = zr.max;
-    const heightZoom = cfg.model.heightZoom > 0 ? Math.min(cfg.model.heightZoom, previewZoomMax) : zr.def;
+    // Cap the saved zoom to the light default, never higher; an unset one (0) opens there too.
+    const heightZoom = cfg.model.heightZoom > 0 ? Math.min(cfg.model.heightZoom, zr.def) : zr.def;
     model.applySettings({ ...cfg.model, heightZoom });
     // Fold the resolved DEM + sanitized settings back into the config so it's consistent.
     config.update({ demId: initialDemId, model: model.getSettings() });
