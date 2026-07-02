@@ -35,10 +35,11 @@
     const isBlocked = (f) => selectionSide > f.sizeLimit;
     const limitLabel = (f) => f.sizeLimit >= 1000 ? `${+(f.sizeLimit / 1000).toFixed(1)} km` : `${f.sizeLimit} m`;
 
-    // Per-feature download UI state, keyed by feature id: { busy, label, ready }. `ready` gates
-    // "Update preview" / Save and is reset whenever the selection changes.
+    // Per-feature download UI state, keyed by feature id: { busy, label, ready, error }. `ready` gates
+    // "Update preview" / Save and is reset whenever the selection changes. `error` holds the raw
+    // message from the last failed download/load (Overpass often 504s / rate-limits), shown verbatim.
     let downloadState = $state(untrack(() =>
-        Object.fromEntries(features.map(f => [f.id, { busy: false, label: idleLabel(f), ready: false }]))));
+        Object.fromEntries(features.map(f => [f.id, { busy: false, label: idleLabel(f), ready: false, error: '' }]))));
     // The raw object list per feature ({id,name,disabled}[]) and the single selected element (map ↔
     // list), plus a per-feature name filter the user types.
     let elements = $state(untrack(() => Object.fromEntries(features.map(f => [f.id, []]))));
@@ -65,7 +66,7 @@
     // Selection changed / cleared: drop every feature's downloaded data + working state.
     export function reset() {
         selected = null;
-        for (const f of features) { downloadState[f.id].ready = false; elements[f.id] = []; filter[f.id] = ''; marked[f.id] = {}; }
+        for (const f of features) { downloadState[f.id].ready = false; downloadState[f.id].error = ''; elements[f.id] = []; filter[f.id] = ''; marked[f.id] = {}; }
     }
 
     const isSelected = (fid, eid) => selected?.featureId === fid && selected?.elementId === eid;
@@ -187,12 +188,14 @@
         if (st.busy) return;
         st.busy = true;
         st.label = 'Downloading…';
+        st.error = ''; // clear any previous failure before retrying
         try {
             const count = await onDownload(f.id);
             st.ready = count > 0;
             st.label = count ? `${count} ${f.noun}` : `No ${f.noun} found`;
-        } catch {
+        } catch (e) {
             st.label = 'Download failed';
+            st.error = e instanceof Error ? e.message : String(e);
         } finally {
             st.busy = false;
             setTimeout(() => st.label = idleLabel(f), 2500);
@@ -223,13 +226,15 @@
         const f = features.find(x => x.id === loadTargetId);
         if (!file || !f) return;
         const st = downloadState[f.id];
+        st.error = '';
         try {
             const json = JSON.parse(await file.text());
             const count = onLoadJson(f.id, json);
             st.ready = count > 0;
             st.label = count ? `${count} ${f.noun}` : `No ${f.noun} found`;
-        } catch {
+        } catch (e) {
             st.label = 'Load failed';
+            st.error = e instanceof Error ? e.message : String(e);
         } finally {
             setTimeout(() => st.label = idleLabel(f), 2500);
         }
@@ -275,6 +280,10 @@
                     <button class="btn btn-sm flex-1" title="Save the {f.noun} as a JSON file" onclick={() => saveJson(() => onSaveJson(f.id), `${f.id}.json`)} disabled={!st.ready}>Save</button>
                     <button class="btn btn-sm flex-1" title="Load {f.noun} from a previously saved JSON file" onclick={() => pickLoad(f.id)}>Load</button>
                 </div>
+                <!-- Raw error from the last failed download/load (e.g. Overpass "504 Gateway Timeout"). -->
+                {#if st.error}
+                    <textarea class="textarea textarea-bordered textarea-xs w-full h-16 font-mono text-xs text-error resize-y whitespace-pre" readonly aria-label="{f.label} download error">{st.error}</textarea>
+                {/if}
             </div>
             <!-- Filter + object list. Type a word ("Booth") for a substring match, or full regex.
                  Mark rows (checkbox / Space, ↑/↓ to move) — Select All / Invert help build the set.
