@@ -77,7 +77,7 @@
     export function setCustomMaps(m) { mapPanel?.setCustomMaps(m); }
     export function setSelectActive(active) { mapPanel?.setSelectActive(active); }
     export function setSelectTool(tool) { mapPanel?.setSelectTool(tool); }
-    export function setHasSelection(has) { mapPanel?.setHasSelection(has); }
+    export function setHasSelection(has, sideMeters = 0) { mapPanel?.setHasSelection(has, sideMeters); }
     export function setOsmAvailable(id, has) { previewPanel?.setOsmAvailable(id, has); }
     export function setOsmElements(id, els) { mapPanel?.setOsmElements(id, els); }
     export function setOsmSelected(featureId, elementId) { mapPanel?.setOsmSelected(featureId, elementId); }

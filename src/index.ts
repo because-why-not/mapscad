@@ -386,7 +386,9 @@ function updatePreviewStats(geo: ModelGeometry | null): void {
 function onSelectionChange(corners: LonLat[] | null): void {
     config.update({ selection: corners });
     appInstance?.setPreviewVisible(!!corners); // App shows/hides the 3D panel
-    appInstance?.setHasSelection(!!corners);   // map panel shows/hides the OSM-data button
+    // The longest selection side (metres) gates which OSM features can be downloaded (Env limits).
+    const sideMeters = corners ? Math.max(...Object.values(rectExtent(corners))) : 0;
+    appInstance?.setHasSelection(!!corners, sideMeters); // map panel shows/hides the OSM-data button
     currentCorners = corners;
     // Any downloaded OSM features no longer match the new area: drop them + their preview sections.
     selectOsm(null, null);
@@ -679,7 +681,7 @@ async function init(): Promise<void> {
                 olMap?.getTargetElement()?.classList.toggle('map-crosshair', active);
             },
             // The menu sections to render (one per registry feature), so the UI is data-driven.
-            features: OSM_FEATURES.map(f => ({ id: f.id, label: f.label, noun: f.noun, hasRadius: f.geometry === 'line' })),
+            features: OSM_FEATURES.map(f => ({ id: f.id, label: f.label, noun: f.noun, hasRadius: f.geometry === 'line', sizeLimit: f.sizeLimit })),
             // Download one OSM feature for the current selection and overlay it on the map. Returns
             // the element count so the button can report it; throws bubble to the panel.
             onDownload: async (id: string) => {

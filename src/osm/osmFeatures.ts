@@ -1,4 +1,5 @@
 import type { BBox } from './bbox';
+import { Env } from '../Env';
 
 /**
  * Registry of OSM vector features. Each entry is the SINGLE place a feature is defined — its
@@ -35,6 +36,9 @@ export interface OsmFeatureDef {
     raise: number;
     /** Default brush radius in metres for `line` features (ignored for `area`). */
     radius: number;
+    /** Max selection side length (metres) this feature can be downloaded for; above it the UI
+     *  blocks the download (too many elements). From Env. */
+    sizeLimit: number;
 }
 
 /** Build a `["highway"~"^(a|b|c)$"]` anchored-alternation selector from a value list. */
@@ -58,17 +62,17 @@ export const OSM_FEATURES: OsmFeatureDef[] = [
     {
         id: 'buildings', label: 'Buildings', noun: 'buildings', geometry: 'area', minPoints: 3,
         selector: '["building"]', strokeColor: '#1f77b4', fillColor: 'rgba(31, 119, 180, 0.35)',
-        zIndex: 850, raise: 6, radius: 0,
+        zIndex: 850, raise: 6, radius: 0, sizeLimit: Env.BUILDINGS_LIMIT,
     },
     {
         id: 'streets', label: 'Streets', noun: 'streets', geometry: 'line', minPoints: 2,
         selector: highwaySelector(STREET_HIGHWAYS), strokeColor: '#ff7f0e',
-        zIndex: 880, raise: 2, radius: 12,
+        zIndex: 880, raise: 2, radius: 12, sizeLimit: Env.STREET_LIMIT,
     },
     {
         id: 'tracks', label: 'Tracks', noun: 'tracks', geometry: 'line', minPoints: 2,
         selector: highwaySelector(TRACK_HIGHWAYS), strokeColor: '#d62728',
-        zIndex: 900, raise: 2, radius: 10,
+        zIndex: 900, raise: 2, radius: 10, sizeLimit: Env.TRACK_LIMIT,
     },
 ];
 

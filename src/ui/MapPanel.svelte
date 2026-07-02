@@ -53,6 +53,9 @@
     // True once a selection exists, so the "download tracks" button can appear. Pushed in
     // from index.ts as the selection is drawn / cleared / restored.
     let hasSelection = $state(false);
+    // Longest selection side in metres, pushed alongside hasSelection — the Data tab uses it to gate
+    // each OSM download against its size limit.
+    let selectionSide = $state(0);
     // The Data tab is only reachable once an area is selected.
     let dataEnabled = $derived(hasSelection);
     // True after the selection changed while away from the Data tab — the downloaded data is now
@@ -90,8 +93,9 @@
     let boxSelectActive = $state(false);
     function toggleBoxSelect() { boxSelectActive = !boxSelectActive; onBoxSelectToggle(boxSelectActive); }
 
-    export function setHasSelection(has) {
+    export function setHasSelection(has, sideMeters = 0) {
         hasSelection = has;
+        selectionSide = sideMeters; // longest selection side (m) — gates OSM downloads by size
         if (has) selectionDirty = true; // selection changed → Data should reopen so stale data gets re-downloaded
         dataPanel?.reset();
     }
@@ -376,6 +380,7 @@
             bind:this={dataPanel}
             {features}
             {hasSelection}
+            {selectionSide}
             active={menuOpen && activeTab === 'data'}
             onRequestOpen={() => { menuOpen = true; activeTab = 'data'; }}
             {onDownload}

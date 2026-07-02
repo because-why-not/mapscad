@@ -11,6 +11,8 @@
         features = [],
         // True once an area is selected (the tab is gated on this upstream; drives the empty-state hint).
         hasSelection = false,
+        // Longest selection side in metres — a feature whose sizeLimit it exceeds is too big to download.
+        selectionSide = 0,
         // True while this panel is actually visible (drawer open on the Data tab) — gates keyboard nav.
         active = false,
         // Ask the parent to open the drawer on the Data tab (used when an element is selected on the map).
@@ -26,6 +28,10 @@
     } = $props();
 
     const idleLabel = (f) => `Download ${f.noun}`;
+    // A feature can't be downloaded when the selection is larger than its size limit (too many
+    // elements) — we show a warning instead of its buttons.
+    const isBlocked = (f) => selectionSide > f.sizeLimit;
+    const limitLabel = (f) => f.sizeLimit >= 1000 ? `${+(f.sizeLimit / 1000).toFixed(1)} km` : `${f.sizeLimit} m`;
 
     // Per-feature download UI state, keyed by feature id: { busy, label, ready }. `ready` gates
     // "Update preview" / Save and is reset whenever the selection changes.
@@ -249,6 +255,14 @@
             <div class="px-4 py-1 mt-2 first:mt-0 text-xs font-bold uppercase tracking-wider opacity-50">
                 {f.label}{#if total}<span class="ml-1 font-normal normal-case opacity-70">({filtering ? `${rows.length}/${total}` : total})</span>{/if}
             </div>
+            {#if isBlocked(f)}
+                <!-- Selection too large for this feature: block the download, explain why. -->
+                <div class="px-4 py-2">
+                    <div role="alert" class="alert alert-warning py-2 text-xs">
+                        <span>Area too large for {f.noun}. Zoom in or shrink the selection to under {limitLabel(f)} per side to download them.</span>
+                    </div>
+                </div>
+            {:else}
             <div class="px-4 py-2 flex flex-col gap-2">
                 <button class="btn btn-sm btn-block" title="Download {f.noun} in the selected area" onclick={() => downloadFeature(f)} disabled={st.busy}>
                     {#if st.busy}<span class="loading loading-spinner loading-xs"></span>{/if}
@@ -290,6 +304,7 @@
                     <button class="btn btn-xs flex-1" disabled={!hasMarks(f.id)} onclick={() => applyEnabled(f.id, false)}>Disable</button>
                     <button class="btn btn-xs flex-1" disabled={!hasMarks(f.id)} onclick={() => cancelMarks(f.id)}>Cancel</button>
                 </div>
+            {/if}
             {/if}
         {/each}
         <input type="file" accept=".json,application/json" bind:this={fileInput} onchange={loadJson} class="hidden" />
