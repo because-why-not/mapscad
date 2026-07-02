@@ -21,63 +21,18 @@ function memoryStorage(): Storage {
 
 beforeEach(() => {
     vi.stubGlobal('localStorage', memoryStorage());
-    window.location.hash = '';
 });
-
-// Open the page as if it carried this config slice in its URL hash (index.ts composes the
-// rest of the hash; the store only reads/writes the `c=` param).
-function openWithParam(param: string): void {
-    window.location.hash = 'c=' + param;
-}
 
 describe('localStorage persistence', () => {
     it('round-trips settings + selection across a fresh store', () => {
         const a = new PreviewConfigStore();
         a.update({ demId: 'dunedin_elevation_raw', selection: sel as any, model: { heightScale: 3, socketEnabled: true } });
 
-        window.location.hash = ''; // isolate from the live-URL sync — read from storage only
         const b = new PreviewConfigStore();
         expect(b.get().demId).toBe('dunedin_elevation_raw');
         expect(b.get().selection).toEqual(sel);
         expect(b.get().model.heightScale).toBe(3);
         expect(b.get().model.socketEnabled).toBe(true);
-    });
-});
-
-describe('share-link codec', () => {
-    it('round-trips through the URL hash, including non-ASCII (utf-8 path)', () => {
-        const a = new PreviewConfigStore();
-        a.update({ demId: 'tëst_é_DEM', selection: sel as any, model: { heightScale: 2.5 } });
-        const param = a.encodeParam();
-
-        localStorage.clear();          // prove the link alone carries the config
-        openWithParam(param);
-        const b = new PreviewConfigStore();
-        expect(b.get().demId).toBe('tëst_é_DEM');
-        expect(b.get().selection).toEqual(sel);
-        expect(b.get().model.heightScale).toBe(2.5);
-    });
-
-    it('does NOT carry preview-only display flags', () => {
-        const a = new PreviewConfigStore();
-        a.update({ display: { smoothShading: false } });
-        const param = a.encodeParam();
-        localStorage.clear();
-        openWithParam(param);
-        const b = new PreviewConfigStore();
-        // The shared slice omits `display`, so it falls back to the default (true).
-        expect(b.get().display.smoothShading).toBe(true);
-    });
-
-    it('a share link wins over local storage', () => {
-        const seed = new PreviewConfigStore();
-        seed.update({ demId: 'shared_dem' });
-        const param = seed.encodeParam();
-
-        localStorage.setItem('previewConfig', JSON.stringify({ version: 1, demId: 'local_dem' }));
-        openWithParam(param);
-        const store = new PreviewConfigStore();
-        expect(store.get().demId).toBe('shared_dem');
     });
 });
 

@@ -18,7 +18,7 @@ import { OsmOverlay } from './OsmOverlay';
 import { fetchFeatureRaw, parseWays, waysFromJson, type OsmElement } from './osm/OverpassFeature';
 import { OsmVectorData } from './osm/OsmVectorData';
 import { OSM_FEATURES, osmFeature } from './osm/osmFeatures';
-import { sampleSelectionHeights, rectExtent, groundResolution, zoomForResolution, tileCoverage } from './HeightSampler';
+import { sampleSelectionHeights, rectExtent, tileCoverage } from './HeightSampler';
 import { TerrainPreview } from './TerrainPreview';
 import { MapModel, SelectionShape, type ModelGeometry } from './MapModel';
 import { PreviewConfigStore } from './PreviewConfig';
@@ -26,6 +26,7 @@ import { exportModelStl } from './StlMaker';
 import { exportModel3mf } from './ThreeMFMaker';
 import { estimateMemory, measureMemory, formatBytes, memoryLevel, isOverBudget } from './memory';
 import type { GeoView, MapEngine } from './engine/MapEngine';
+import { groundResolution, zoomForResolution } from './MathHelper';
 
 // This file is the composition root: the only place that names concrete engines.
 // Everything it wires together (MapController, App, persistence) is engine-agnostic.
@@ -446,30 +447,45 @@ function saveActive(id: string): void {
 }
 
 // --- URL state ---------------------------------------------------------------
-// The hash carries the human-readable map state always (map name + lat/lng/zoom) and the
-// opaque export config (`c=`) ONLY once an area is selected, e.g.
+// The hash carries only human-readable state: the map (name + lat/lng/zoom) always, and the
+// selected area (corner lon/lats + shape) once one exists, e.g.
 //   #map=north_island_hillshade_8m&lat=-41.27&lng=174.78&z=8.4
-//   …&c=<base64>            (added after a selection)
+//   …&shape=oval&sel=174.7,-41.2;174.9,-41.2;174.9,-41.4;174.7,-41.4   (after a selection)
+// The rest of the export config (DEM, model settings) is NOT shared — it lives in localStorage.
 
-/** Parse the human-readable map state from the URL hash (map name + view), if present. */
-function readUrlMapState(): { map?: string; view?: GeoView } {
+/** Parse the human-readable state from the URL hash (map, view, selected area), if present. */
+function readUrlMapState(): { map?: string; view?: GeoView; selection?: LonLat[]; shape?: SelectionShape } {
     try {
         const params = new URLSearchParams(window.location.hash.replace(/^#/, ''));
         const lat = parseFloat(params.get('lat') ?? '');
         const lng = parseFloat(params.get('lng') ?? '');
         const zoom = parseFloat(params.get('z') ?? '');
         const view = [lat, lng, zoom].every(Number.isFinite) ? { lat, lng, zoom } : undefined;
-        return { map: params.get('map') || undefined, view };
+        const shape = params.get('shape') === SelectionShape.Oval ? SelectionShape.Oval
+            : params.get('shape') === SelectionShape.Rectangle ? SelectionShape.Rectangle : undefined;
+        return { map: params.get('map') || undefined, view, selection: parseSelection(params.get('sel')), shape };
     } catch (e) { Env.error('read url map state', e); return {}; }
 }
 
-/** Compose the full hash URL: readable map state, plus `c=` only when a selection exists. */
+/** `lon,lat;lon,lat;lon,lat;lon,lat` -> four [lon,lat] corners, or undefined if malformed. */
+function parseSelection(s: string | null): LonLat[] | undefined {
+    if (!s) return undefined;
+    const corners = s.split(';').map(pair => pair.split(',').map(Number) as LonLat);
+    if (corners.length !== 4 || corners.some(c => c.length !== 2 || !c.every(Number.isFinite))) return undefined;
+    return corners;
+}
+
+/** Compose the full hash URL: readable map state, plus the selected area when one exists. */
 function composeShareUrl(): string {
     const v = controller?.getView() ?? DEFAULT_VIEW;
     const params: string[] = [];
     if (controller?.activeId) params.push(`map=${encodeURIComponent(controller.activeId)}`);
     params.push(`lat=${v.lat.toFixed(5)}`, `lng=${v.lng.toFixed(5)}`, `z=${v.zoom.toFixed(2)}`);
-    if (config.get().selection) params.push(`c=${config.encodeParam()}`);
+    const selection = config.get().selection;
+    if (selection) {
+        params.push(`shape=${config.get().model.shape}`);
+        params.push(`sel=${selection.map(c => `${c[0].toFixed(5)},${c[1].toFixed(5)}`).join(';')}`);
+    }
     const url = new URL(window.location.href);
     url.hash = params.join('&');
     return url.toString();
@@ -545,7 +561,14 @@ async function init(): Promise<void> {
     const previewDems = maps
         .filter(m => m.mmapsrv.type === 'elevation')
         .map(m => ({ id: m.name, name: demLabel(stripLocalPrefix(m.name)) }));
-    // Resolve the DEM from the saved/shared config, falling back to the default elevation
+    // A shared link carries the selected area (corners + shape) in readable form — adopt it so
+    // it wins over the last local selection, then read the merged config below.
+    const urlMapState = readUrlMapState();
+    if (urlMapState.selection) {
+        config.update({ selection: urlMapState.selection });
+        if (urlMapState.shape) config.update({ model: { ...config.get().model, shape: urlMapState.shape } });
+    }
+    // Resolve the DEM from the saved config, falling back to the default elevation
     // source (or whatever the manifest offers).
     const cfg = config.get();
     const initialDemId = (cfg.demId && mapsById[cfg.demId]?.mmapsrv.type === 'elevation')
@@ -589,9 +612,8 @@ async function init(): Promise<void> {
         category: s.category,
     }));
 
-    // Map name + view come from the URL hash if present (human-readable, shareable), else
-    // fall back to the last-used local values, else defaults.
-    const urlMapState = readUrlMapState();
+    // Map name + view come from the URL hash if present (read above), else fall back to the
+    // last-used local values, else defaults.
     const allIds = [...tileProviders.map(p => p.id), ...customMaps.map(c => c.id)];
     const saved = localStorage.getItem('activeProvider');
     const initialId = (urlMapState.map && allIds.includes(urlMapState.map)) ? urlMapState.map

@@ -2,10 +2,10 @@ import { test, expect } from '@playwright/test';
 import { stubServer } from './_stub';
 
 // The "map-only" link: the URL hash carries human-readable map state (map name + view) and
-// NO opaque `c=` blob until an area is selected. Opening such a link should position the
+// NO selection params until an area is selected. Opening such a link should position the
 // map and select the named source, with the URL staying human-readable.
 
-test('a map-only link applies map name + view, with no c= blob', async ({ page }) => {
+test('a map-only link applies map name + view, with no selection params', async ({ page }) => {
     await stubServer(page);
 
     // Open with only the readable params — a specific (non-default) source + view.
@@ -24,8 +24,8 @@ test('a map-only link applies map name + view, with no c= blob', async ({ page }
     expect(page.url()).toContain('lng=174.78');
     expect(page.url()).toContain('z=8.4');
 
-    // …but with no selection, the opaque export blob must NOT appear.
-    expect(page.url()).not.toContain('c=');
+    // …but with no selection, no selection params must appear.
+    expect(page.url()).not.toContain('sel=');
 });
 
 test('the active source is highlighted in the menu', async ({ page }) => {

@@ -48,12 +48,13 @@ export async function stubServer(page: Page): Promise<void> {
     await page.route('**/elevation-tiles-prod/**', blank('image/png'));
 }
 
-/** Decode the export config from a URL's `c=` hash param (null if there's no selection). */
-export function configFromUrl(url: string): any | null {
-    const hash = new URL(url).hash.replace(/^#/, '');
-    const c = new URLSearchParams(hash).get('c');
-    if (!c) return null;
-    return JSON.parse(Buffer.from(c, 'base64url').toString('utf8'));
+/** Read the selected area from a URL's readable hash params (null if there's no selection). */
+export function configFromUrl(url: string): { selection: number[][]; shape: string | null } | null {
+    const params = new URLSearchParams(new URL(url).hash.replace(/^#/, ''));
+    const sel = params.get('sel');
+    if (!sel) return null;
+    const selection = sel.split(';').map(p => p.split(',').map(Number));
+    return { selection, shape: params.get('shape') };
 }
 
 /** Great-circle distance in metres between two [lon, lat] points. */

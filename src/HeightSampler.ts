@@ -5,10 +5,6 @@ import { TerrariumMapData } from './dem/TerrariumMapData';
 import { downloadRaster, type DownloadOptions } from './dem/TileDownloader';
 import { DEFAULT_TILE_SIZE, haversine, groundResolution } from './MathHelper';
 
-// Re-exported so callers can keep importing the ground-resolution / zoom math from the sampler
-// facade; the formulas themselves live in MathHelper.
-export { groundResolution, zoomForResolution } from './MathHelper';
-
 /**
  * Orchestrates the DEM height pipeline: it owns the geometry (which tiles a selection
  * covers at a zoom) and ties the three stages together —
