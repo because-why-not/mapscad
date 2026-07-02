@@ -73,8 +73,9 @@
     export function setCustomMaps(m) { mapPanel?.setCustomMaps(m); }
     export function setSelectActive(active) { mapPanel?.setSelectActive(active); }
     export function setSelectTool(tool) { mapPanel?.setSelectTool(tool); }
-    export function setHasSelection(has, sideMeters = 0) { mapPanel?.setHasSelection(has, sideMeters); }
+    export function setHasSelection(has, sideMeters = 0, resetData = true) { mapPanel?.setHasSelection(has, sideMeters, resetData); }
     export function setOsmAvailable(id, has) { previewPanel?.setOsmAvailable(id, has); }
+    export function setOsmStale(id, stale) { mapPanel?.setOsmStale(id, stale); }
     export function setOsmElements(id, els) { mapPanel?.setOsmElements(id, els); }
     export function setOsmSelected(featureId, elementId) { mapPanel?.setOsmSelected(featureId, elementId); }
     export function addOsmMarks(id, ids) { mapPanel?.addOsmMarks(id, ids); }

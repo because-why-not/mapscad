@@ -35,11 +35,12 @@
     const isBlocked = (f) => selectionSide > f.sizeLimit;
     const limitLabel = (f) => f.sizeLimit >= 1000 ? `${+(f.sizeLimit / 1000).toFixed(1)} km` : `${f.sizeLimit} m`;
 
-    // Per-feature download UI state, keyed by feature id: { busy, label, ready, error }. `ready` gates
-    // "Update preview" / Save and is reset whenever the selection changes. `error` holds the raw
-    // message from the last failed download/load (Overpass often 504s / rate-limits), shown verbatim.
+    // Per-feature download UI state, keyed by feature id: { busy, label, ready, error, stale }. `ready`
+    // gates "Update preview" / Save. `error` holds the raw message from the last failed download/load
+    // (Overpass often 504s / rate-limits), shown verbatim. `stale` is set when the selection is edited
+    // (the data is kept + re-projected, but may not cover the shifted area) — cleared on re-download.
     let downloadState = $state(untrack(() =>
-        Object.fromEntries(features.map(f => [f.id, { busy: false, label: idleLabel(f), ready: false, error: '' }]))));
+        Object.fromEntries(features.map(f => [f.id, { busy: false, label: idleLabel(f), ready: false, error: '', stale: false }]))));
     // The raw object list per feature ({id,name,disabled}[]) and the single selected element (map ↔
     // list), plus a per-feature name filter the user types.
     let elements = $state(untrack(() => Object.fromEntries(features.map(f => [f.id, []]))));
@@ -52,6 +53,8 @@
 
     // --- imperative API, forwarded from MapPanel (which index.ts drives) ---
     export function setElements(id, els) { elements[id] = els; marked[id] = {}; }
+    // Flag/unflag a feature's data as possibly not covering the (edited) selection.
+    export function setStale(id, v) { if (downloadState[id]) downloadState[id].stale = v; }
     export function setSelected(featureId, elementId) {
         selected = featureId !== null && elementId !== null ? { featureId, elementId } : null;
         // Selecting an element (e.g. by clicking it on the map) opens the drawer so the user sees the
@@ -66,7 +69,7 @@
     // Selection changed / cleared: drop every feature's downloaded data + working state.
     export function reset() {
         selected = null;
-        for (const f of features) { downloadState[f.id].ready = false; downloadState[f.id].error = ''; elements[f.id] = []; filter[f.id] = ''; marked[f.id] = {}; }
+        for (const f of features) { downloadState[f.id].ready = false; downloadState[f.id].error = ''; downloadState[f.id].stale = false; elements[f.id] = []; filter[f.id] = ''; marked[f.id] = {}; }
     }
 
     const isSelected = (fid, eid) => selected?.featureId === fid && selected?.elementId === eid;
@@ -191,6 +194,7 @@
         st.error = ''; // clear any previous failure before retrying
         try {
             const count = await onDownload(f.id);
+            st.stale = false; // fresh data for the current area
             st.ready = count > 0;
             st.label = count ? `${count} ${f.noun}` : `No ${f.noun} found`;
         } catch (e) {
@@ -230,6 +234,7 @@
         try {
             const json = JSON.parse(await file.text());
             const count = onLoadJson(f.id, json);
+            st.stale = false;
             st.ready = count > 0;
             st.label = count ? `${count} ${f.noun}` : `No ${f.noun} found`;
         } catch (e) {
@@ -280,6 +285,13 @@
                     <button class="btn btn-sm flex-1" title="Save the {f.noun} as a JSON file" onclick={() => saveJson(() => onSaveJson(f.id), `${f.id}.json`)} disabled={!st.ready}>Save</button>
                     <button class="btn btn-sm flex-1" title="Load {f.noun} from a previously saved JSON file" onclick={() => pickLoad(f.id)}>Load</button>
                 </div>
+                <!-- The selection was edited after downloading: data is kept + re-projected, but may
+                     not cover the shifted area. Cleared once re-downloaded. -->
+                {#if st.stale}
+                    <div role="alert" class="alert alert-warning py-1 text-xs">
+                        <span>Selection changed — data may not cover the new area. Re-download to refresh.</span>
+                    </div>
+                {/if}
                 <!-- Raw error from the last failed download/load (e.g. Overpass "504 Gateway Timeout"). -->
                 {#if st.error}
                     <textarea class="textarea textarea-bordered textarea-xs w-full h-16 font-mono text-xs text-error resize-y whitespace-pre" readonly aria-label="{f.label} download error">{st.error}</textarea>

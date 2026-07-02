@@ -392,15 +392,9 @@ function updatePreviewStats(geo: ModelGeometry | null): void {
     });
 }
 
-/** Single place the selection state fans out: persistence, panel visibility, model. */
-function onSelectionChange(corners: LonLat[] | null): void {
-    config.update({ selection: corners });
-    appInstance?.setPreviewVisible(!!corners); // App shows/hides the 3D panel
-    // The longest selection side (metres) gates which OSM features can be downloaded (Env limits).
-    const sideMeters = corners ? Math.max(...Object.values(rectExtent(corners))) : 0;
-    appInstance?.setHasSelection(!!corners, sideMeters); // map panel shows/hides the OSM-data button
-    currentCorners = corners;
-    // Any downloaded OSM features no longer match the new area: drop them + their preview sections.
+/** Drop every downloaded OSM feature — elements, 2D overlays, preview binding and UI. Used when the
+ *  selection is CLEARED; a mere edit keeps the data and re-projects it to the new corners instead. */
+function clearOsmData(): void {
     selectOsm(null, null);
     previewOsm.clear();
     for (const def of OSM_FEATURES) {
@@ -410,8 +404,37 @@ function onSelectionChange(corners: LonLat[] | null): void {
         appInstance?.setOsmAvailable(def.id, false);
         pushOsmElements(def.id); // empties the object list
     }
-    if (corners) resample();
-    else model.setGrid(null); // notifies -> preview clears, stats null
+}
+
+/** Single place the selection state fans out: persistence, panel visibility, model. */
+function onSelectionChange(corners: LonLat[] | null): void {
+    const hadSelection = !!currentCorners;
+    config.update({ selection: corners });
+    appInstance?.setPreviewVisible(!!corners); // App shows/hides the 3D panel
+    // The longest selection side (metres) gates which OSM features can be downloaded (Env limits).
+    const sideMeters = corners ? Math.max(...Object.values(rectExtent(corners))) : 0;
+    currentCorners = corners;
+
+    if (!corners) {
+        // Selection cleared: nothing to sample, so drop all downloaded data + reset the data panel.
+        appInstance?.setHasSelection(false, 0, true);
+        clearOsmData();
+        model.setGrid(null); // notifies -> preview clears, stats null
+        return;
+    }
+
+    // A brand-new selection starts clean (reset the panel); an EDIT of an existing one KEEPS the
+    // downloaded data — the rasteriser re-clips it to the new grid on resample (syncOsmField), and the
+    // bbox only shifts slightly — but flags it stale so the user knows it may miss the shifted area and
+    // can re-download (Overpass rate-limits make a silent wipe an expensive click to lose).
+    const isEdit = hadSelection;
+    appInstance?.setHasSelection(true, sideMeters, !isEdit);
+    if (isEdit) {
+        for (const def of OSM_FEATURES) {
+            if (osmData.has(def.id)) appInstance?.setOsmStale(def.id, true);
+        }
+    }
+    resample(); // re-sample the DEM + re-sync any preview-added features to the new corners
 }
 
 /** A selection the user just drew/edited. A brand-new one defaults its heightmap zoom from the

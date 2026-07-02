@@ -87,12 +87,15 @@
     let boxSelectActive = $state(false);
     function toggleBoxSelect() { boxSelectActive = !boxSelectActive; onBoxSelectToggle(boxSelectActive); }
 
-    export function setHasSelection(has, sideMeters = 0) {
+    export function setHasSelection(has, sideMeters = 0, resetData = true) {
         hasSelection = has;
         selectionSide = sideMeters; // longest selection side (m) — gates OSM downloads by size
         if (has) selectionDirty = true; // selection changed → Data should reopen so stale data gets re-downloaded
-        dataPanel?.reset();
+        // A cleared or brand-new selection resets the panel; an edit keeps the (re-projected) data and
+        // instead flags it stale (see setOsmStale), so a slight nudge doesn't discard a download.
+        if (resetData) dataPanel?.reset();
     }
+    export function setOsmStale(id, stale) { dataPanel?.setStale(id, stale); }
 
     // Aspect-ratio lock for drawing/resizing (session-only). 'free' or a 'w:h' preset, or
     // 'custom' with the two numbers below. Locked to width:height = halfX/halfY.
@@ -303,6 +306,9 @@
             <button class="btn btn-ghost btn-sm btn-circle text-primary-content self-center mx-1" aria-label="Close menu" onclick={() => menuOpen = false}>✕</button>
         </div>
 
+        <!-- The Selection menu is unmounted when inactive (it only mirrors parent state), but the Data
+             panel below stays MOUNTED and merely hidden — switching to the Selection tab to edit the
+             area must not destroy its downloaded lists / per-feature state. -->
         {#if activeTab === 'selection'}
         <div class="overflow-y-auto flex-1 py-2">
             {#each sections as section (section.title)}
@@ -339,23 +345,24 @@
                 </div>
             {/if}
         </div>
-        {:else}
-        <OsmDataPanel
-            bind:this={dataPanel}
-            {features}
-            {hasSelection}
-            {selectionSide}
-            active={menuOpen && activeTab === 'data'}
-            onRequestOpen={() => { menuOpen = true; activeTab = 'data'; }}
-            {onDownload}
-            {onUpdatePreview}
-            {onSaveJson}
-            {onLoadJson}
-            {onSelectElement}
-            {onSetEnabled}
-            {onHoverElement}
-            {onMarksChange}
-        />
         {/if}
+        <div class="flex-1 flex flex-col min-h-0 {activeTab === 'data' ? '' : 'hidden'}">
+            <OsmDataPanel
+                bind:this={dataPanel}
+                {features}
+                {hasSelection}
+                {selectionSide}
+                active={menuOpen && activeTab === 'data'}
+                onRequestOpen={() => { menuOpen = true; activeTab = 'data'; }}
+                {onDownload}
+                {onUpdatePreview}
+                {onSaveJson}
+                {onLoadJson}
+                {onSelectElement}
+                {onSetEnabled}
+                {onHoverElement}
+                {onMarksChange}
+            />
+        </div>
     </div>
 </div>
