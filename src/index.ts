@@ -567,7 +567,7 @@ async function init(): Promise<void> {
     // toggle; each DEM has its own zoom range, so switching also moves the zoom.
     const previewDems = maps
         .filter(m => m.mmapsrv.type === 'elevation')
-        .map(m => ({ id: m.name, name: demLabel(stripLocalPrefix(m.name)) }));
+        .map(m => ({ id: m.name, name: demLabel(stripLocalPrefix(m.name)), attribution: m.attributionDetail }));
     // A shared link carries the selected area (corners + shape) in readable form — adopt it so
     // it wins over the last local selection, then read the merged config below.
     const urlMapState = readUrlMapState();

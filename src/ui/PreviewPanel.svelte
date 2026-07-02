@@ -1,5 +1,7 @@
 <script>
     import { untrack } from 'svelte';
+    import Attribution from './Attribution.svelte';
+    import { OSM_DATA_API } from '../osm/dataSources';
 
     let {
         style = '',
@@ -53,6 +55,11 @@
     // Set the active source without firing onDemChange (index.ts already switched the DEM).
     export function setDem(id) { demId = id; }
 
+    // Attribution shown at the bottom of the menu: the elevation source in use, plus the OSM data
+    // credit whenever any downloaded feature is actually included in the model.
+    let demAttribution = $derived(dems.find(d => d.id === demId)?.attribution);
+    let usesOsmData = $derived(features.some(f => osmAvailable[f.id] && osmSettings[f.id]?.enabled));
+
     const memColor = { ok: '', warn: 'text-warning', high: 'text-error' };
     const fmt = n => n.toLocaleString();
     const fmtArea = n => n >= 100 ? Math.round(n).toLocaleString() : n.toFixed(n >= 10 ? 1 : 2);
@@ -84,7 +91,7 @@
         const out = {};
         for (const f of features) {
             const s = src[f.id] ?? {};
-            out[f.id] = { enabled: s.enabled ?? false, raise: s.raise ?? 0, radius: s.radius ?? 0, separate: s.separate ?? true };
+            out[f.id] = { enabled: s.enabled ?? false, raise: s.raise ?? 0, radius: s.radius ?? 0, separate: s.separate ?? false };
         }
         return out;
     }));
@@ -333,6 +340,14 @@
                 </div>
                 <button class="btn btn-sm btn-ghost bg-base-100" onclick={shareLink}>{shareLabel}</button>
             </div>
+
+            <!-- Attribution for what actually went into the model: the elevation source, plus the
+                 OSM data source when any downloaded feature is included. -->
+            {#if demAttribution || usesOsmData}
+                <div class="px-4 py-1 mt-2 text-xs font-bold uppercase tracking-wider opacity-50">Attribution</div>
+                {#if demAttribution}<Attribution attribution={demAttribution} />{/if}
+                {#if usesOsmData}<Attribution attribution={OSM_DATA_API.attribution} />{/if}
+            {/if}
         </div>
     </div>
 </div>

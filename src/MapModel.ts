@@ -96,7 +96,7 @@ export const DEFAULT_MODEL_SETTINGS: ModelSettings = {
  *  raise/radius. The shape stays generic so a new registry entry needs no change here. */
 function defaultOsmSettings(): Record<string, OsmFeatureSettings> {
     const osm: Record<string, OsmFeatureSettings> = {};
-    for (const def of OSM_FEATURES) osm[def.id] = { enabled: false, raise: def.raise, radius: def.radius, separate: true };
+    for (const def of OSM_FEATURES) osm[def.id] = { enabled: false, raise: def.raise, radius: def.radius, separate: false };
     return osm;
 }
 
@@ -280,9 +280,9 @@ function sanitizeOsm(s: any): Record<string, OsmFeatureSettings> {
         const raise = cur ? num(cur.raise, def.raise) : num(legacy && s?.[legacy.raise], def.raise);
         const radius = cur ? num(cur.radius, def.radius)
             : num(legacy?.radius ? s?.[legacy.radius] : undefined, def.radius);
-        // Default to a separate body (the colourable multi-object workflow); legacy configs with no
-        // flag opt in too. Set false to fold the feature back into the terrain surface.
-        const separate = cur && 'separate' in cur ? !!cur.separate : true;
+        // Default to folding the feature into the terrain surface; set true for a separate body
+        // (the colourable multi-object workflow). Legacy configs with no flag default off too.
+        const separate = cur && 'separate' in cur ? !!cur.separate : false;
         out[def.id] = { enabled, raise, radius: Math.max(0, radius), separate };
     }
     return out;
