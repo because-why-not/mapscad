@@ -5,9 +5,8 @@ import { Env } from './Env';
 import { fetchTileMapManifest, ManifestMap } from './TileMapManifest';
 import { EXTERNAL_DEMS } from './externalDems';
 import { EXTERNAL_MAPS } from './externalMaps';
-import { PROVIDER_CATEGORY } from './mapCategories';
 import { prettifyMapName, iconForMapType, LOCAL_MAP_PREFIX, stripLocalPrefix } from './mapMeta';
-import { availableCustomMaps } from './customMaps';
+import { availableCustomMaps, elevationGroup } from './customMaps';
 import { MapController } from './MapController';
 import { OpenLayersEngine } from './engine/OpenLayersEngine';
 import { MapLibreTerrainEngine } from './engine/MapLibreTerrainEngine';
@@ -31,12 +30,7 @@ import { groundResolution, zoomForResolution, type LonLat } from './mathHelper';
 // This file is the composition root: the only place that names concrete engines.
 // Everything it wires together (MapController, App, persistence) is engine-agnostic.
 
-const DEFAULT_VIEW: GeoView = { lng: 170.5028, lat: -45.8788, zoom: 13 }; // Dunedin
-
-// Elevation source for the 3D preview. The heightmap zoom (a model setting) now drives
-// detail: one mesh vertex per DEM pixel at that zoom, so density is set by zoom, not by
-// the selection size.
-const PREVIEW_DEM = 'dunedin_elevation_raw';
+const DEFAULT_VIEW: GeoView = { lng: 174.82131, lat: -41.14554, zoom: 6 }; 
 
 let appInstance: any = null;
 let previewDem: ManifestMap | undefined;
@@ -558,15 +552,10 @@ async function init(): Promise<void> {
         mapsById[name] ? name : (mapsById[LOCAL_MAP_PREFIX + name] ? LOCAL_MAP_PREFIX + name : null);
     const customSpecs = availableCustomMaps(mapsById);
     // Resolve any active map source to the DEM it represents (used to default the preview
-    // source when a brand-new selection is drawn). Raw DEM layers map to themselves; custom
-    // maps to their demSource; server hillshade layers via PROVIDER_CATEGORY.dem.
+    // source when a brand-new selection is drawn). Raw DEM layers map to themselves; the
+    // synthesized 2D/3D hillshades map to their demSource.
     for (const m of maps) if (m.mmapsrv.type === 'elevation') demBySource[m.name] = m.name;
     for (const s of customSpecs) demBySource[s.id] = s.demSource;
-    for (const [name, cat] of Object.entries(PROVIDER_CATEGORY)) {
-        if (!cat.dem) continue;
-        const src = resolveSource(name), dem = resolveSource(cat.dem);
-        if (src && dem) demBySource[src] = dem;
-    }
     // The 3D preview can be built from any elevation DEM the server advertises (the
     // manifest tags those with mmapsrv.type === 'elevation'). Expose them all as a source
     // toggle; each DEM has its own zoom range, so switching also moves the zoom.
@@ -580,12 +569,11 @@ async function init(): Promise<void> {
         config.update({ selection: urlMapState.selection });
         if (urlMapState.shape) config.update({ model: { ...config.get().model, shape: urlMapState.shape } });
     }
-    // Resolve the DEM from the saved config, falling back to the default elevation
-    // source (or whatever the manifest offers).
+    // Resolve the DEM from the saved config, else the first elevation source the manifest offers.
     const cfg = config.get();
     const initialDemId = (cfg.demId && mapsById[cfg.demId]?.mmapsrv.type === 'elevation')
         ? cfg.demId
-        : (resolveSource(PREVIEW_DEM) ?? previewDems[0]?.id ?? '');
+        : (previewDems[0]?.id ?? '');
     previewDem = mapsById[initialDemId];
 
     // The zoom slider's range + default. With a restored selection, cap it to the resolution the
@@ -614,14 +602,16 @@ async function init(): Promise<void> {
     const initialPreviewSettings: Record<string, any> = { ...model.getSettings(), smoothShading: cfg.display.smoothShading };
 
     const tileProviders = maps.map(m => {
-        const cat = PROVIDER_CATEGORY[stripLocalPrefix(m.name)]; // undefined for ungrouped maps
+        // Elevation DEMs are grouped with their synthesized 2D/3D hillshades under one heading
+        // (derived from the DEM name, never hardcoded); the raw layer is the "Raw" entry there.
+        const category = m.mmapsrv.type === 'elevation' ? elevationGroup(m.name) : undefined;
         return {
             id: m.name,
-            // Inside a source category the header already names the source, so entries use a
-            // short label (Raw / 2D Hillshade); ungrouped maps keep their prettified name.
-            name: cat ? cat.label : (m.prettyName ?? prettifyMapName(stripLocalPrefix(m.name))),
-            icon: cat?.icon ?? iconForMapType(m.mmapsrv.type),
-            category: cat?.category,
+            // Inside a category the header already names the source, so the entry is just "Raw";
+            // ungrouped maps keep their prettified name.
+            name: category ? 'Raw' : (m.prettyName ?? prettifyMapName(stripLocalPrefix(m.name))),
+            icon: iconForMapType(m.mmapsrv.type),
+            category,
             server: m.name.startsWith(LOCAL_MAP_PREFIX),
             attribution: m.attributionDetail,
         };
