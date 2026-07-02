@@ -615,16 +615,23 @@ async function init(): Promise<void> {
             icon: cat?.icon ?? iconForMapType(m.mmapsrv.type),
             category: cat?.category,
             server: m.name.startsWith(LOCAL_MAP_PREFIX),
+            attribution: m.attributionDetail,
         };
     });
-    const customMaps = customSpecs.map(s => ({
-        id: s.id,
-        name: s.name,
-        icon: s.icon,
-        sun: isSunCapable(s),
-        shadows: false,
-        category: s.category,
-    }));
+    const customMaps = customSpecs.map(s => {
+        // A custom map (2D/3D hillshade, imagery) has no attribution of its own — it derives from
+        // the DEM/imagery source it renders, so surface the underlying source's attribution.
+        const srcId = resolveSource(s.demSource);
+        return {
+            id: s.id,
+            name: s.name,
+            icon: s.icon,
+            sun: isSunCapable(s),
+            shadows: false,
+            category: s.category,
+            attribution: srcId ? mapsById[srcId]?.attributionDetail : undefined,
+        };
+    });
 
     // Map name + view come from the URL hash if present (read above), else fall back to the
     // last-used local values, else defaults.

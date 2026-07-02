@@ -114,6 +114,13 @@
     }
     function emitAspect() { onAspectChange(aspectRatio()); }
 
+    // Structured attribution for the selected map, shown at the top of the menu (undefined for
+    // server maps that only carry a plain attribution string).
+    let activeAttribution = $derived(
+        (providerList.find(p => p.id === activeProviderId)
+            ?? customList.find(c => c.id === activeProviderId))?.attribution
+    );
+
     let sunEnabled = $derived(!!customList.find(c => c.id === activeProviderId)?.sun);
     let shadowsCapable = $derived(!!customList.find(c => c.id === activeProviderId)?.shadows);
     let timeLabel = $derived(formatTime(minutesOfDay));
@@ -331,6 +338,16 @@
 
         {#if activeTab === 'selection'}
         <div class="overflow-y-auto flex-1 py-2">
+            {#if activeAttribution}
+                <div class="mx-3 mb-2 p-2 rounded bg-base-100 text-xs leading-5">
+                    <div>Provided by <span class="font-semibold">{activeAttribution.provider}</span></div>
+                    <div><a class="link link-primary" href={activeAttribution.homepage.url} target="_blank" rel="noopener noreferrer">{activeAttribution.homepage.text}</a></div>
+                    <div>License: <a class="link link-primary" href={activeAttribution.license.url} target="_blank" rel="noopener noreferrer">{activeAttribution.license.text}</a></div>
+                    <div class="mt-1 pt-1 border-t border-base-300 opacity-70">
+                        {#each activeAttribution.credit as span}{#if typeof span === 'string'}{span}{:else}<a class="link" href={span.url} target="_blank" rel="noopener noreferrer">{span.text}</a>{/if}{/each}
+                    </div>
+                </div>
+            {/if}
             {#each sections as section (section.title)}
                 {@const isOpen = openSection === section.title}
                 {@const hasActive = section.items.some(i => i.id === activeProviderId)}

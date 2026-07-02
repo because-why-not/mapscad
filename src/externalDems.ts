@@ -14,6 +14,20 @@ export const EXTERNAL_DEMS: ManifestMap[] = [
     {
         name: 'mapterhorn_elevation',
         attribution: "© Mapterhorn · Copernicus GLO-30",
+        attributionDetail: {
+            // Mapterhorn composites many regional datasets, each with its own licensing terms, so
+            // there is no single license — point at their per-region attribution page instead.
+            provider: 'Mapterhorn',
+            homepage: { text: 'mapterhorn.com', url: 'https://mapterhorn.com' },
+            license: { text: 'Varies by region', url: 'https://mapterhorn.com/attribution' },
+            credit: [
+                '© ',
+                { text: 'Mapterhorn', url: 'https://mapterhorn.com' },
+                ' — see ',
+                { text: 'mapterhorn.com/attribution', url: 'https://mapterhorn.com/attribution' },
+                ' for per-region data sources and licenses',
+            ],
+        },
         tiles: ['https://tiles.mapterhorn.com/{z}/{x}/{y}.webp'],
         minzoom: 0,
         // Global coverage is Copernicus GLO-30 to z12. Above that the endpoint has data
@@ -35,6 +49,17 @@ export const EXTERNAL_DEMS: ManifestMap[] = [
     {
         name: 'aws_terrain_elevation',
         attribution: 'Terrain Tiles © Mapzen/Tilezen, hosted on AWS Open Data',
+        attributionDetail: {
+            provider: 'Mapzen / Tilezen Terrain Tiles',
+            homepage: { text: 'registry.opendata.aws/terrain-tiles', url: 'https://registry.opendata.aws/terrain-tiles/' },
+            license: { text: 'CC BY 4.0 / public domain (mixed)', url: 'https://github.com/tilezen/joerd/blob/master/docs/attribution.md' },
+            credit: [
+                'Terrain Tiles © ',
+                { text: 'Mapzen / Tilezen', url: 'https://github.com/tilezen/joerd/blob/master/docs/attribution.md' },
+                ', hosted on ',
+                { text: 'AWS Open Data', url: 'https://registry.opendata.aws/terrain-tiles/' },
+            ],
+        },
         tiles: ['https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png'],
         minzoom: 0,
         maxzoom: 15,
