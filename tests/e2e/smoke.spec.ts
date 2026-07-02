@@ -49,7 +49,7 @@ test('app loads and mounts', async ({ page }) => {
 
     await page.goto('/');
     await expect(page).toHaveTitle('Map');
-    // The map panel is always visible on load (the 3D preview is hidden until toggled on),
-    // so its menu button is the reliable "Svelte mounted" signal.
-    await expect(page.getByRole('button', { name: 'Open map menu' })).toBeVisible();
+    // The map panel is always visible on load (the 3D preview is hidden until toggled on), so its
+    // Selection/Data tab strip is the reliable "Svelte mounted" signal.
+    await expect(page.getByRole('button', { name: 'Selection' })).toBeVisible();
 });

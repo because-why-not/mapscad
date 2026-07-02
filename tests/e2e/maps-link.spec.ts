@@ -10,7 +10,7 @@ test('a map-only link applies map name + view, with no selection params', async 
 
     // Open with only the readable params — a specific (non-default) source + view.
     await page.goto('/#map=opentopomap&lat=-41.27000&lng=174.78000&z=8.40');
-    await expect(page.getByRole('button', { name: 'Open map menu' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Selection' })).toBeVisible();
 
     // The z= param drove the initial zoom readout (the badge over the map).
     await expect(page.getByText(/^z8/)).toBeVisible();
@@ -31,7 +31,8 @@ test('a map-only link applies map name + view, with no selection params', async 
 test('the active source is highlighted in the menu', async ({ page }) => {
     await stubServer(page);
     await page.goto('/#map=opentopomap&lat=-41.27&lng=174.78&z=8');
-    await page.getByRole('button', { name: 'Open map menu' }).click();
+    // Open the right-hand drawer (default Selection tab holds the map-source accordion).
+    await page.getByRole('button', { name: 'Toggle menu' }).click();
     // The accordion auto-opens the section holding the active layer; its button is active.
-    await expect(page.getByRole('button', { name: /Opentopomap/ })).toHaveClass(/active/);
+    await expect(page.getByRole('button', { name: /OpenTopoMap/ })).toHaveClass(/active/);
 });

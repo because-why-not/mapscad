@@ -7,7 +7,7 @@ import { stubServer, dragOnMap, configFromUrl, haversineMeters } from './_stub';
 
 // Wait until the OpenLayers map (and thus the selection tool created in its onReady) exists.
 async function waitForMap(page: import('@playwright/test').Page): Promise<void> {
-    await expect(page.getByRole('button', { name: 'Open map menu' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Selection' })).toBeVisible();
     await expect(page.locator('#map-mount canvas')).toBeVisible();
 }
 
