@@ -50,13 +50,25 @@ export interface BuildHooks {
 export function buildModelGeometry(input: BuildInput, hooks: BuildHooks = {}): ModelGeometry {
     const s = input.settings;
     let grid = input.grid;
-    const originalGrid = input.grid; // pre-tiling; OSM bodies co-register with this (see appendOsmBodies)
+    let osmBodies = input.osmBodies;
     const report = hooks.onProgress ?? (() => {});
     report(0);
 
     // Grid stage (pure): reshape the whole grid first (may change its dimensions). The OSM raises
-    // already ran on the main thread; tiling injects no-data dividers here.
-    for (const gp of pureGridProcessors(s)) grid = gp.process(grid);
+    // already ran on the main thread; tiling injects no-data dividers here. A processor that changes
+    // dimensions remaps the OSM coverage rasters the same way, so features stay co-registered with the
+    // reshaped terrain (tiling relocates the tiles AND splits the features that ride on them).
+    for (const gp of pureGridProcessors(s)) {
+        const { cols, rows } = grid;
+        grid = gp.process(grid);
+        if (osmBodies && osmBodies.length > 0 && gp.remapRaster) {
+            const remap = gp.remapRaster.bind(gp);
+            osmBodies = osmBodies.map(b => {
+                const coverage = remap(b.coverage, cols, rows, 0);
+                return { ...b, coverage };
+            });
+        }
+    }
     report(0.2);
 
     const terrain = buildTerrain(grid, s);
@@ -64,7 +76,8 @@ export function buildModelGeometry(input: BuildInput, hooks: BuildHooks = {}): M
     report(0.9);
 
     // OSM features ride on top of the terrain as their own draped solids, appended as extra bodies.
-    const geo = appendOsmBodies(terrain, originalGrid, s, input.osmBodies);
+    // They build against the reshaped grid + remapped coverage, so they line up with the tiled terrain.
+    const geo = appendOsmBodies(terrain, grid, s, osmBodies);
     report(1);
     return geo;
 }
@@ -125,20 +138,20 @@ function buildTerrain(grid: HeightGrid, s: ModelSettings): ModelGeometry {
 /** Append each OSM feature as its OWN body draped on the terrain surface, so a slicer's "split to
  *  objects" separates terrain / tracks / streets / buildings for multi-part / multi-colour printing.
  *  Bodies OVERLAP the terrain (the base sinks below the surface) rather than carving it — the simplest
- *  representation; a watertight carve-and-inlay can come later. Built against `originalGrid` (the
- *  pre-tiling sampled grid the coverage rasters align with); tiling reshapes the terrain but features
- *  stay whole, mirroring how ovals ignore tiling. */
+ *  representation; a watertight carve-and-inlay can come later. `grid` and each feature's coverage have
+ *  already been through the same grid stage as the terrain (tiling remaps both), so features co-register
+ *  with the reshaped terrain and split at its tile cuts. */
 function appendOsmBodies(
-    terrain: ModelGeometry, originalGrid: HeightGrid, s: ModelSettings, osmBodies: OsmBody[] | undefined,
+    terrain: ModelGeometry, grid: HeightGrid, s: ModelSettings, osmBodies: OsmBody[] | undefined,
 ): ModelGeometry {
     if (!osmBodies || osmBodies.length === 0) return terrain;
-    // The surface features ride on: the same per-cell elevation chain the terrain used, over the
-    // original (un-tiled) grid so heights line up with the coverage rasters.
-    const surface = applyElevation(originalGrid, s);
+    // The surface features ride on: the same per-cell elevation chain the terrain used, over the same
+    // (reshaped) grid so heights and the remapped coverage rasters line up cell-for-cell.
+    const surface = applyElevation(grid, s);
     const bodies = terrain.bodies.slice();
     let { vertexCount, triangleCount, minY, maxY } = terrain;
     for (const feature of osmBodies) {
-        const built = buildFeatureBody(originalGrid, surface, feature);
+        const built = buildFeatureBody(grid, surface, feature);
         if (!built) continue;
         built.body.kind = feature.id;
         bodies.push(built.body);

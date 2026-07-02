@@ -88,6 +88,24 @@ describe('TileDividerProcessor', () => {
         expect(out.rows).toBe(4);
         expect([...out.heights].some(Number.isNaN)).toBe(false);
     });
+
+    it('remapRaster reshapes an OSM coverage raster with the SAME divider/seam plan as the grid', () => {
+        // Same 4×4 → 6×4 reshape as above, applied to a coverage raster (source cell = r*10+c).
+        const tiler = new TileDividerProcessor(2, 1);
+        const cov = new Float32Array(16);
+        for (let r = 0; r < 4; r++) for (let c = 0; c < 4; c++) cov[r * 4 + c] = r * 10 + c;
+        const out = tiler.remapRaster(cov, 4, 4, 0);
+        // 6 columns, matching process(): [0,1,2,-1,2,3].
+        expect(out.length).toBe(6 * 4);
+        // Divider column (index 3) is filled with 0 (no coverage), not NaN — it's walled off anyway.
+        for (let r = 0; r < 4; r++) expect(out[r * 6 + 3]).toBe(0);
+        // The seam (source col 2) is duplicated on both sides of the divider (cols 2 and 4), so a
+        // feature reaches the cut on each tile exactly like the terrain does.
+        for (let r = 0; r < 4; r++) {
+            expect(out[r * 6 + 2]).toBe(r * 10 + 2);
+            expect(out[r * 6 + 4]).toBe(r * 10 + 2);
+        }
+    });
 });
 
 describe('SocketProcessor', () => {
