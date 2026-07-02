@@ -2,6 +2,7 @@ const path = require('path');
 const MiniCssExtractPlugin = require('mini-css-extract-plugin');
 const webpack = require('webpack');
 const dotenv = require('dotenv');
+const { LicenseWebpackPlugin } = require('license-webpack-plugin');
 
 const env = dotenv.config().parsed || {};
 // Optional self-hosted tile server. Unset => '' (the app falls back to the public
@@ -29,6 +30,19 @@ module.exports = {
     plugins: [
         new webpack.DefinePlugin({ __TILE_SERVER_URL__: JSON.stringify(TILE_SERVER_URL) }),
         new MiniCssExtractPlugin({ filename: 'css/index.css' }),
+        // Collects the license text of every package actually bundled (not all of
+        // node_modules) into www/THIRD_PARTY_LICENSES.txt for distribution attribution.
+        new LicenseWebpackPlugin({
+            outputFilename: '../THIRD_PARTY_LICENSES.txt',
+            perChunkOutput: false,
+            // three's package.json `exports` map doesn't expose "./package.json", so the plugin's
+            // require.resolve-based package detection throws and silently skips it. Attribute it
+            // manually. (glfx.js / d3-color that appear in the output are NOT separate deps — they
+            // are riders inside maplibre-gl's own LICENSE.txt.)
+            additionalModules: [
+                { name: 'three', directory: path.resolve(__dirname, 'node_modules/three') },
+            ],
+        }),
     ],
     devServer: {
         port: 8003,
