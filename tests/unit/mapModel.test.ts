@@ -287,14 +287,14 @@ describe('MapModel.sanitize (via applySettings/getSettings)', () => {
         const m = new MapModel({
             socketSize: -5,
             heightScale: NaN,
-            resolutionLimit: 1,     // below the floor of 2
+            rasterResolution: 1,     // below the floor of 2
             tilesX: 0,
             tilesY: 2.9,
         });
         const s = m.getSettings();
         expect(s.socketSize).toBe(0);
         expect(s.heightScale).toBe(1);
-        expect(s.resolutionLimit).toBe(2);
+        expect(s.rasterResolution).toBe(2);
         expect(s.tilesX).toBe(1);
         expect(s.tilesY).toBe(2);
     });

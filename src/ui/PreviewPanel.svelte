@@ -68,7 +68,7 @@
 
     // 3D-build settings (UI + state only for now; Generate/Save just report them out).
     let heightZoom = $state(untrack(() => initialSettings.heightZoom ?? zoomMax));
-    let resolutionLimit = $state(untrack(() => initialSettings.resolutionLimit ?? 256));
+    let rasterResolution = $state(untrack(() => initialSettings.rasterResolution ?? 512));
     let heightScale = $state(untrack(() => initialSettings.heightScale ?? 1));
     let socketEnabled = $state(untrack(() => initialSettings.socketEnabled ?? false));
     let socketSize = $state(untrack(() => initialSettings.socketSize ?? 0));
@@ -99,7 +99,7 @@
     export function setOsmAvailable(id, has) { if (id in osmAvailable) osmAvailable[id] = has; }
 
     function settings() {
-        return { heightZoom, resolutionLimit, heightScale, socketEnabled, socketSize, tilesEnabled, tilesX, tilesY, waterEnabled, waterCutoff, waterLevel, lowCutEnabled, lowCutLevel, osm: $state.snapshot(osmSettings), smoothShading };
+        return { heightZoom, rasterResolution, heightScale, socketEnabled, socketSize, tilesEnabled, tilesX, tilesY, waterEnabled, waterCutoff, waterLevel, lowCutEnabled, lowCutLevel, osm: $state.snapshot(osmSettings), smoothShading };
     }
     function emit() { onSettingsChange(settings()); }
     function selectAll(e) { e.target.select(); }
@@ -218,9 +218,9 @@
                     <input type="range" min={zMin} max={zMax} step="1" class="range range-sm" bind:value={heightZoom} onchange={emit} />
                 </div>
                 <div class="flex items-center gap-2">
-                    <span class="text-sm flex-1">Resolution limit</span>
-                    <input type="number" min="64" step="64" class="input input-sm input-bordered w-24" bind:value={resolutionLimit} onfocus={selectAll} onchange={emit} />
-                    <span class="text-sm opacity-60">vtx</span>
+                    <span class="text-sm flex-1">Raster resolution</span>
+                    <input type="number" min="64" step="64" class="input input-sm input-bordered w-24" bind:value={rasterResolution} onfocus={selectAll} onchange={emit} />
+                    <span class="text-sm opacity-60">px</span>
                 </div>
                 <div class="flex flex-col gap-1">
                     <span class="text-sm flex items-center justify-between">Height scale <span class="font-mono">{heightScale}×</span></span>

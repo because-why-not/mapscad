@@ -26,8 +26,10 @@ export interface OsmFeatureSettings {
 }
 
 export interface ModelSettings {
-    heightZoom: number;      // DEM tile zoom to sample at — drives mesh detail/density
-    resolutionLimit: number; // hard cap on vertices along the longest side
+    heightZoom: number;      // DEM tile zoom to sample at — how much real DEM detail to fetch
+    rasterResolution: number; // model grid samples along the longest side; the DEM is bilinearly
+                             // sampled (interpolated when coarser) to fill it, so this — not the
+                             // DEM zoom — sets mesh density (OSM bodies can be finer than the DEM)
     heightScale: number;     // vertical exaggeration, baked into geometry
     socketEnabled: boolean;  // add a base below the terrain to make a manifold solid
     socketSize: number;      // metres of socket below the lowest point (+ a small floor)
@@ -76,7 +78,7 @@ export interface ModelGeometry {
 
 export const DEFAULT_MODEL_SETTINGS: ModelSettings = {
     heightZoom: 0,
-    resolutionLimit: 256,
+    rasterResolution: 512,
     heightScale: 1,
     socketEnabled: false,
     socketSize: 0,
@@ -244,7 +246,7 @@ export class MapModel {
 function sanitize(s: ModelSettings): ModelSettings {
     return {
         heightZoom: Math.round(num(s.heightZoom, 0)),
-        resolutionLimit: Math.min(4096, Math.max(2, Math.floor(num(s.resolutionLimit, 256)))),
+        rasterResolution: Math.min(4096, Math.max(2, Math.floor(num(s.rasterResolution, 512)))),
         heightScale: Math.max(0.01, num(s.heightScale, 1)),
         socketEnabled: !!s.socketEnabled,
         socketSize: Math.max(0, num(s.socketSize, 0)),

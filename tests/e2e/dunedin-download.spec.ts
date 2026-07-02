@@ -9,8 +9,10 @@ import path from 'path';
 // boot restores the selection, samples the real DEM, and renders — exactly the user flow. We
 // then click Save and capture the STL download.
 //
-// The area is intentionally tiny (~150 m square, sampled to a 128×128 grid at z17) so the
-// download is a handful of tiles. Pin the zoom so the result is deterministic.
+// The area is intentionally tiny (~150 m square) so the download is a handful of tiles. The DEM is
+// sampled at z17 (pinned for determinism) and bilinearly filled into the model's raster grid. The
+// raster resolution is forced to 512 on load (see index.ts), so the grid's long side is 512 — the
+// seeded value below is documentary; the app overrides it.
 //
 // Regenerate the reference after an intentional geometry change:
 //     UPDATE_GOLDEN=1 npx playwright test dunedin-download
@@ -25,11 +27,11 @@ const CONFIG = {
         [170.514467, -45.834774],
         [170.512533, -45.834774],
     ],
-    model: { heightZoom: 17, resolutionLimit: 128, socketEnabled: true, socketSize: 5, heightScale: 1 },
+    model: { heightZoom: 17, rasterResolution: 512, socketEnabled: true, socketSize: 5, heightScale: 1 },
     display: { smoothShading: true },
 };
 
-const GOLDEN = path.join(__dirname, 'fixtures', 'dunedin-128.stl');
+const GOLDEN = path.join(__dirname, 'fixtures', 'dunedin-512.stl');
 
 // Binary STL → triangle count + the flat array of all floats (normals + vertices).
 function parseStl(buf: Buffer): { triCount: number; floats: Float32Array } {

@@ -99,39 +99,40 @@ function demZoomRange(dem: ManifestMap | undefined): { min: number; max: number 
  *   - `def`: one level coarser — the preview opens fast and light.
  * Both clamped to the zooms the DEM actually stores.
  */
-function resolutionZoomRange(corners: LonLat[], dem: ManifestMap, limit: number): { min: number; max: number; def: number } {
+function resolutionZoomRange(corners: LonLat[], dem: ManifestMap, raster: number): { min: number; max: number; def: number } {
     const { min: dMin, max: dMax } = demZoomRange(dem);
     const { widthMeters, heightMeters } = rectExtent(corners);
     const longSide = Math.max(widthMeters, heightMeters);
-    const natural = Math.ceil(zoomForResolution(corners[0][1], longSide / limit, dem.mmapsrv.tileSize));
+    // The zoom at which one DEM pixel ≈ one raster cell — the natural match. Above it the DEM is
+    // finer than the grid can hold (wasted downloads); below it the grid interpolates the DEM.
+    const natural = Math.ceil(zoomForResolution(corners[0][1], longSide / raster, dem.mmapsrv.tileSize));
     const max = Math.min(dMax, natural + 1);
     const def = Math.max(dMin, Math.min(max, natural - 1));
     return { min: dMin, max, def };
 }
 
-/** Grid size at a zoom: one sample per DEM pixel, capped to the resolution limit. */
-function gridResolution(corners: LonLat[], zoom: number, limit: number): { cols: number; rows: number } {
+/** Model grid size: exactly `raster` samples on the long side, the short side scaled to the
+ *  selection's aspect ratio. Independent of the DEM zoom — the DEM is bilinearly sampled (and
+ *  interpolated when it's coarser) to fill this grid, so the raster resolution alone sets mesh
+ *  density. That lets OSM feature bodies carry finer detail than the heightmap provides. */
+function gridResolution(corners: LonLat[], raster: number): { cols: number; rows: number } {
     const { widthMeters, heightMeters } = rectExtent(corners);
-    const res = groundResolution(corners[0][1], zoom, previewDem?.mmapsrv.tileSize); // metres per DEM pixel at this zoom
-    let cols = Math.max(2, Math.round(widthMeters / res) + 1);
-    let rows = Math.max(2, Math.round(heightMeters / res) + 1);
-    const long = Math.max(cols, rows);
-    if (long > limit) {
-        const f = limit / long;
-        cols = Math.max(2, Math.round(cols * f));
-        rows = Math.max(2, Math.round(rows * f));
-    }
+    const long = Math.max(widthMeters, heightMeters);
+    const cols = Math.max(2, Math.round(raster * widthMeters / long));
+    const rows = Math.max(2, Math.round(raster * heightMeters / long));
     return { cols, rows };
 }
 
-/** Largest zoom ≤ desired whose DEM canvas + mesh fits the memory budget. */
-function safeZoom(corners: LonLat[], desired: number, limit: number): number {
+/** Largest zoom ≤ desired whose DEM download + mesh fits the memory budget. The grid is fixed by
+ *  the raster resolution (zoom-independent now), so lowering the zoom only shrinks the DEM tile
+ *  download; the mesh footprint is bounded by the raster resolution regardless. */
+function safeZoom(corners: LonLat[], desired: number, raster: number): number {
     const zMin = previewDem!.mmapsrv.minStoredZoom ?? previewDem!.minzoom;
     const zMax = previewDem!.maxzoom;
     let z = Math.max(zMin, Math.min(zMax, Math.round(desired)));
+    const { cols, rows } = gridResolution(corners, raster);
     for (; z > zMin; z--) {
         const cov = tileCoverage(corners, previewDem!, z);
-        const { cols, rows } = gridResolution(corners, z, limit);
         const est = estimateMemory({ cols, rows, tilesX: cov.tilesX, tilesY: cov.tilesY });
         if (!isOverBudget(est.totalBytes)) break;
     }
@@ -151,9 +152,9 @@ async function resample(): Promise<void> {
     const t0 = performance.now();
     appInstance?.setPreviewLoading({ loaded: 0, total: 0 }); // show the bottom progress bar
     try {
-        const { heightZoom, resolutionLimit } = model.getSettings();
-        const zoom = safeZoom(currentCorners, heightZoom, resolutionLimit);
-        const { cols, rows } = gridResolution(currentCorners, zoom, resolutionLimit);
+        const { heightZoom, rasterResolution } = model.getSettings();
+        const zoom = safeZoom(currentCorners, heightZoom, rasterResolution);
+        const { cols, rows } = gridResolution(currentCorners, rasterResolution);
         const grid = await sampleSelectionHeights(currentCorners, previewDem, cols, rows, zoom, {
             signal: abort.signal,
             onProgress: (loaded, total) => appInstance?.setPreviewLoading({ loaded, total }),
@@ -428,7 +429,7 @@ function onUserSelectionChange(corners: LonLat[] | null): void {
         if (previewDem) {
             // Open at the resolution the mesh actually needs (one level below natural), and cap
             // how fine the user can go — so we don't fetch far more DEM detail than the grid uses.
-            const { min, max, def } = resolutionZoomRange(corners, previewDem, model.getSettings().resolutionLimit);
+            const { min, max, def } = resolutionZoomRange(corners, previewDem, model.getSettings().rasterResolution);
             model.applySettings({ heightZoom: def });
             config.update({ model: model.getSettings() });
             appInstance?.setPreviewZoomRange(min, max, def); // move the slider's range + value
@@ -566,13 +567,13 @@ async function init(): Promise<void> {
     // (`zr.def`, the same value a fresh draw opens at) — NEVER the range max — so a reload can't
     // silently refetch far finer DEM detail (many more tiles) than the default; an unset one (0)
     // opens at that default too. The user can still slide up to `zr.max` afterwards.
-    // The resolution limit is deliberately NOT restored — every load starts at this fixed value so a
-    // stale saved cap can't silently change the mesh density (the user can still adjust it in-session).
-    const STARTUP_RESOLUTION_LIMIT = 512;
+    // The raster resolution is deliberately NOT restored — every load starts at this fixed value so a
+    // stale saved value can't silently change the mesh density (the user can still adjust it in-session).
+    const STARTUP_RASTER_RESOLUTION = 512;
     const savedSelection = cfg.selection;
     let zr: { min: number; max: number; def: number };
     if (savedSelection && previewDem) {
-        zr = resolutionZoomRange(savedSelection, previewDem, STARTUP_RESOLUTION_LIMIT);
+        zr = resolutionZoomRange(savedSelection, previewDem, STARTUP_RASTER_RESOLUTION);
     } else {
         const range = demZoomRange(previewDem);
         zr = { ...range, def: range.max };
@@ -580,7 +581,7 @@ async function init(): Promise<void> {
     const previewZoomMin = zr.min, previewZoomMax = zr.max;
     // Cap the saved zoom to the light default, never higher; an unset one (0) opens there too.
     const heightZoom = cfg.model.heightZoom > 0 ? Math.min(cfg.model.heightZoom, zr.def) : zr.def;
-    model.applySettings({ ...cfg.model, heightZoom, resolutionLimit: STARTUP_RESOLUTION_LIMIT });
+    model.applySettings({ ...cfg.model, heightZoom, rasterResolution: STARTUP_RASTER_RESOLUTION });
     // Fold the resolved DEM + sanitized settings back into the config so it's consistent.
     config.update({ demId: initialDemId, model: model.getSettings() });
     const initialPreviewSettings: Record<string, any> = { ...model.getSettings(), smoothShading: cfg.display.smoothShading };
@@ -716,7 +717,7 @@ async function init(): Promise<void> {
                 // native detail, so carrying the old level over rarely makes sense (and can over-
                 // fetch). With a selection, that default + range come from the resolution the mesh needs.
                 const { min, max, def } = currentCorners
-                    ? resolutionZoomRange(currentCorners, previewDem, model.getSettings().resolutionLimit)
+                    ? resolutionZoomRange(currentCorners, previewDem, model.getSettings().rasterResolution)
                     : { ...demZoomRange(previewDem), def: demZoomRange(previewDem).max };
                 model.applySettings({ heightZoom: def });
                 config.update({ demId: id, model: model.getSettings() });
@@ -730,17 +731,17 @@ async function init(): Promise<void> {
                 model.applySettings(s); // rebuilds geometry from the current grid
                 config.update({ model: model.getSettings(), display: { smoothShading: s.smoothShading ?? true } });
                 preview?.setSmoothShading(s.smoothShading ?? true); // display-only
-                // The resolution limit drives the zoom cap (finest useful detail), so recompute
-                // the slider range + clamp the current zoom into it when it changes.
-                if (s.resolutionLimit !== prev.resolutionLimit && currentCorners && previewDem) {
-                    const { min, max } = resolutionZoomRange(currentCorners, previewDem, s.resolutionLimit);
+                // The raster resolution sets where the DEM zoom stops being useful (one DEM pixel per
+                // raster cell), so recompute the slider range + clamp the current zoom into it when it changes.
+                if (s.rasterResolution !== prev.rasterResolution && currentCorners && previewDem) {
+                    const { min, max } = resolutionZoomRange(currentCorners, previewDem, s.rasterResolution);
                     const heightZoom = Math.max(min, Math.min(max, model.getSettings().heightZoom));
                     model.applySettings({ heightZoom });
                     config.update({ model: model.getSettings() });
                     appInstance?.setPreviewZoomRange(min, max, heightZoom);
                 }
-                // Zoom / resolution change the sampling itself, so re-fetch the heights.
-                if (s.heightZoom !== prev.heightZoom || s.resolutionLimit !== prev.resolutionLimit) {
+                // Zoom / raster resolution change the sampling itself, so re-fetch the heights.
+                if (s.heightZoom !== prev.heightZoom || s.rasterResolution !== prev.rasterResolution) {
                     scheduleResample();
                 }
             },
