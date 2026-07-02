@@ -9,13 +9,13 @@ import { Circle as CircleStyle, Fill, Icon, Stroke, Style } from 'ol/style';
 import { fromLonLat, toLonLat } from 'ol/proj';
 import type { Coordinate } from 'ol/coordinate';
 import { SelectionShape } from './MapModel';
+import type { LonLat } from './mathHelper';
 
 /** A rotatable rectangular selection drawn on the OpenLayers 2D map.
  *
  * Geometry is kept in the map's view projection (planar metres) as a centre,
  * half-extents and a rotation, mirroring the original Leaflet tool but zoom-stable.
  * It's exposed/stored to the rest of the app only as four lon/lat corners. */
-export type LonLat = [number, number];
 
 interface SelectionAreaOptions {
     onChange?: (corners: LonLat[] | null) => void;

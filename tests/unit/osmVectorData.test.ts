@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { OsmVectorData } from '../../src/osm/OsmVectorData';
-import type { LonLat } from '../../src/SelectionArea';
+import type { LonLat } from '../../src/mathHelper';
 import type { OsmElement } from '../../src/osm/OverpassFeature';
 
 // Axis-aligned 1°×1° selection (TL, TR, BR, BL) → affine maps u=lon, v=1−lat; 10×10 cells.

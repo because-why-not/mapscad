@@ -1,4 +1,4 @@
-import type { LonLat } from './SelectionArea';
+import type { LonLat } from './mathHelper';
 import { ModelSettings, DEFAULT_MODEL_SETTINGS } from './MapModel';
 import { Env } from './Env';
 

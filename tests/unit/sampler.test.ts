@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
-import { lonLatToWorldPx, rectPoint, sampleHeights } from '../../src/dem/Sampler';
+import { rectPoint, sampleHeights } from '../../src/dem/Sampler';
 import { TerrariumMapData, type RawRaster } from '../../src/dem/TerrariumMapData';
-import type { LonLat } from '../../src/SelectionArea';
+import { lonLatToWorldPx, type LonLat } from '../../src/mathHelper';
 
 function encode(m: number): [number, number, number, number] {
     const v = m + 32768;

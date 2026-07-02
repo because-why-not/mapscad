@@ -11,7 +11,7 @@ import { availableCustomMaps, isSunCapable } from './customMaps';
 import { MapController } from './MapController';
 import { OpenLayersEngine } from './engine/OpenLayersEngine';
 import { MapLibreTerrainEngine } from './engine/MapLibreTerrainEngine';
-import { SelectionArea, LonLat } from './SelectionArea';
+import { SelectionArea } from './SelectionArea';
 import OlMap from 'ol/Map';
 import DragBox from 'ol/interaction/DragBox';
 import { OsmOverlay } from './OsmOverlay';
@@ -26,7 +26,7 @@ import { exportModelStl } from './StlMaker';
 import { exportModel3mf } from './ThreeMFMaker';
 import { estimateMemory, measureMemory, formatBytes, memoryLevel, isOverBudget } from './memory';
 import type { GeoView, MapEngine } from './engine/MapEngine';
-import { groundResolution, zoomForResolution } from './MathHelper';
+import { groundResolution, zoomForResolution, type LonLat } from './mathHelper';
 
 // This file is the composition root: the only place that names concrete engines.
 // Everything it wires together (MapController, App, persistence) is engine-agnostic.

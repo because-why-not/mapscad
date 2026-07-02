@@ -9,7 +9,7 @@ import { describe, it, expect, beforeAll, vi } from 'vitest';
 import { OsmCanvasProcessor } from '../../src/model/OsmCanvasProcessor';
 import { OsmVectorData } from '../../src/osm/OsmVectorData';
 import { osmFeature } from '../../src/osm/osmFeatures';
-import type { LonLat } from '../../src/SelectionArea';
+import type { LonLat } from '../../src/mathHelper';
 import type { HeightGrid } from '../../src/HeightSampler';
 
 const LINE = osmFeature('tracks');   // geometry: 'line'

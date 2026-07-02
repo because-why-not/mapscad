@@ -1,4 +1,6 @@
-import type { LonLat } from './SelectionArea';
+/** A geographic point as `[longitude, latitude]` in degrees — the base coordinate type the
+ *  whole app passes around (selections, OSM geometry, sampling). */
+export type LonLat = [number, number];
 
 /**
  * Geodesy + Web-Mercator tile math — the raw formulas the DEM pipeline is built on, gathered

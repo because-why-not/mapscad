@@ -1,4 +1,4 @@
-import type { LonLat } from '../SelectionArea';
+import type { LonLat } from '../mathHelper';
 import type { OsmElement } from './OverpassFeature';
 import { projectLonLatLines, type GridSpace } from './gridProjection';
 

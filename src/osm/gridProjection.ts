@@ -1,4 +1,4 @@
-import type { LonLat } from '../SelectionArea';
+import type { LonLat } from '../mathHelper';
 
 /** The sampled grid lon/lat vectors are projected against: the selection corners plus the
  *  heightmap resolution. (Metre extents aren't needed for the col/row projection.) */

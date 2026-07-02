@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { cornersToBBox } from '../../src/osm/bbox';
-import type { LonLat } from '../../src/SelectionArea';
+import type { LonLat } from '../../src/mathHelper';
 
 describe('cornersToBBox', () => {
     it('takes the axis-aligned bounds of the (possibly rotated) corners', () => {

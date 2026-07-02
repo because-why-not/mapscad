@@ -1,4 +1,4 @@
-import type { LonLat } from '../SelectionArea';
+import type { LonLat } from '../mathHelper';
 import { Env } from '../Env';
 import { cornersToBBox } from './bbox';
 import { buildQuery, type OsmFeatureDef } from './osmFeatures';

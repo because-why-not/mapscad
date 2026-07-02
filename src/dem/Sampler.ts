@@ -1,9 +1,5 @@
-import type { LonLat } from '../SelectionArea';
+import { lonLatToWorldPx, type LonLat } from '../mathHelper';
 import type { TerrariumMapData } from './TerrariumMapData';
-// Imported for local sampling + re-exported, so the sampler stays an import site for pixel-space
-// math while the formula itself lives in MathHelper.
-import { lonLatToWorldPx } from '../MathHelper';
-export { lonLatToWorldPx };
 
 /**
  * Samples a height field over a (possibly rotated) selection rectangle into a grid. Pure:

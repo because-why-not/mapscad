@@ -1,4 +1,4 @@
-import type { LonLat } from '../SelectionArea';
+import type { LonLat } from '../mathHelper';
 
 /** Axis-aligned lon/lat bounds of the (possibly rotated) selection corners. */
 export interface BBox {

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { groundResolution, zoomForResolution } from '../../src/MathHelper';
+import { groundResolution, zoomForResolution } from '../../src/mathHelper';
 
 describe('groundResolution', () => {
     it('returns ~156.5 km/px at the equator, zoom 0 (full earth across one 256px tile)', () => {

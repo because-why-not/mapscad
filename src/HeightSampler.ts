@@ -1,9 +1,8 @@
 import type { ManifestMap } from './TileMapManifest';
-import type { LonLat } from './SelectionArea';
-import { lonLatToWorldPx, sampleHeights, type HeightGrid } from './dem/Sampler';
+import { sampleHeights, type HeightGrid } from './dem/Sampler';
 import { TerrariumMapData } from './dem/TerrariumMapData';
 import { downloadRaster, type DownloadOptions } from './dem/TileDownloader';
-import { DEFAULT_TILE_SIZE, haversine, groundResolution } from './MathHelper';
+import { DEFAULT_TILE_SIZE, haversine, groundResolution, lonLatToWorldPx, type LonLat } from './mathHelper';
 
 /**
  * Orchestrates the DEM height pipeline: it owns the geometry (which tiles a selection
