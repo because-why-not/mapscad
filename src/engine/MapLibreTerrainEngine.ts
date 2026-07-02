@@ -13,7 +13,11 @@ const toGeoZoom = (z: number) => z + 1;
 // lets terrain stay 3D when zoomed out a bit rather than flattening abruptly.
 const DEM_UNDERZOOM = 3;
 
-interface SunDirection { azimuth: number; altitude: number; }
+interface Light { azimuth: number; altitude: number; }
+
+// Fixed illumination for the 3D hillshade — top-left at 45°, the usual cartographic
+// convention. (There are no time-of-day controls; the light is a constant.)
+const DEFAULT_LIGHT: Light = { azimuth: 315, altitude: 45 };
 
 /**
  * 3D renderer: drapes a raster imagery source over terrain derived from a
@@ -28,7 +32,6 @@ export class MapLibreTerrainEngine implements MapEngine {
     private moveCb: (() => void) | null = null;
     private activeId = '';
     private specById = new Map<string, CustomMapSpec>();
-    private sun: SunDirection = { azimuth: 315, altitude: 45 };
 
     constructor(specs: CustomMapSpec[], private mapsById: Record<string, ManifestMap>) {
         this.sourceIds = specs.map(s => s.id);
@@ -50,12 +53,7 @@ export class MapLibreTerrainEngine implements MapEngine {
         const spec = this.specById.get(id);
         if (!spec) return;
         this.activeId = id;
-        if (this.map) this.map.setStyle(buildTerrainStyle(spec, this.mapsById, this.sun));
-    }
-
-    setSun(azimuthDeg: number, altitudeDeg: number): void {
-        this.sun = { azimuth: azimuthDeg, altitude: altitudeDeg };
-        this.applySunToMap();
+        if (this.map) this.map.setStyle(buildTerrainStyle(spec, this.mapsById, DEFAULT_LIGHT));
     }
 
     show(view: GeoView): void {
@@ -85,7 +83,7 @@ export class MapLibreTerrainEngine implements MapEngine {
 
     private create(view: GeoView): void {
         const spec = this.specById.get(this.activeId);
-        const style = spec ? buildTerrainStyle(spec, this.mapsById, this.sun) : { version: 8, sources: {}, layers: [] };
+        const style = spec ? buildTerrainStyle(spec, this.mapsById, DEFAULT_LIGHT) : { version: 8, sources: {}, layers: [] };
         const map = new this.gl.Map({
             container: this.el,
             style,
@@ -98,29 +96,11 @@ export class MapLibreTerrainEngine implements MapEngine {
         const nav = new this.gl.NavigationControl({ visualizePitch: true });
         map.addControl(nav, 'bottom-left');
         if (this.moveCb) map.on('moveend', this.moveCb);
-        // Re-apply the current sun whenever a style (re)loads, e.g. after setStyle.
-        map.on('style.load', () => this.applySunToMap());
         this.map = map;
     }
 
     private applyView(view: GeoView): void {
         this.map.jumpTo({ center: [view.lng, view.lat], zoom: toMlZoom(view.zoom) });
-    }
-
-    /** Push the current sun onto the live hillshade + land-base layers, if present. */
-    private applySunToMap(): void {
-        const map = this.map;
-        if (!map) return;
-        try {
-            if (!map.getLayer || !map.getLayer('hillshade')) return;
-            const paint = hillshadePaint(this.sun);
-            for (const key of Object.keys(paint)) map.setPaintProperty('hillshade', key, paint[key]);
-            if (map.getLayer('bg')) {
-                map.setPaintProperty('bg', 'background-color', terrainBaseColor(this.sun));
-            }
-        } catch {
-            // style not ready yet — the style.load handler will re-apply.
-        }
     }
 }
 
@@ -131,7 +111,7 @@ export class MapLibreTerrainEngine implements MapEngine {
  * the DEM itself. Returned loosely-typed so the abstraction above carries no
  * compile-time dependency on maplibre's style types.
  */
-function buildTerrainStyle(spec: CustomMapSpec, mapsById: Record<string, ManifestMap>, sun: SunDirection): any {
+function buildTerrainStyle(spec: CustomMapSpec, mapsById: Record<string, ManifestMap>, light: Light): any {
     const dem = mapsById[spec.demSource];
     const sources: Record<string, any> = {
         dem: {
@@ -148,7 +128,7 @@ function buildTerrainStyle(spec: CustomMapSpec, mapsById: Record<string, Manifes
     };
     // Land base under the hillshade (flat ground shows this, since the hillshade layer
     // only paints slopes); imagery maps just use a dark void behind the raster.
-    const baseColor = spec.surface.type === 'hillshade' ? terrainBaseColor(sun) : '#0b1021';
+    const baseColor = spec.surface.type === 'hillshade' ? terrainBaseColor(light) : '#0b1021';
     const layers: any[] = [
         { id: 'bg', type: 'background', paint: { 'background-color': baseColor } },
     ];
@@ -170,7 +150,7 @@ function buildTerrainStyle(spec: CustomMapSpec, mapsById: Record<string, Manifes
             id: 'hillshade',
             type: 'hillshade',
             source: 'dem',
-            paint: hillshadePaint(sun),
+            paint: hillshadePaint(light),
         });
     }
 
@@ -190,36 +170,35 @@ function buildTerrainStyle(spec: CustomMapSpec, mapsById: Record<string, Manifes
     };
 }
 
-// How much of full daylight we have: 0 at/below the horizon, 1 once the sun is high.
+// How much of full daylight we have: 0 at/below the horizon, 1 once the light is high.
 function daylightFactor(altitudeDeg: number): number {
     return Math.max(0, Math.min(1, altitudeDeg / 25));
 }
 
 /**
- * Land base colour the relief sits on. Tracks the sun's altitude so the whole scene
- * brightens through the day and darkens to a moonlit blue at night — this is what
- * makes the time-of-day visibly change the map (the hillshade layer alone only
- * shades slopes, leaving flat ground showing this colour).
+ * Land base colour the relief sits on, from the light's altitude (the hillshade layer
+ * alone only shades slopes, leaving flat ground showing this colour). With the fixed
+ * daytime light this resolves to the daylit tan.
  */
-function terrainBaseColor(sun: SunDirection): string {
-    const day = daylightFactor(sun.altitude);
+function terrainBaseColor(light: Light): string {
+    const day = daylightFactor(light.altitude);
     return lerpHex('#141823', '#c9c3b2', day); // night blue-grey -> daylit tan
 }
 
 /**
- * Hillshade paint derived from the sun. MapLibre's hillshade layer only takes an
+ * Hillshade paint derived from the light. MapLibre's hillshade layer only takes an
  * illumination azimuth (not an altitude), so we use the altitude to modulate the
- * relief strength: a low sun yields longer, stronger shadows.
+ * relief strength: a lower light yields stronger relief.
  */
-function hillshadePaint(sun: SunDirection): Record<string, any> {
-    const day = daylightFactor(sun.altitude);
-    const exaggeration = 0.45 + (1 - day) * 0.35;   // 0.45 (high sun) .. 0.8 (low/night)
+function hillshadePaint(light: Light): Record<string, any> {
+    const day = daylightFactor(light.altitude);
+    const exaggeration = 0.45 + (1 - day) * 0.35;   // 0.45 (high light) .. 0.8 (low light)
     return {
         'hillshade-exaggeration': exaggeration,
         'hillshade-shadow-color': '#23252e',
         'hillshade-highlight-color': '#ffffff',
         'hillshade-accent-color': '#6b7280',
-        'hillshade-illumination-direction': Math.round(sun.azimuth),
+        'hillshade-illumination-direction': Math.round(light.azimuth),
         // Anchor the light to the map (north), not the viewport, so rotating the
         // camera doesn't swing the shading around.
         'hillshade-illumination-anchor': 'map',

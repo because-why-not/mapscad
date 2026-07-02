@@ -7,7 +7,7 @@ import { EXTERNAL_DEMS } from './externalDems';
 import { EXTERNAL_MAPS } from './externalMaps';
 import { PROVIDER_CATEGORY } from './mapCategories';
 import { prettifyMapName, iconForMapType, LOCAL_MAP_PREFIX, stripLocalPrefix } from './mapMeta';
-import { availableCustomMaps, isSunCapable } from './customMaps';
+import { availableCustomMaps } from './customMaps';
 import { MapController } from './MapController';
 import { OpenLayersEngine } from './engine/OpenLayersEngine';
 import { MapLibreTerrainEngine } from './engine/MapLibreTerrainEngine';
@@ -509,29 +509,6 @@ function scheduleUrlSync(): void {
     }, 250);
 }
 
-function loadSunDate(): Date {
-    try {
-        const s = localStorage.getItem('sunDate');
-        if (s) {
-            const d = new Date(s);
-            if (!isNaN(d.valueOf())) return d;
-        }
-    } catch (e) { Env.error('load sunDate', e); }
-    return new Date();
-}
-
-function saveSunDate(date: Date): void {
-    try { localStorage.setItem('sunDate', date.toISOString()); } catch (e) { Env.error('save sunDate', e); }
-}
-
-function loadShadows(): boolean {
-    try { return localStorage.getItem('shadows') !== '0'; } catch (e) { Env.error('load shadows', e); return true; }
-}
-
-function saveShadows(enabled: boolean): void {
-    try { localStorage.setItem('shadows', enabled ? '1' : '0'); } catch (e) { Env.error('save shadows', e); }
-}
-
 async function init(): Promise<void> {
     // One-off cleanup: these were folded into the single `previewConfig` key (PreviewConfig)
     // and are no longer read. Drop the orphans so they don't linger in users' storage.
@@ -629,8 +606,6 @@ async function init(): Promise<void> {
             id: s.id,
             name: s.name,
             icon: s.icon,
-            sun: isSunCapable(s),
-            shadows: false,
             category: s.category,
             attribution: srcId ? mapsById[srcId]?.attributionDetail : undefined,
         };
@@ -643,8 +618,6 @@ async function init(): Promise<void> {
     const initialId = (urlMapState.map && allIds.includes(urlMapState.map)) ? urlMapState.map
         : (saved && allIds.includes(saved)) ? saved
         : (allIds[0] ?? '');
-    const initialSunDate = loadSunDate();
-    const initialShadows = loadShadows();
 
     // These are assigned just below; the App callbacks (user-triggered later) close over
     // them, so it's fine that they reference values not set until after mount.
@@ -661,11 +634,7 @@ async function init(): Promise<void> {
             tileProviders,
             customMaps,
             initialActiveProviderId: initialId,
-            initialSunDate,
-            initialShadows,
             onLayerSwitch: (id: string) => controller?.select(id),
-            onSunChange: (date: Date) => { saveSunDate(date); controller?.setSunDate(date); },
-            onShadowsChange: (enabled: boolean) => { saveShadows(enabled); controller?.setShadowsEnabled(enabled); },
             initialMapZoom: initialView.zoom,
             onSelectToggle: (active: boolean, shape: SelectionShape = SelectionShape.Rectangle) => {
                 if (!selection) return;
@@ -850,8 +819,6 @@ async function init(): Promise<void> {
         engines,
         container: mapMount,
         initialView,
-        initialSunDate,
-        initialShadows,
         onActiveChange: id => appInstance?.setActiveProvider(id),
         onViewPersist: v => { saveView(v); appInstance?.setMapZoom(v.zoom); scheduleUrlSync(); },
         onActivePersist: id => { saveActive(id); scheduleUrlSync(); },

@@ -8,11 +8,7 @@
         tileProviders = [],
         customMaps = [],
         initialActiveProviderId = '',
-        initialSunDate = new Date(),
-        initialShadows = true,
         onLayerSwitch = () => {},
-        onSunChange = () => {},
-        onShadowsChange = () => {},
         onSelectToggle = () => {},
         onAspectChange = () => {},
         onDataModeChange = () => {},
@@ -40,15 +36,12 @@
     export function setZoom(z) { mapZoom = z; }
 
     let menuOpen = $state(false);
-    // Panel-level mode tabs: 'selection' (selection tools + map sources/sun) and 'data'
+    // Panel-level mode tabs: 'selection' (selection tools + map sources) and 'data'
     // (OpenStreetMap download/edit). The Data tab is gated on a selection existing — see dataEnabled.
     let activeTab = $state('selection');
     let activeProviderId = $state(untrack(() => initialActiveProviderId));
     let providerList = $state(untrack(() => tileProviders));
     let customList = $state(untrack(() => customMaps));
-    let dateValue = $state(untrack(() => toDateInput(initialSunDate)));
-    let minutesOfDay = $state(untrack(() => initialSunDate.getHours() * 60 + initialSunDate.getMinutes()));
-    let shadowsOn = $state(untrack(() => initialShadows));
     // Which selection tool is active: 'none' | 'rectangle' | 'oval'.
     let activeTool = $state('none');
     // True once a selection exists, so the "download tracks" button can appear. Pushed in
@@ -121,10 +114,6 @@
         (providerList.find(p => p.id === activeProviderId)
             ?? customList.find(c => c.id === activeProviderId))?.attribution
     );
-
-    let sunEnabled = $derived(!!customList.find(c => c.id === activeProviderId)?.sun);
-    let shadowsCapable = $derived(!!customList.find(c => c.id === activeProviderId)?.shadows);
-    let timeLabel = $derived(formatTime(minutesOfDay));
 
     // Group the menu into sections: ungrouped public tile layers under "Map Source", then one
     // section per named category (public categories like Mapterhorn / AWS Terrain first, then
@@ -201,29 +190,6 @@
         onLayerSwitch(id);
     }
 
-    function pad(n) { return String(n).padStart(2, '0'); }
-    function toDateInput(date) {
-        return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
-    }
-    function formatTime(minutes) {
-        return `${pad(Math.floor(minutes / 60))}:${pad(minutes % 60)}`;
-    }
-    function composeSunDate() {
-        const [y, m, d] = dateValue.split('-').map(Number);
-        return new Date(y, m - 1, d, Math.floor(minutesOfDay / 60), minutesOfDay % 60);
-    }
-    function emitSun() {
-        if (dateValue) onSunChange(composeSunDate());
-    }
-    function setSunNow() {
-        const now = new Date();
-        dateValue = toDateInput(now);
-        minutesOfDay = now.getHours() * 60 + now.getMinutes();
-        onSunChange(now);
-    }
-    function toggleShadows() {
-        onShadowsChange(shadowsOn);
-    }
 </script>
 
 <div class="panel panel-map" {style}>
@@ -291,7 +257,7 @@
     </div>
     {/if}
 
-    <!-- Mode tabs: switch the panel between Selection (tools + map sources/sun) and Data
+    <!-- Mode tabs: switch the panel between Selection (tools + map sources) and Data
          (OpenStreetMap download/edit). Each opens the right-hand drawer to its content. The
          Data tab is disabled until an area is selected. -->
     <div class="absolute top-4 left-1/2 -translate-x-1/2 z-[1000] join shadow-md">
@@ -364,24 +330,6 @@
                     </ul>
                 {/if}
             {/each}
-
-            {#if sunEnabled}
-                <div class="px-4 py-1 mt-2 text-xs font-bold uppercase tracking-wider opacity-50">Sun</div>
-                <div class="px-4 py-2 flex flex-col gap-2">
-                    <input type="date" class="input input-sm input-bordered w-full" bind:value={dateValue} onchange={emitSun} />
-                    <div class="flex items-center gap-2">
-                        <input type="range" min="0" max="1439" step="5" class="range range-sm flex-1" bind:value={minutesOfDay} oninput={emitSun} />
-                        <span class="text-sm font-mono tabular-nums w-12 text-right">{timeLabel}</span>
-                    </div>
-                    {#if shadowsCapable}
-                        <label class="flex items-center gap-2 cursor-pointer py-1">
-                            <input type="checkbox" class="toggle toggle-sm" bind:checked={shadowsOn} onchange={toggleShadows} />
-                            <span class="text-sm">Cast shadows</span>
-                        </label>
-                    {/if}
-                    <button class="btn btn-sm btn-outline" onclick={setSunNow}>Now</button>
-                </div>
-            {/if}
 
             {#if activeAttribution}
                 <div class="px-4 py-1 mt-2 text-xs font-bold uppercase tracking-wider opacity-50">Attribution</div>

@@ -7,11 +7,7 @@
         tileProviders = [],
         customMaps = [],
         initialActiveProviderId = '',
-        initialSunDate = new Date(),
-        initialShadows = true,
         onLayerSwitch = () => {},
-        onSunChange = () => {},
-        onShadowsChange = () => {},
         onSelectToggle = () => {},
         onAspectChange = () => {},
         onDataModeChange = () => {},
@@ -145,11 +141,7 @@
         {tileProviders}
         {customMaps}
         {initialActiveProviderId}
-        {initialSunDate}
-        {initialShadows}
         {onLayerSwitch}
-        {onSunChange}
-        {onShadowsChange}
         {onSelectToggle}
         {onAspectChange}
         {onDataModeChange}

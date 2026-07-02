@@ -146,8 +146,3 @@ export function availableCustomMaps(mapsById: Record<string, ManifestMap>): Cust
     }
     return out;
 }
-
-/** Whether a custom map is lit by the sun (so the Sun date/time controls apply). */
-export function isSunCapable(spec: CustomMapSpec): boolean {
-    return spec.surface.type === 'hillshade';
-}
