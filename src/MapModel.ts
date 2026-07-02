@@ -119,10 +119,10 @@ function defaultOsmSettings(): Record<string, OsmFeatureSettings> {
  *   4. vertex   — `vertexProcessors()` mutate the assembled mesh (the socket closes it).
  *
  * Two build paths produce the same welded, shared-vertex representation:
- *   - the fast `buildTile` sheet, for a gap-free rectangle, and
- *   - `buildKept` → `buildMaskedTile`, a per-cell walled solid used whenever cells are
+ *   - the fast `buildBody` sheet, for a gap-free rectangle, and
+ *   - `buildKept` → `buildMaskedBody`, a per-cell walled solid used whenever cells are
  *     dropped — ovals AND no-data holes (real DEM gaps or injected tile dividers) both route
- *     here, so tiling emits ONE solid whose disconnected, walled bodies are the tiles.
+ *     here, so tiling emits ONE solid whose disconnected, walled blocks are the tiles.
  *
  * This pluggable chain is the seed of the planned CAD-style feature history (see CLAUDE.md /
  * todo.md): keep the stage boundary intact when adding processors.

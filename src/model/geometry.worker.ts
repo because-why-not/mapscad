@@ -3,7 +3,7 @@ import { buildModelGeometry, type BuildInput } from './buildGeometry';
 /**
  * Off-main-thread model build. Receives an (already OSM-raised) HeightGrid + ModelSettings, runs the
  * shared pure pipeline (`buildModelGeometry` — the exact same code MapModel uses synchronously), and
- * posts back the neutral geometry, transferring the tile buffers so the main thread gets them without
+ * posts back the neutral geometry, transferring the body buffers so the main thread gets them without
  * a copy. Progress is streamed so index.ts can drive the shared (cancellable) progress bar; cancel is
  * a `worker.terminate()` from the main thread, so the worker itself needs no abort handling.
  */

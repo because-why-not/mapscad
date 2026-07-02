@@ -84,7 +84,7 @@ function buildTerrain(grid: HeightGrid, s: ModelSettings): ModelGeometry {
     const processed = applyElevation(grid, s);
 
     // No-data carves holes: real gaps OR the tile dividers injected above. Route through the masked
-    // builder — one solid whose disconnected bodies ARE the tiles, each walled.
+    // builder — one solid whose disconnected blocks ARE the tiles, each walled.
     if (hasNoData(processed)) {
         const keep = (cc: number, cr: number) => cellHasData(processed, cols, rows, cc, cr);
         return buildKept(grid, processed, keep, s);

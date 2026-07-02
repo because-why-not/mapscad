@@ -35,24 +35,24 @@ describe('threeMfArchive', () => {
         expect(text).toContain('PK\x05\x06');
     });
 
-    it('groups tiles by kind into one named, coloured object each', () => {
+    it('groups bodies by kind into one named, coloured object each', () => {
         const archive = threeMfArchive([tri('terrain'), tri('buildings'), tri('buildings'), tri('streets')]);
         const xml = modelXml(archive);
         // 3 kinds → 3 objects, 3 base materials, 3 build items.
         expect(xml.match(/<object /g)?.length).toBe(3);
         expect(xml.match(/<base /g)?.length).toBe(3);
         expect(xml.match(/<item /g)?.length).toBe(3);
-        // "buildings" appears once as an object (its two tiles merged), with the registry stroke colour.
+        // "buildings" appears once as an object (its two bodies merged), with the registry stroke colour.
         expect(xml.match(/<object [^>]*name="buildings"/g)?.length).toBe(1);
         expect(xml).toContain('#1F77B4FF'); // buildings strokeColor '#1f77b4'
     });
 
-    it('merges a kind\'s tiles into one mesh, offsetting the second tile\'s indices', () => {
+    it('merges a kind\'s bodies into one mesh, offsetting the second body\'s indices', () => {
         const archive = threeMfArchive([tri('buildings'), tri('buildings')]);
         const xml = modelXml(archive);
         const obj = xml.slice(xml.indexOf('<object '), xml.indexOf('</object>'));
         expect(obj.match(/<vertex /g)?.length).toBe(6);   // 2 tris × 3 verts
         expect(obj.match(/<triangle /g)?.length).toBe(2);
-        expect(obj).toContain('v1="3"'); // second triangle's indices offset by the first tile's 3 verts
+        expect(obj).toContain('v1="3"'); // second triangle's indices offset by the first body's 3 verts
     });
 });
