@@ -386,6 +386,9 @@
             {#if activeAttribution}
                 <div class="px-4 py-1 mt-2 text-xs font-bold uppercase tracking-wider opacity-50">Attribution</div>
                 <Attribution attribution={activeAttribution} />
+                <div class="mx-3 mb-2 text-xs opacity-70">
+                    <a class="link link-primary" href="THIRD_PARTY_LICENSES.txt" target="_blank" rel="noopener noreferrer">Third-party software licenses</a>
+                </div>
             {/if}
         </div>
         {:else}
