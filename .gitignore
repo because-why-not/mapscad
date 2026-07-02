@@ -24,3 +24,4 @@ npm-debug.log*
 *.swp
 
 import/
+tests/e2e/fixtures/dunedin-128.stl

@@ -11,11 +11,13 @@ import path from 'path';
 //
 // The area is intentionally tiny (~150 m square) so the download is a handful of tiles. The DEM is
 // sampled at z17 (pinned for determinism) and bilinearly filled into the model's raster grid. The
-// raster resolution is forced to 512 on load (see index.ts), so the grid's long side is 512 — the
-// seeded value below is documentary; the app overrides it.
+// app forces the raster resolution on load, so we pin it to 128 via the `rasterResolution` override
+// (seeded into localStorage below) to keep the golden mesh — and thus the fixture file — small.
 //
 // Regenerate the reference after an intentional geometry change:
 //     UPDATE_GOLDEN=1 npx playwright test dunedin-download
+
+const RASTER = 128;
 
 const CONFIG = {
     version: 1,
@@ -27,11 +29,11 @@ const CONFIG = {
         [170.514467, -45.834774],
         [170.512533, -45.834774],
     ],
-    model: { heightZoom: 17, rasterResolution: 512, socketEnabled: true, socketSize: 5, heightScale: 1 },
+    model: { heightZoom: 17, rasterResolution: RASTER, socketEnabled: true, socketSize: 5, heightScale: 1 },
     display: { smoothShading: true },
 };
 
-const GOLDEN = path.join(__dirname, 'fixtures', 'dunedin-512.stl');
+const GOLDEN = path.join(__dirname, 'fixtures', 'dunedin-128.stl');
 
 // Binary STL → triangle count + the flat array of all floats (normals + vertices).
 function parseStl(buf: Buffer): { triCount: number; floats: Float32Array } {
@@ -48,9 +50,11 @@ function parseStl(buf: Buffer): { triCount: number; floats: Float32Array } {
 
 test('downloads a small Dunedin area and matches the stored STL', async ({ page }) => {
     // Seed the saved config before the app boots, so it restores exactly this selection + settings.
-    await page.addInitScript(cfg => {
+    // Also pin the raster resolution (Env reads this override at load) so the mesh stays small.
+    await page.addInitScript(({ cfg, raster }) => {
         localStorage.setItem('previewConfig', JSON.stringify(cfg));
-    }, CONFIG);
+        localStorage.setItem('rasterResolution', String(raster));
+    }, { cfg: CONFIG, raster: RASTER });
     await page.goto('/');
 
     // The stats overlay only appears once the DEM has been sampled and the mesh built.
@@ -58,7 +62,7 @@ test('downloads a small Dunedin area and matches the stored STL', async ({ page 
 
     await page.getByRole('button', { name: 'Open 3D menu' }).click();
     const downloadPromise = page.waitForEvent('download');
-    await page.getByRole('button', { name: 'Save' }).click();
+    await page.getByRole('button', { name: 'Save STL' }).click();
     const download = await downloadPromise;
 
     const chunks: Buffer[] = [];
