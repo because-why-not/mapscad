@@ -231,7 +231,7 @@
                 </div>
                 <div class="flex items-center gap-2">
                     <span class="text-sm flex-1">Raster resolution</span>
-                    <input type="number" min="64" step="64" class="input input-sm input-bordered w-24" bind:value={rasterResolution} onfocus={selectAll} onchange={emit} />
+                    <input type="number" min="64" max="2048" step="64" class="input input-sm input-bordered w-24" bind:value={rasterResolution} onfocus={selectAll} onchange={emit} />
                     <span class="text-sm opacity-60">px</span>
                 </div>
                 <div class="flex flex-col gap-1">

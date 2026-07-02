@@ -246,7 +246,7 @@ export class MapModel {
 function sanitize(s: ModelSettings): ModelSettings {
     return {
         heightZoom: Math.round(num(s.heightZoom, 0)),
-        rasterResolution: Math.min(4096, Math.max(2, Math.floor(num(s.rasterResolution, 512)))),
+        rasterResolution: Math.min(2048, Math.max(2, Math.floor(num(s.rasterResolution, 512)))),
         heightScale: Math.max(0.01, num(s.heightScale, 1)),
         socketEnabled: !!s.socketEnabled,
         socketSize: Math.max(0, num(s.socketSize, 0)),
