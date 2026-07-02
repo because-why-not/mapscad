@@ -1,5 +1,9 @@
 import type { LonLat } from '../SelectionArea';
 import type { TerrariumMapData } from './TerrariumMapData';
+// Imported for local sampling + re-exported, so the sampler stays an import site for pixel-space
+// math while the formula itself lives in MathHelper.
+import { lonLatToWorldPx } from '../MathHelper';
+export { lonLatToWorldPx };
 
 /**
  * Samples a height field over a (possibly rotated) selection rectangle into a grid. Pure:
@@ -20,15 +24,6 @@ export interface HeightGrid {
 }
 
 const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
-
-/** Lon/lat -> global pixel coordinate at a given zoom (Web Mercator, `tileSize`px tiles). */
-export function lonLatToWorldPx(lon: number, lat: number, z: number, tileSize: number): [number, number] {
-    const scale = tileSize * Math.pow(2, z);
-    const x = (lon + 180) / 360 * scale;
-    const s = Math.sin(lat * Math.PI / 180);
-    const y = (0.5 - Math.log((1 + s) / (1 - s)) / (4 * Math.PI)) * scale;
-    return [x, y];
-}
 
 /** Bilinear interpolation of a point inside the rectangle (u,v in [0,1]); corners TL,TR,BR,BL. */
 export function rectPoint(c: LonLat[], u: number, v: number): LonLat {

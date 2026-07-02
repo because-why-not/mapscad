@@ -18,7 +18,7 @@ import { OsmOverlay } from './OsmOverlay';
 import { fetchFeatureRaw, parseWays, waysFromJson, type OsmElement } from './osm/OverpassFeature';
 import { OsmVectorData } from './osm/OsmVectorData';
 import { OSM_FEATURES, osmFeature } from './osm/osmFeatures';
-import { sampleSelectionHeights, rectExtent, groundResolution, tileCoverage } from './HeightSampler';
+import { sampleSelectionHeights, rectExtent, groundResolution, zoomForResolution, tileCoverage } from './HeightSampler';
 import { TerrainPreview } from './TerrainPreview';
 import { MapModel, SelectionShape, type ModelGeometry } from './MapModel';
 import { PreviewConfigStore } from './PreviewConfig';
@@ -86,6 +86,26 @@ function demLabel(name: string): string {
 function demZoomRange(dem: ManifestMap | undefined): { min: number; max: number } {
     if (!dem) return { min: 0, max: 17 };
     return { min: dem.mmapsrv.minStoredZoom ?? dem.minzoom, max: dem.maxzoom };
+}
+
+/**
+ * Zoom slider range + default for a selection, derived from the resolution the mesh will
+ * actually use. The grid is capped to `limit` samples on its long side, so its finest useful
+ * sample spacing is longSideMetres / limit; the (fractional) DEM zoom matching that spacing is
+ * the "natural" zoom — beyond it, finer tiles only add detail the grid discards (slower, and
+ * harder on the external tile servers). We round the natural zoom UP, then:
+ *   - `max`: one level finer than that (a little bilinear headroom) — the user can't pick higher.
+ *   - `def`: one level coarser — the preview opens fast and light.
+ * Both clamped to the zooms the DEM actually stores.
+ */
+function resolutionZoomRange(corners: LonLat[], dem: ManifestMap, limit: number): { min: number; max: number; def: number } {
+    const { min: dMin, max: dMax } = demZoomRange(dem);
+    const { widthMeters, heightMeters } = rectExtent(corners);
+    const longSide = Math.max(widthMeters, heightMeters);
+    const natural = Math.ceil(zoomForResolution(corners[0][1], longSide / limit, dem.mmapsrv.tileSize));
+    const max = Math.min(dMax, natural + 1);
+    const def = Math.max(dMin, Math.min(max, natural - 1));
+    return { min: dMin, max, def };
 }
 
 /** Grid size at a zoom: one sample per DEM pixel, capped to the resolution limit. */
@@ -381,8 +401,9 @@ function onSelectionChange(corners: LonLat[] | null): void {
     else model.setGrid(null); // notifies -> preview clears, stats null
 }
 
-/** A selection the user just drew/edited. A brand-new one defaults its heightmap zoom to
- *  what's currently visible on the map, so we don't fetch far more detail than they see. */
+/** A selection the user just drew/edited. A brand-new one defaults its heightmap zoom from the
+ *  resolution the mesh needs (see resolutionZoomRange), so we don't fetch far more detail than
+ *  the grid will use. */
 function onUserSelectionChange(corners: LonLat[] | null): void {
     // Only seed defaults for a *brand-new* selection: corners exist (one was just drawn),
     // currentCorners is still empty (so it's new, not an edit of an existing one), and we
@@ -397,12 +418,12 @@ function onUserSelectionChange(corners: LonLat[] | null): void {
             appInstance?.setPreviewDem(activeDem); // sync the preview's Source toggle
         }
         if (previewDem) {
-            const { min, max } = demZoomRange(previewDem);
-            const visible = Math.round(controller.getView().zoom);
-            const heightZoom = Math.max(min, Math.min(max, visible));
-            model.applySettings({ heightZoom });
+            // Open at the resolution the mesh actually needs (one level below natural), and cap
+            // how fine the user can go — so we don't fetch far more DEM detail than the grid uses.
+            const { min, max, def } = resolutionZoomRange(corners, previewDem, model.getSettings().resolutionLimit);
+            model.applySettings({ heightZoom: def });
             config.update({ model: model.getSettings() });
-            appInstance?.setPreviewZoomRange(min, max, heightZoom); // move the slider to match
+            appInstance?.setPreviewZoomRange(min, max, def); // move the slider's range + value
         }
     }
     onSelectionChange(corners);
@@ -532,9 +553,16 @@ async function init(): Promise<void> {
         : (resolveSource(PREVIEW_DEM) ?? previewDems[0]?.id ?? '');
     previewDem = mapsById[initialDemId];
 
-    const { min: previewZoomMin, max: previewZoomMax } = demZoomRange(previewDem);
-    // heightZoom 0 means "unset" (no DEM zoom is that low) -> default to the finest level.
-    const heightZoom = cfg.model.heightZoom > 0 ? cfg.model.heightZoom : previewZoomMax;
+    // The zoom slider's range + default. With a restored selection, cap it to the resolution the
+    // mesh needs (as when drawing a new one); otherwise it's just the DEM's full range until a
+    // selection is drawn. A saved heightZoom is kept but clamped down into the capped range; an
+    // unset one (0) opens at the resolution-based default (or the DEM max with no selection).
+    const savedSelection = cfg.selection;
+    const zr = (savedSelection && previewDem)
+        ? resolutionZoomRange(savedSelection, previewDem, cfg.model.resolutionLimit)
+        : { ...demZoomRange(previewDem), def: demZoomRange(previewDem).max };
+    const previewZoomMin = zr.min, previewZoomMax = zr.max;
+    const heightZoom = cfg.model.heightZoom > 0 ? Math.min(cfg.model.heightZoom, previewZoomMax) : zr.def;
     model.applySettings({ ...cfg.model, heightZoom });
     // Fold the resolved DEM + sanitized settings back into the config so it's consistent.
     config.update({ demId: initialDemId, model: model.getSettings() });
@@ -672,7 +700,10 @@ async function init(): Promise<void> {
                 // Keep the current detail level, just clamp it into the new source's range —
                 // don't snap to the new max (e.g. North Island z14 -> Mapterhorn would jump
                 // to z17, downloading far more than asked). safeZoom still trims on resample.
-                const { min, max } = demZoomRange(previewDem);
+                // With a selection, cap the range to the resolution the mesh needs on this DEM.
+                const { min, max } = currentCorners
+                    ? resolutionZoomRange(currentCorners, previewDem, model.getSettings().resolutionLimit)
+                    : demZoomRange(previewDem);
                 const heightZoom = Math.max(min, Math.min(max, model.getSettings().heightZoom));
                 model.applySettings({ heightZoom });
                 config.update({ demId: id, model: model.getSettings() });
@@ -686,6 +717,15 @@ async function init(): Promise<void> {
                 model.applySettings(s); // rebuilds geometry from the current grid
                 config.update({ model: model.getSettings(), display: { smoothShading: s.smoothShading ?? true } });
                 preview?.setSmoothShading(s.smoothShading ?? true); // display-only
+                // The resolution limit drives the zoom cap (finest useful detail), so recompute
+                // the slider range + clamp the current zoom into it when it changes.
+                if (s.resolutionLimit !== prev.resolutionLimit && currentCorners && previewDem) {
+                    const { min, max } = resolutionZoomRange(currentCorners, previewDem, s.resolutionLimit);
+                    const heightZoom = Math.max(min, Math.min(max, model.getSettings().heightZoom));
+                    model.applySettings({ heightZoom });
+                    config.update({ model: model.getSettings() });
+                    appInstance?.setPreviewZoomRange(min, max, heightZoom);
+                }
                 // Zoom / resolution change the sampling itself, so re-fetch the heights.
                 if (s.heightZoom !== prev.heightZoom || s.resolutionLimit !== prev.resolutionLimit) {
                     scheduleResample();

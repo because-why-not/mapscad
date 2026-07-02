@@ -3,6 +3,11 @@ import type { LonLat } from './SelectionArea';
 import { lonLatToWorldPx, sampleHeights, type HeightGrid } from './dem/Sampler';
 import { TerrariumMapData } from './dem/TerrariumMapData';
 import { downloadRaster, type DownloadOptions } from './dem/TileDownloader';
+import { DEFAULT_TILE_SIZE, haversine, groundResolution } from './MathHelper';
+
+// Re-exported so callers can keep importing the ground-resolution / zoom math from the sampler
+// facade; the formulas themselves live in MathHelper.
+export { groundResolution, zoomForResolution } from './MathHelper';
 
 /**
  * Orchestrates the DEM height pipeline: it owns the geometry (which tiles a selection
@@ -19,27 +24,7 @@ import { downloadRaster, type DownloadOptions } from './dem/TileDownloader';
 export type { HeightGrid };
 export type SampleOptions = DownloadOptions;
 
-const TILE = 256;
-const EARTH_CIRCUMFERENCE = 40075016.686;
-
-function haversine([lon1, lat1]: LonLat, [lon2, lat2]: LonLat): number {
-    const R = 6378137;
-    const dLat = (lat2 - lat1) * Math.PI / 180;
-    const dLon = (lon2 - lon1) * Math.PI / 180;
-    const a = Math.sin(dLat / 2) ** 2
-        + Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLon / 2) ** 2;
-    return 2 * R * Math.asin(Math.sqrt(a));
-}
-
-/**
- * Web Mercator ground resolution (metres per DEM pixel) at a zoom and latitude.
- * `tileSize` is the source's pixels-per-tile (256 for most, 512 for e.g. Mapterhorn):
- * a 512px tile packs twice the pixels into the same geographic span, so it's twice as
- * fine at the same zoom.
- */
-export function groundResolution(lat: number, zoom: number, tileSize = TILE): number {
-    return EARTH_CIRCUMFERENCE * Math.cos(lat * Math.PI / 180) / (tileSize * Math.pow(2, zoom));
-}
+const TILE = DEFAULT_TILE_SIZE;
 
 /** Real-world width (TL→TR) and height (TL→BL) of the selection rectangle, in metres. */
 export function rectExtent(corners: LonLat[]): { widthMeters: number; heightMeters: number } {
