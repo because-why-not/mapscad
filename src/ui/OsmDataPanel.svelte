@@ -1,5 +1,7 @@
 <script>
     import { untrack } from 'svelte';
+    import Attribution from './Attribution.svelte';
+    import { OSM_DATA_API } from '../osm/dataSources';
 
     // The OSM "Data" tab body: per-feature download / save-load, plus the object list with
     // mark → enable/disable editing. Owns all data state; the parent (MapPanel) keeps the
@@ -309,4 +311,7 @@
         {/each}
         <input type="file" accept=".json,application/json" bind:this={fileInput} onchange={loadJson} class="hidden" />
     {/if}
+
+    <div class="px-4 py-1 mt-2 text-xs font-bold uppercase tracking-wider opacity-50">Attribution</div>
+    <Attribution attribution={OSM_DATA_API.attribution} />
 </div>

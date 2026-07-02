@@ -2,6 +2,7 @@ import type { LonLat } from '../mathHelper';
 import { Env } from '../Env';
 import { cornersToBBox } from './bbox';
 import { buildQuery, type OsmFeatureDef } from './osmFeatures';
+import { OSM_DATA_API } from './dataSources';
 
 /**
  * Generic OSM-feature fetcher: pure network + parsing, no map/DOM coupling. Replaces the old
@@ -12,7 +13,7 @@ import { buildQuery, type OsmFeatureDef } from './osmFeatures';
  * deletion), its `name` tag if present, and its `[lon, lat]` geometry (a ring for area features).
  */
 
-const OVERPASS_URL = 'https://overpass-api.de/api/interpreter';
+const OVERPASS_URL = OSM_DATA_API.endpoint;
 
 /** One OSM way: identity (id + optional name) plus its geometry (a closed ring for area features). */
 export interface OsmElement {
