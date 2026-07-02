@@ -363,15 +363,19 @@ function updatePreviewStats(geo: ModelGeometry | null): void {
     if (!grid || !geo) { appInstance?.setPreviewStats(null); return; }
     const mem = measureMemory(geo, grid); // realistic: from the actual built mesh, not a grid guess
     const surfaceVerts = grid.cols * grid.rows;
+    // Ground resolution (metres per DEM pixel) at the heightmap zoom, and the DEM's effective pixel
+    // size over the selection — now distinct from the raster grid, since the DEM is interpolated to
+    // fill the grid. Lets the user compare real heightmap detail against the vertex grid below it.
+    const hmRes = currentCorners
+        ? groundResolution(currentCorners[0][1], grid.zoom, previewDem?.mmapsrv.tileSize)
+        : undefined;
     appInstance?.setPreviewStats({
         vertices: geo.vertexCount,
         triangles: geo.triangleCount,
         zoom: grid.zoom,
-        // Ground resolution (metres per DEM pixel) at the heightmap zoom, so the user sees what
-        // the raw zoom level means physically for this latitude/source.
-        zoomResolution: currentCorners
-            ? groundResolution(currentCorners[0][1], grid.zoom, previewDem?.mmapsrv.tileSize)
-            : undefined,
+        zoomResolution: hmRes,
+        heightmapCols: hmRes ? Math.max(1, Math.round(grid.widthMeters / hmRes)) : undefined,
+        heightmapRows: hmRes ? Math.max(1, Math.round(grid.heightMeters / hmRes)) : undefined,
         widthMeters: Math.round(grid.widthMeters),
         heightMeters: Math.round(grid.heightMeters),
         minThickness: geo.minThickness,   // thinnest/thickest solid column, export units

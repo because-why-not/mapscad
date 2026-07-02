@@ -29,6 +29,8 @@
     let menuOpen = $state(false);
     let previewStats = $state(null);
     export function setPreviewStats(stats) { previewStats = stats; }
+    // Collapse the stats overlay down to just its toggle arrow (it can cover the model).
+    let statsCollapsed = $state(false);
 
     // Bottom loading bar: null = hidden. Download phase = { loaded, total } (DEM tiles); build phase
     // = { percent } (off-thread geometry build). The two render differently; both are cancellable.
@@ -122,15 +124,25 @@
     <div class="panel-mount" id="preview-mount" bind:this={mountEl}></div>
 
     {#if previewStats}
-        <div class="absolute top-4 left-4 z-[1000] bg-base-100/80 backdrop-blur rounded shadow-md px-3 py-2 text-xs font-mono leading-5 pointer-events-none">
-            <div>Selection: {fmt(previewStats.widthMeters)} × {fmt(previewStats.heightMeters)} m</div>
-            <div>Min / Max height: {fmtH(previewStats.minHeight)} / {fmtH(previewStats.maxHeight)} m</div>
-            <div>Detail: {fmt(previewStats.gridCols)} × {fmt(previewStats.gridRows)} vtx ({fmtArea(previewStats.vertexSpacing)} m/vtx)</div>
-            <div>Heightmap zoom: z{previewStats.zoom}{#if previewStats.zoomResolution != null} ({fmtArea(previewStats.zoomResolution)} m/px){/if}</div>
-            <div>Vertices: {fmt(previewStats.vertices)}</div>
-            <div>Triangles: {fmt(previewStats.triangles)}</div>
-            <div class={memColor[previewStats.memoryLevel]}>Memory: ~{previewStats.memoryText}</div>
-            <div>Min / Max thickness: {fmtH(previewStats.minThickness)} / {fmtH(previewStats.maxThickness)} units</div>
+        <div class="absolute top-4 left-4 z-[1000] bg-base-100/80 backdrop-blur rounded shadow-md text-xs font-mono leading-5 pointer-events-none">
+            <button
+                class="block px-2 py-0.5 leading-none opacity-50 hover:opacity-100 cursor-pointer pointer-events-auto"
+                title={statsCollapsed ? 'Show stats' : 'Hide stats'}
+                aria-label={statsCollapsed ? 'Show stats' : 'Hide stats'}
+                onclick={() => statsCollapsed = !statsCollapsed}
+            >{statsCollapsed ? '▸' : '▾'}</button>
+            {#if !statsCollapsed}
+                <div class="px-3 pb-2">
+                    <div>Selection: {fmt(previewStats.widthMeters)} × {fmt(previewStats.heightMeters)} m</div>
+                    <div>Min / Max height: {fmtH(previewStats.minHeight)} / {fmtH(previewStats.maxHeight)} m</div>
+                    <div>Height Detail: {#if previewStats.heightmapCols != null}{fmt(previewStats.heightmapCols)} × {fmt(previewStats.heightmapRows)} px ({fmtArea(previewStats.zoomResolution)} m/px) {/if} z{previewStats.zoom}</div>
+                    <div>Vertex Detail: {fmt(previewStats.gridCols)} × {fmt(previewStats.gridRows)} vtx ({fmtArea(previewStats.vertexSpacing)} m/vtx)</div>
+                    <div>Vertices: {fmt(previewStats.vertices)}</div>
+                    <div>Triangles: {fmt(previewStats.triangles)}</div>
+                    <div class={memColor[previewStats.memoryLevel]}>Memory: ~{previewStats.memoryText}</div>
+                    <div>Min / Max thickness: {fmtH(previewStats.minThickness)} / {fmtH(previewStats.maxThickness)} units</div>
+                </div>
+            {/if}
         </div>
     {/if}
 
