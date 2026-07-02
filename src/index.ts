@@ -728,17 +728,15 @@ async function init(): Promise<void> {
             onPreviewDemChange: (id: string) => {
                 if (!mapsById[id]) return;
                 previewDem = mapsById[id];
-                // Keep the current detail level, just clamp it into the new source's range —
-                // don't snap to the new max (e.g. North Island z14 -> Mapterhorn would jump
-                // to z17, downloading far more than asked). safeZoom still trims on resample.
-                // With a selection, cap the range to the resolution the mesh needs on this DEM.
-                const { min, max } = currentCorners
+                // Reset the zoom to the new source's resolution-based default — each DEM has its own
+                // native detail, so carrying the old level over rarely makes sense (and can over-
+                // fetch). With a selection, that default + range come from the resolution the mesh needs.
+                const { min, max, def } = currentCorners
                     ? resolutionZoomRange(currentCorners, previewDem, model.getSettings().resolutionLimit)
-                    : demZoomRange(previewDem);
-                const heightZoom = Math.max(min, Math.min(max, model.getSettings().heightZoom));
-                model.applySettings({ heightZoom });
+                    : { ...demZoomRange(previewDem), def: demZoomRange(previewDem).max };
+                model.applySettings({ heightZoom: def });
                 config.update({ demId: id, model: model.getSettings() });
-                appInstance?.setPreviewZoomRange(min, max, heightZoom); // move the slider's range + value
+                appInstance?.setPreviewZoomRange(min, max, def); // move the slider's range + value
                 resample();
             },
             //triggered when the user changes settings in the side menu
