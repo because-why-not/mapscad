@@ -4,7 +4,7 @@
 // spread-apart tiles. We drive `buildModelGeometry` directly (no DOM) with a hand-made coverage.
 import { describe, it, expect } from 'vitest';
 import { buildModelGeometry, type OsmBody } from '../../src/model/buildGeometry';
-import { DEFAULT_MODEL_SETTINGS, type ModelSettings } from '../../src/MapModel';
+import { DEFAULT_MODEL_SETTINGS, SelectionShape, type ModelSettings } from '../../src/MapModel';
 import type { HeightGrid } from '../../src/HeightSampler';
 
 function flatGrid(cols: number, rows: number, w = 60, h = 30): HeightGrid {
@@ -69,5 +69,31 @@ describe('tiling reshapes OSM coverage with the terrain', () => {
         // Tiling grows the width (4 cols → 6), so the feature now reaches the wider terrain, not the
         // old compressed extent it used to float over.
         expect(spanX(featTiled)).toBeGreaterThan(spanX(featUntiled));
+    });
+});
+
+describe('oval selection clips OSM feature bodies to the footprint', () => {
+    it('masks a full-coverage feature to the ellipse — it does NOT run out over the cut-off corners', () => {
+        const grid = flatGrid(9, 9, 80, 80);
+        const rect = buildModelGeometry({ grid, settings: settings({}), osmBodies: [fullCoverage(9, 9)] });
+        const oval = buildModelGeometry(
+            { grid, settings: settings({ shape: SelectionShape.Oval }), osmBodies: [fullCoverage(9, 9)] });
+
+        const rectFeat = rect.bodies.find(b => b.kind === 'streets')!;
+        const ovalFeat = oval.bodies.find(b => b.kind === 'streets')!;
+        // The oval mask drops the corner cells, so the clipped feature has fewer vertices than the
+        // full-rectangle one (the bug: it used to keep the whole rectangle).
+        expect(ovalFeat.positions.length).toBeLessThan(rectFeat.positions.length);
+        // No feature vertex may sit in a cut-off corner (both |x| and |z| near the half-extent — well
+        // outside the inscribed ellipse). The rectangle feature does reach those corners.
+        const halfX = grid.widthMeters / 2, halfZ = grid.heightMeters / 2;
+        const reachesCorner = (b: { positions: Float32Array }) => {
+            for (let i = 0; i < b.positions.length; i += 3) {
+                if (Math.abs(b.positions[i]) > halfX * 0.9 && Math.abs(b.positions[i + 2]) > halfZ * 0.9) return true;
+            }
+            return false;
+        };
+        expect(reachesCorner(rectFeat)).toBe(true);
+        expect(reachesCorner(ovalFeat)).toBe(false);
     });
 });

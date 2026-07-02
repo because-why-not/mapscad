@@ -77,7 +77,11 @@ export function buildModelGeometry(input: BuildInput, hooks: BuildHooks = {}): M
 
     // OSM features ride on top of the terrain as their own draped solids, appended as extra bodies.
     // They build against the reshaped grid + remapped coverage, so they line up with the tiled terrain.
-    const geo = appendOsmBodies(terrain, grid, s, osmBodies);
+    // An oval selection carves the terrain with a cell-centre mask (not NaN in the height field), so
+    // pass that same mask down to clip the feature bodies to the oval too — otherwise a separate-object
+    // track would run out over the cut-off corners.
+    const terrainMask = s.shape === 'oval' ? ovalCellMask(grid.cols, grid.rows) : undefined;
+    const geo = appendOsmBodies(terrain, grid, s, osmBodies, terrainMask);
     report(1);
     return geo;
 }
@@ -143,6 +147,7 @@ function buildTerrain(grid: HeightGrid, s: ModelSettings): ModelGeometry {
  *  with the reshaped terrain and split at its tile cuts. */
 function appendOsmBodies(
     terrain: ModelGeometry, grid: HeightGrid, s: ModelSettings, osmBodies: OsmBody[] | undefined,
+    terrainMask?: (cc: number, cr: number) => boolean,
 ): ModelGeometry {
     if (!osmBodies || osmBodies.length === 0) return terrain;
     // The surface features ride on: the same per-cell elevation chain the terrain used, over the same
@@ -151,7 +156,7 @@ function appendOsmBodies(
     const bodies = terrain.bodies.slice();
     let { vertexCount, triangleCount, minY, maxY } = terrain;
     for (const feature of osmBodies) {
-        const built = buildFeatureBody(grid, surface, feature);
+        const built = buildFeatureBody(grid, surface, feature, terrainMask);
         if (!built) continue;
         built.body.kind = feature.id;
         bodies.push(built.body);
@@ -170,6 +175,7 @@ function appendOsmBodies(
  *  null when nothing is covered. */
 function buildFeatureBody(
     grid: HeightGrid, surface: Float32Array, feature: OsmBody,
+    keep?: (cc: number, cr: number) => boolean,
 ): { body: ModelBody; minY: number; maxY: number } | null {
     const { cols, rows, widthMeters, heightMeters } = grid;
     const cov = feature.coverage;
@@ -181,6 +187,7 @@ function buildFeatureBody(
     const hasData = (c: number, r: number) => { const v = surface[r * cols + c]; return v === v; }; // !NaN
     const inside = (cc: number, cr: number): boolean => {
         if (cc < 0 || cr < 0 || cc >= cols - 1 || cr >= rows - 1) return false;
+        if (keep && !keep(cc, cr)) return false; // clip to the terrain footprint (e.g. the oval mask)
         if (!(hasData(cc, cr) && hasData(cc + 1, cr) && hasData(cc, cr + 1) && hasData(cc + 1, cr + 1))) return false;
         const m = Math.max(cov[cr * cols + cc], cov[cr * cols + cc + 1], cov[(cr + 1) * cols + cc], cov[(cr + 1) * cols + cc + 1]);
         return m > OSM_COVERAGE_THRESHOLD;
@@ -313,19 +320,23 @@ function applyElevation(grid: HeightGrid, s: ModelSettings): Float32Array {
  */
 function buildOval(grid: HeightGrid, s: ModelSettings): ModelGeometry {
     const { cols, rows } = grid;
+    const inside = ovalCellMask(cols, rows);
+    const processed = applyElevation(grid, s);
+    const keep = (cc: number, cr: number) => inside(cc, cr) && cellHasData(processed, cols, rows, cc, cr);
+    return buildKept(grid, processed, keep, s);
+}
 
-    // A cell (cc,cr) spans grid columns cc..cc+1 and rows cr..cr+1; keep it if its centre is inside
-    // the unit ellipse AND all four corners carry data (no-data carves holes in the oval too).
-    const inside = (cc: number, cr: number): boolean => {
+/** Inscribed-ellipse cell mask: true where cell (cc,cr)'s CENTRE lies inside the oval that fits the
+ *  sampled rectangle. The single definition of the oval footprint — used both to carve the terrain
+ *  and to clip OSM feature bodies to it, so separate-object features stop at the same outline instead
+ *  of running out over the cut-off corners. A cell spans grid columns cc..cc+1 and rows cr..cr+1. */
+function ovalCellMask(cols: number, rows: number): (cc: number, cr: number) => boolean {
+    return (cc, cr) => {
         if (cc < 0 || cr < 0 || cc >= cols - 1 || cr >= rows - 1) return false;
         const du = 2 * ((cc + 0.5) / (cols - 1)) - 1;
         const dv = 2 * ((cr + 0.5) / (rows - 1)) - 1;
         return du * du + dv * dv <= 1;
     };
-
-    const processed = applyElevation(grid, s);
-    const keep = (cc: number, cr: number) => inside(cc, cr) && cellHasData(processed, cols, rows, cc, cr);
-    return buildKept(grid, processed, keep, s);
 }
 
 /** Emit one masked solid over the cells kept by `keep`: top + (when socketed) base & boundary walls.
