@@ -1,5 +1,5 @@
 import type { HeightGrid } from '../HeightSampler';
-import type { ModelSettings, ModelGeometry, ModelTile } from '../MapModel';
+import type { ModelSettings, ModelGeometry, ModelBody } from '../MapModel';
 import {
     type ElevationGridProcessor, TileDividerProcessor,
     type ElevationValueProcessor, type ElevationContext, HeightScaleProcessor, WaterProcessor, LowCutProcessor,
@@ -60,7 +60,7 @@ export function buildModelGeometry(input: BuildInput, hooks: BuildHooks = {}): M
     report(0.2);
 
     const terrain = buildTerrain(grid, s);
-    for (const t of terrain.tiles) t.kind = 'terrain';
+    for (const b of terrain.bodies) b.kind = 'terrain';
     report(0.9);
 
     // OSM features ride on top of the terrain as their own draped solids, appended as extra bodies.
@@ -92,11 +92,11 @@ function buildTerrain(grid: HeightGrid, s: ModelSettings): ModelGeometry {
 
     // Lowest model-space surface (incl. water), so the socket floor sits below the water.
     const minY = minOf(processed);
-    const tile = buildTile(grid, processed, 0, cols - 1, 0, rows - 1, 0, 0, minY, s);
+    const body = buildBody(grid, processed, 0, cols - 1, 0, rows - 1, 0, 0, minY, s);
 
     let lowY = Infinity, highY = -Infinity;
-    for (let i = 1; i < tile.positions.length; i += 3) {
-        const y = tile.positions[i];
+    for (let i = 1; i < body.positions.length; i += 3) {
+        const y = body.positions[i];
         if (y < lowY) lowY = y;
         if (y > highY) highY = y;
     }
@@ -113,9 +113,9 @@ function buildTerrain(grid: HeightGrid, s: ModelSettings): ModelGeometry {
     }
 
     return {
-        tiles: [tile], widthMeters, heightMeters,
-        vertexCount: tile.positions.length / 3,
-        triangleCount: tile.indices.length / 3,
+        bodies: [body], widthMeters, heightMeters,
+        vertexCount: body.positions.length / 3,
+        triangleCount: body.indices.length / 3,
         minY: lowY, maxY: highY,
         socketStartY: s.socketEnabled ? minY : null,
         minThickness, maxThickness,
@@ -129,25 +129,25 @@ function buildTerrain(grid: HeightGrid, s: ModelSettings): ModelGeometry {
  *  pre-tiling sampled grid the coverage rasters align with); tiling reshapes the terrain but features
  *  stay whole, mirroring how ovals ignore tiling. */
 function appendOsmBodies(
-    terrain: ModelGeometry, originalGrid: HeightGrid, s: ModelSettings, bodies: OsmBody[] | undefined,
+    terrain: ModelGeometry, originalGrid: HeightGrid, s: ModelSettings, osmBodies: OsmBody[] | undefined,
 ): ModelGeometry {
-    if (!bodies || bodies.length === 0) return terrain;
+    if (!osmBodies || osmBodies.length === 0) return terrain;
     // The surface features ride on: the same per-cell elevation chain the terrain used, over the
     // original (un-tiled) grid so heights line up with the coverage rasters.
     const surface = applyElevation(originalGrid, s);
-    const tiles = terrain.tiles.slice();
+    const bodies = terrain.bodies.slice();
     let { vertexCount, triangleCount, minY, maxY } = terrain;
-    for (const body of bodies) {
-        const built = buildFeatureBody(originalGrid, surface, body);
+    for (const feature of osmBodies) {
+        const built = buildFeatureBody(originalGrid, surface, feature);
         if (!built) continue;
-        built.tile.kind = body.id;
-        tiles.push(built.tile);
-        vertexCount += built.tile.positions.length / 3;
-        triangleCount += built.tile.indices.length / 3;
+        built.body.kind = feature.id;
+        bodies.push(built.body);
+        vertexCount += built.body.positions.length / 3;
+        triangleCount += built.body.indices.length / 3;
         minY = Math.min(minY, built.minY);
         maxY = Math.max(maxY, built.maxY);
     }
-    return { ...terrain, tiles, vertexCount, triangleCount, minY, maxY };
+    return { ...terrain, bodies, vertexCount, triangleCount, minY, maxY };
 }
 
 /** One OSM feature as a closed solid draped on the terrain: top = surface + coverage·raise (so
@@ -156,15 +156,15 @@ function appendOsmBodies(
  *  coverage threshold and all four corners carry terrain data; every boundary edge is walled. Returns
  *  null when nothing is covered. */
 function buildFeatureBody(
-    grid: HeightGrid, surface: Float32Array, body: OsmBody,
-): { tile: ModelTile; minY: number; maxY: number } | null {
+    grid: HeightGrid, surface: Float32Array, feature: OsmBody,
+): { body: ModelBody; minY: number; maxY: number } | null {
     const { cols, rows, widthMeters, heightMeters } = grid;
-    const cov = body.coverage;
+    const cov = feature.coverage;
     const X = (c: number) => -widthMeters / 2 + (c / (cols - 1)) * widthMeters;
     const Z = (r: number) => heightMeters / 2 - (r / (rows - 1)) * heightMeters;
     // Sink the base below the surface so the body always overlaps the terrain solid (robust union, no
     // coplanar z-fighting). Proportional to the raise so it scales with the feature's own height.
-    const fuse = Math.max(SOCKET_FLOOR_OFFSET, Math.abs(body.raise) * 0.5);
+    const fuse = Math.max(SOCKET_FLOOR_OFFSET, Math.abs(feature.raise) * 0.5);
     const hasData = (c: number, r: number) => { const v = surface[r * cols + c]; return v === v; }; // !NaN
     const inside = (cc: number, cr: number): boolean => {
         if (cc < 0 || cr < 0 || cc >= cols - 1 || cr >= rows - 1) return false;
@@ -174,7 +174,7 @@ function buildFeatureBody(
     };
 
     type V = [number, number, number];
-    const top = (c: number, r: number): V => [X(c), surface[r * cols + c] + body.raise * cov[r * cols + c], Z(r)];
+    const top = (c: number, r: number): V => [X(c), surface[r * cols + c] + feature.raise * cov[r * cols + c], Z(r)];
     const bot = (c: number, r: number): V => [X(c), surface[r * cols + c] - fuse, Z(r)];
 
     const positions: number[] = [];
@@ -203,16 +203,16 @@ function buildFeatureBody(
         if (positions[i] > maxY) maxY = positions[i];
     }
     const welded = weldIndexed(positions, indices);
-    const tile: ModelTile = { positions: welded.positions, indices: welded.indices, ix0: 0, iy0: 0 };
-    return { tile, minY, maxY };
+    const body: ModelBody = { positions: welded.positions, indices: welded.indices, ix0: 0, iy0: 0 };
+    return { body, minY, maxY };
 }
 
-/** Build one independent solid spanning grid columns c0..c1 and rows r0..r1. */
-function buildTile(
+/** Build one independent solid body spanning grid columns c0..c1 and rows r0..r1. */
+function buildBody(
     grid: HeightGrid, processed: Float32Array,
     c0: number, c1: number, r0: number, r1: number, ix0: number, iy0: number, minY: number,
     s: ModelSettings,
-): ModelTile {
+): ModelBody {
     const { cols, rows, widthMeters, heightMeters } = grid;
     const tcols = c1 - c0 + 1, trows = r1 - r0 + 1;
 
@@ -337,12 +337,12 @@ function buildKept(
     }
     if (!Number.isFinite(minSurf)) {
         return {
-            tiles: [], widthMeters, heightMeters, vertexCount: 0, triangleCount: 0,
+            bodies: [], widthMeters, heightMeters, vertexCount: 0, triangleCount: 0,
             minY: 0, maxY: 0, socketStartY: null, minThickness: 0, maxThickness: 0,
         };
     }
 
-    const tile = buildMaskedTile(grid, processed, keep, minSurf, s);
+    const body = buildMaskedBody(grid, processed, keep, minSurf, s);
     let minThickness = 0, maxThickness = 0, lowY = minSurf;
     if (s.socketEnabled) {
         const baseY = minSurf - Math.max(s.socketSize, SOCKET_FLOOR_OFFSET);
@@ -351,20 +351,20 @@ function buildKept(
         maxThickness = highY - baseY;
     }
     return {
-        tiles: [tile], widthMeters, heightMeters,
-        vertexCount: tile.positions.length / 3,
-        triangleCount: tile.indices.length / 3,
+        bodies: [body], widthMeters, heightMeters,
+        vertexCount: body.positions.length / 3,
+        triangleCount: body.indices.length / 3,
         minY: lowY, maxY: highY,
         socketStartY: s.socketEnabled ? minSurf : null,
         minThickness, maxThickness,
     };
 }
 
-/** One solid over the kept cells: top + (when socketed) base & boundary walls. */
-function buildMaskedTile(
+/** One solid body over the kept cells: top + (when socketed) base & boundary walls. */
+function buildMaskedBody(
     grid: HeightGrid, processed: Float32Array, inside: (cc: number, cr: number) => boolean, minSurf: number,
     s: ModelSettings,
-): ModelTile {
+): ModelBody {
     const { cols, rows, widthMeters, heightMeters } = grid;
     const X = (c: number) => -widthMeters / 2 + (c / (cols - 1)) * widthMeters;
     const Z = (r: number) => heightMeters / 2 - (r / (rows - 1)) * heightMeters;

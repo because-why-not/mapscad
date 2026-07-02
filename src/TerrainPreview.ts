@@ -1,11 +1,19 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import type { ModelGeometry } from './MapModel';
+import { OSM_FEATURES } from './osm/osmFeatures';
+
+// Separated OSM bodies are tinted their feature colour so the multi-object (multi-colour print)
+// split is obvious in the preview; keyed by body `kind` (the feature id). Reuses the same colours
+// the 2D overlay uses, so map, preview and 3MF agree.
+const KIND_COLORS: Record<string, string> = Object.fromEntries(
+    OSM_FEATURES.map(f => [f.id, f.strokeColor]),
+);
 
 /**
  * Custom 3D terrain preview (not one of the map engines). It is a pure consumer of the
  * MapModel's neutral geometry: feed it a ModelGeometry (metre-space vertices + indices,
- * one solid per tile) and it renders it. All surface/socket/tile/exaggeration decisions
+ * one solid per body) and it renders it. All surface/socket/tile/exaggeration decisions
  * live in MapModel, so the preview and the exported STL show the identical solid.
  */
 export class TerrainPreview {
@@ -16,6 +24,9 @@ export class TerrainPreview {
     private controls: OrbitControls;
     private group: THREE.Group;
     private material: THREE.MeshStandardMaterial;
+    // Per-kind recoloured clones of `material` for separated OSM bodies, created lazily and cached
+    // (one per feature kind, reused across rebuilds). Disposed with the preview, not per rebuild.
+    private kindMaterials = new Map<string, THREE.MeshStandardMaterial>();
     private socketLineMaterial: THREE.LineBasicMaterial;
     private framed = false; // only auto-frame the first model after the view was empty
     private lastW = 0;       // extent of the current model, for the reset-camera button
@@ -94,11 +105,11 @@ export class TerrainPreview {
         this.renderer.render(this.scene, this.camera);
     };
 
-    /** Render a MapModel geometry (or null to clear). One Three mesh per tile. */
+    /** Render a MapModel geometry (or null to clear). One Three mesh per body. */
     setGeometry(geo: ModelGeometry | null): void {
         this.clear();
         this.requestRender(); // content changed (cleared or rebuilt) — redraw regardless of the camera
-        if (!geo || geo.tiles.length === 0) {
+        if (!geo || geo.bodies.length === 0) {
             this.framed = false; // next model after an empty view gets re-framed
             return;
         }
@@ -108,12 +119,12 @@ export class TerrainPreview {
         // Y is real elevation (not centred on 0), so frame around the model's vertical midpoint.
         this.lastCY = (geo.minY + geo.maxY) / 2;
 
-        for (const tile of geo.tiles) {
+        for (const body of geo.bodies) {
             const buf = new THREE.BufferGeometry();
-            buf.setAttribute('position', new THREE.BufferAttribute(tile.positions, 3));
-            buf.setIndex(new THREE.BufferAttribute(tile.indices, 1));
+            buf.setAttribute('position', new THREE.BufferAttribute(body.positions, 3));
+            buf.setIndex(new THREE.BufferAttribute(body.indices, 1));
             buf.computeVertexNormals();
-            const mesh = new THREE.Mesh(buf, this.material);
+            const mesh = new THREE.Mesh(buf, this.materialForKind(body.kind));
             this.group.add(mesh);
         }
 
@@ -148,6 +159,20 @@ export class TerrainPreview {
         this.group.clear();
     }
 
+    /** The material for a body: the base terrain material, or a cached recoloured clone for a
+     *  separated OSM feature (terrain / unknown kinds keep the base material). */
+    private materialForKind(kind: string | undefined): THREE.MeshStandardMaterial {
+        const color = kind ? KIND_COLORS[kind] : undefined;
+        if (!color) return this.material;
+        let mat = this.kindMaterials.get(kind!);
+        if (!mat) {
+            mat = this.material.clone();
+            mat.color.set(color);
+            this.kindMaterials.set(kind!, mat);
+        }
+        return mat;
+    }
+
     /** Re-frame the camera to the default south-looking view of the current model. */
     resetCamera(): void {
         if (this.lastW > 0 || this.lastH > 0) this.frameCamera(this.lastW, this.lastH);
@@ -157,6 +182,10 @@ export class TerrainPreview {
     setSmoothShading(enabled: boolean): void {
         this.material.flatShading = !enabled;
         this.material.needsUpdate = true;
+        for (const mat of this.kindMaterials.values()) {
+            mat.flatShading = !enabled;
+            mat.needsUpdate = true;
+        }
         this.requestRender();
     }
 
@@ -244,6 +273,7 @@ export class TerrainPreview {
         window.removeEventListener('pointerup', this.onPointerUp);
         this.clear();
         this.material.dispose();
+        for (const mat of this.kindMaterials.values()) mat.dispose();
         this.socketLineMaterial.dispose();
         this.controls.dispose();
         this.renderer.dispose();

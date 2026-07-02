@@ -18,10 +18,10 @@ ctx.onmessage = (e: MessageEvent<BuildRequest>) => {
         const geo = buildModelGeometry({ grid, settings, osmBodies }, {
             onProgress: (fraction) => ctx.postMessage({ type: 'progress', id, fraction }),
         });
-        // Transfer the tile buffers (positions + indices) back — they're freshly built here, so the
+        // Transfer the body buffers (positions + indices) back — they're freshly built here, so the
         // worker has no further use for them.
         const transfer: ArrayBuffer[] = [];
-        for (const t of geo.tiles) transfer.push(t.positions.buffer as ArrayBuffer, t.indices.buffer as ArrayBuffer);
+        for (const b of geo.bodies) transfer.push(b.positions.buffer as ArrayBuffer, b.indices.buffer as ArrayBuffer);
         ctx.postMessage({ type: 'done', id, geo }, transfer);
     } catch (err) {
         ctx.postMessage({ type: 'error', id, message: String((err as Error)?.message ?? err) });

@@ -1,4 +1,4 @@
-import type { MapModel, ModelGeometry, ModelTile } from './MapModel';
+import type { MapModel, ModelGeometry, ModelBody } from './MapModel';
 
 /**
  * Serialises a MapModel's neutral geometry to a single binary STL. It does no geometry math
@@ -10,8 +10,8 @@ import type { MapModel, ModelGeometry, ModelTile } from './MapModel';
 
 export function exportModelStl(model: MapModel, baseName = 'mapscad'): void {
     const geo = model.buildGeometry();
-    if (!geo || geo.tiles.length === 0) return;
-    const blob = new Blob([geometryToBinaryStl(geo.tiles)], { type: 'application/octet-stream' });
+    if (!geo || geo.bodies.length === 0) return;
+    const blob = new Blob([geometryToBinaryStl(geo.bodies)], { type: 'application/octet-stream' });
     download(blob, `${baseName}.stl`);
 }
 
@@ -20,18 +20,18 @@ export function triangleCount(geo: ModelGeometry): number {
     return geo.triangleCount;
 }
 
-/** All tiles concatenated into one binary STL — each tile keeps its own (disconnected)
+/** All bodies concatenated into one binary STL — each body keeps its own (disconnected)
  *  triangles, so distinct bodies survive as distinct components in the single file. */
-function geometryToBinaryStl(tiles: ModelTile[]): ArrayBuffer {
+function geometryToBinaryStl(bodies: ModelBody[]): ArrayBuffer {
     let triCount = 0;
-    for (const t of tiles) triCount += t.indices.length / 3;
+    for (const b of bodies) triCount += b.indices.length / 3;
 
     const buffer = new ArrayBuffer(80 + 4 + triCount * 50); // header + count + 50B/tri
     const view = new DataView(buffer);
     view.setUint32(80, triCount, true);
 
     let offset = 84;
-    for (const { positions, indices } of tiles) {
+    for (const { positions, indices } of bodies) {
         const tris = indices.length / 3;
         for (let t = 0; t < tris; t++) {
             const ia = indices[t * 3], ib = indices[t * 3 + 1], ic = indices[t * 3 + 2];

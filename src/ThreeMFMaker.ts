@@ -1,4 +1,4 @@
-import type { MapModel, ModelTile } from './MapModel';
+import type { MapModel, ModelBody } from './MapModel';
 import { osmFeature } from './osm/osmFeatures';
 
 /**
@@ -17,20 +17,20 @@ const TERRAIN_COLOR = '#B0B0B0';
 
 export function exportModel3mf(model: MapModel, baseName = 'mapscad'): void {
     const geo = model.buildGeometry();
-    if (!geo || geo.tiles.length === 0) return;
-    const blob = new Blob([threeMfArchive(geo.tiles) as BlobPart], { type: 'model/3mf' });
+    if (!geo || geo.bodies.length === 0) return;
+    const blob = new Blob([threeMfArchive(geo.bodies) as BlobPart], { type: 'model/3mf' });
     download(blob, `${baseName}.3mf`);
 }
 
-/** Pure: build the 3MF (zip) bytes from the model tiles. Bodies are grouped by `kind` into one named,
+/** Pure: build the 3MF (zip) bytes from the model bodies. Bodies are grouped by `kind` into one named,
  *  coloured `<object>` each. No DOM — separated from `exportModel3mf` so it's unit-testable. */
-export function threeMfArchive(tiles: ModelTile[]): Uint8Array {
+export function threeMfArchive(bodies: ModelBody[]): Uint8Array {
     // Group bodies by kind, preserving first-seen order (terrain first, then features as built).
-    const groups = new Map<string, ModelTile[]>();
-    for (const tile of tiles) {
-        const kind = tile.kind ?? 'part';
+    const groups = new Map<string, ModelBody[]>();
+    for (const body of bodies) {
+        const kind = body.kind ?? 'part';
         const list = groups.get(kind);
-        if (list) list.push(tile); else groups.set(kind, [tile]);
+        if (list) list.push(body); else groups.set(kind, [body]);
     }
     const files: ZipEntry[] = [
         { name: '[Content_Types].xml', data: utf8(CONTENT_TYPES) },
@@ -58,7 +58,7 @@ function displayColor(css: string): string {
     return `#${TERRAIN_COLOR.slice(1).toUpperCase()}FF`;
 }
 
-function buildModelXml(groups: Map<string, ModelTile[]>): string {
+function buildModelXml(groups: Map<string, ModelBody[]>): string {
     const kinds = [...groups.keys()];
     // One base material per group; objects reference it by index for their colour.
     const bases = kinds
@@ -89,13 +89,13 @@ ${items.join('\n')}
 `;
 }
 
-/** One `<object>` whose mesh concatenates all tiles of a kind (their disconnected volumes stay one
+/** One `<object>` whose mesh concatenates all bodies of a kind (their disconnected volumes stay one
  *  object), coloured via the shared basematerials resource (pid=1, pindex=materialIndex). */
-function objectMesh(objectId: number, kind: string, materialIndex: number, tiles: ModelTile[]): string {
+function objectMesh(objectId: number, kind: string, materialIndex: number, bodies: ModelBody[]): string {
     const verts: string[] = [];
     const tris: string[] = [];
-    let base = 0; // running vertex offset so each tile's indices stay local to the merged mesh
-    for (const { positions, indices } of tiles) {
+    let base = 0; // running vertex offset so each body's indices stay local to the merged mesh
+    for (const { positions, indices } of bodies) {
         for (let i = 0; i < positions.length; i += 3) {
             verts.push(`    <vertex x="${fmt(positions[i])}" y="${fmt(positions[i + 1])}" z="${fmt(positions[i + 2])}"/>`);
         }

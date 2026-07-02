@@ -52,17 +52,17 @@ export enum SelectionShape {
     Oval = 'oval',
 }
 
-/** One independent solid: a flat buffer of metre-space vertices + triangle indices. */
-export interface ModelTile {
+/** One independent solid body: a flat buffer of metre-space vertices + triangle indices. */
+export interface ModelBody {
     positions: Float32Array;  // x,y,z per vertex; metres; model-centred; +Y up, +Z south
     indices: Uint32Array;     // 3 per triangle, outward-facing winding
-    ix0: number;              // tile column index (for export filenames)
-    iy0: number;              // tile row index
+    ix0: number;              // grid column index (for export filenames)
+    iy0: number;              // grid row index
     kind?: string;            // 'terrain' or an OSM feature id — groups bodies into named/coloured 3MF objects
 }
 
 export interface ModelGeometry {
-    tiles: ModelTile[];
+    bodies: ModelBody[];
     widthMeters: number;      // real-world extent, for camera framing
     heightMeters: number;
     vertexCount: number;

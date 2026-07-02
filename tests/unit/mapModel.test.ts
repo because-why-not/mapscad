@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { MapModel, ModelSettings, ModelTile, SelectionShape } from '../../src/MapModel';
+import { MapModel, ModelSettings, ModelBody, SelectionShape } from '../../src/MapModel';
 import type { HeightGrid } from '../../src/HeightSampler';
 
 // Build a HeightGrid from a 2D array. Row 0 is the SOUTH edge and column 0 the WEST edge,
@@ -25,19 +25,19 @@ function build(grid: HeightGrid, settings: Partial<ModelSettings>) {
     return model.buildGeometry()!;
 }
 
-// Y of vertex i within a tile's flat positions buffer.
-function ys(tile: ModelTile): number[] {
+// Y of vertex i within a body's flat positions buffer.
+function ys(body: ModelBody): number[] {
     const out: number[] = [];
-    for (let i = 1; i < tile.positions.length; i += 3) out.push(tile.positions[i]);
+    for (let i = 1; i < body.positions.length; i += 3) out.push(body.positions[i]);
     return out;
 }
 
 const flat = makeGrid([[0, 10], [0, 10]]); // SW/NW = 0, SE/NE = 10
 
 describe('buildGeometry — no socket', () => {
-    it('emits an open sheet: one tile, no thickness, no socket marker', () => {
+    it('emits an open sheet: one body, no thickness, no socket marker', () => {
         const geo = build(flat, { socketEnabled: false });
-        expect(geo.tiles).toHaveLength(1);
+        expect(geo.bodies).toHaveLength(1);
         expect(geo.socketStartY).toBeNull();
         expect(geo.minThickness).toBe(0);
         expect(geo.maxThickness).toBe(0);
@@ -102,7 +102,7 @@ describe('buildGeometry — orientation is not mirrored', () => {
         // Unique height at SW (row 0, col 0) so we can find that exact vertex.
         const grid = makeGrid([[42, 1], [2, 3]], 100, 60);
         const geo = build(grid, { socketEnabled: false });
-        const p = geo.tiles[0].positions;
+        const p = geo.bodies[0].positions;
         // First emitted vertex is (r0,c0) = SW: -width/2 east, +height/2 south.
         expect(p[0]).toBeCloseTo(-50); // X = -w/2 (west)
         expect(p[1]).toBeCloseTo(42);  // Y = the SW height
@@ -110,10 +110,10 @@ describe('buildGeometry — orientation is not mirrored', () => {
     });
 });
 
-// Count disconnected bodies in a tile by welding vertices on rounded position (the mesh is
+// Count disconnected blocks within a body by welding vertices on rounded position (the mesh is
 // triangle soup, so index-keyed unioning would over-count).
-function connectedComponents(tile: ModelTile): number {
-    const p = tile.positions, idx = tile.indices;
+function connectedComponents(body: ModelBody): number {
+    const p = body.positions, idx = body.indices;
     const key = (i: number) => `${p[i * 3].toFixed(3)},${p[i * 3 + 1].toFixed(3)},${p[i * 3 + 2].toFixed(3)}`;
     const id = new Map<string, number>();
     const parent: number[] = [];
@@ -134,26 +134,26 @@ function connectedComponents(tile: ModelTile): number {
     return roots.size;
 }
 
-describe('buildGeometry — tiling (no-data dividers → separate bodies in one solid)', () => {
+describe('buildGeometry — tiling (no-data dividers → separate blocks in one solid)', () => {
     // A 5×5 grid splits cleanly into 2×2 blocks (the divider falls at the midpoints).
     const grid5 = makeGrid(Array.from({ length: 5 }, (_, r) => Array.from({ length: 5 }, (_, c) => r + c)));
 
-    it('emits ONE tile holding tilesX×tilesY disconnected bodies', () => {
+    it('emits ONE body holding tilesX×tilesY disconnected blocks', () => {
         const geo = build(grid5, { tilesEnabled: true, tilesX: 2, tilesY: 2, socketEnabled: true, socketSize: 3 });
-        expect(geo.tiles).toHaveLength(1);
-        expect(connectedComponents(geo.tiles[0])).toBe(4);
+        expect(geo.bodies).toHaveLength(1);
+        expect(connectedComponents(geo.bodies[0])).toBe(4);
     });
 
     it('all bodies share one socket base level — a multi-tile print stays level', () => {
         const geo = build(grid5, { tilesEnabled: true, tilesX: 2, tilesY: 1, socketEnabled: true, socketSize: 3 });
-        expect(connectedComponents(geo.tiles[0])).toBe(2);
-        expect(Math.min(...ys(geo.tiles[0]))).toBeCloseTo(geo.minY); // shared floor
+        expect(connectedComponents(geo.bodies[0])).toBe(2);
+        expect(Math.min(...ys(geo.bodies[0]))).toBeCloseTo(geo.minY); // shared floor
     });
 
     it('a single block is the fast un-divided path (one body)', () => {
         const geo = build(grid5, { tilesEnabled: true, tilesX: 1, tilesY: 1 });
-        expect(geo.tiles).toHaveLength(1);
-        expect(connectedComponents(geo.tiles[0])).toBe(1);
+        expect(geo.bodies).toHaveLength(1);
+        expect(connectedComponents(geo.bodies[0])).toBe(1);
     });
 
     it('changes the vertex count when toggled on a no-data grid WITHOUT a socket', () => {
@@ -171,21 +171,21 @@ describe('buildGeometry — tiling (no-data dividers → separate bodies in one 
         const N = NaN;
         const coast = makeGrid([[N, 0, 0], [0, 0, 0], [0, 0, 0]]);
         const geo = build(coast, { socketEnabled: true, socketSize: 2 });
-        const tile = geo.tiles[0];
+        const body = geo.bodies[0];
         const seen = new Set<string>();
-        for (let i = 0; i < tile.positions.length; i += 3) {
-            seen.add(`${tile.positions[i].toFixed(3)},${tile.positions[i + 1].toFixed(3)},${tile.positions[i + 2].toFixed(3)}`);
+        for (let i = 0; i < body.positions.length; i += 3) {
+            seen.add(`${body.positions[i].toFixed(3)},${body.positions[i + 1].toFixed(3)},${body.positions[i + 2].toFixed(3)}`);
         }
-        expect(seen.size).toBe(tile.positions.length / 3); // every vertex position is unique
+        expect(seen.size).toBe(body.positions.length / 3); // every vertex position is unique
     });
 });
 
 describe('buildGeometry — a socketed solid is a closed manifold', () => {
     it('every edge is shared by exactly two triangles', () => {
         const geo = build(makeGrid([[0, 1, 2], [1, 5, 1], [2, 1, 0]]), { socketEnabled: true, socketSize: 2 });
-        const tile = geo.tiles[0];
+        const body = geo.bodies[0];
         const counts = new Map<string, number>();
-        const idx = tile.indices;
+        const idx = body.indices;
         for (let i = 0; i < idx.length; i += 3) {
             const tri = [idx[i], idx[i + 1], idx[i + 2]];
             for (let e = 0; e < 3; e++) {
@@ -201,8 +201,8 @@ describe('buildGeometry — a socketed solid is a closed manifold', () => {
 
 // Manifold check keyed by vertex POSITION (the oval mesh is triangle soup with per-cell
 // duplicated vertices, so an index-keyed check would see shared edges as separate).
-function maxEdgeSharingByPosition(tile: ModelTile): { counts: Map<string, number>; positions: Float32Array } {
-    const p = tile.positions, idx = tile.indices;
+function maxEdgeSharingByPosition(body: ModelBody): { counts: Map<string, number>; positions: Float32Array } {
+    const p = body.positions, idx = body.indices;
     const key = (i: number) => `${p[i * 3].toFixed(4)},${p[i * 3 + 1].toFixed(4)},${p[i * 3 + 2].toFixed(4)}`;
     const counts = new Map<string, number>();
     for (let i = 0; i < idx.length; i += 3) {
@@ -232,7 +232,7 @@ describe('buildGeometry — oval footprint', () => {
         const oval = build(grid, { shape: SelectionShape.Oval, socketEnabled: true, socketSize: 2 });
         expect(oval.triangleCount).toBeGreaterThan(0);
 
-        const p = oval.tiles[0].positions;
+        const p = oval.bodies[0].positions;
         const has = (x: number, z: number) => {
             for (let i = 0; i < p.length; i += 3) {
                 if (Math.abs(p[i] - x) < 1e-6 && Math.abs(p[i + 2] - z) < 1e-6) return true;
@@ -248,8 +248,8 @@ describe('buildGeometry — oval footprint', () => {
 
     it('a socketed oval is a closed manifold (every edge shared by exactly two faces)', () => {
         const geo = build(bumpy, { shape: SelectionShape.Oval, socketEnabled: true, socketSize: 3 });
-        expect(geo.tiles).toHaveLength(1);
-        const { counts } = maxEdgeSharingByPosition(geo.tiles[0]);
+        expect(geo.bodies).toHaveLength(1);
+        const { counts } = maxEdgeSharingByPosition(geo.bodies[0]);
         const bad = [...counts.entries()].filter(([, n]) => n !== 2);
         expect(bad).toEqual([]);
     });
@@ -272,12 +272,12 @@ describe('buildGeometry — no-data carves holes', () => {
         const grid = makeGrid([[N, 0, 0], [0, 0, 0], [0, 0, 0]]);
         const geo = build(grid, { socketEnabled: false });
         expect(geo.triangleCount).toBe(6);
-        expect([...geo.tiles[0].positions].some(v => Number.isNaN(v))).toBe(false);
+        expect([...geo.bodies[0].positions].some(v => Number.isNaN(v))).toBe(false);
     });
 
     it('emits nothing when the whole selection is no-data', () => {
         const geo = build(makeGrid([[N, N], [N, N]]), { socketEnabled: true, socketSize: 5 });
-        expect(geo.tiles).toHaveLength(0);
+        expect(geo.bodies).toHaveLength(0);
         expect(geo.vertexCount).toBe(0);
     });
 });

@@ -3,10 +3,10 @@
 // literal bytes), so filenames and the model XML appear verbatim and can be sliced out and parsed.
 import { describe, it, expect } from 'vitest';
 import { threeMfArchive } from '../../src/ThreeMFMaker';
-import type { ModelTile } from '../../src/MapModel';
+import type { ModelBody } from '../../src/MapModel';
 
-// A minimal 1-triangle tile of a given kind.
-function tri(kind: string): ModelTile {
+// A minimal 1-triangle body of a given kind.
+function tri(kind: string): ModelBody {
     return {
         positions: new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0]),
         indices: new Uint32Array([0, 1, 2]),
