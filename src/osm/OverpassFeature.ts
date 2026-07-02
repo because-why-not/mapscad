@@ -84,10 +84,12 @@ export async function fetchFeatureRaw(def: OsmFeatureDef, corners: LonLat[], sig
         signal,
     });
     if (!res.ok) {
-        // Surface the server's raw reason (Overpass returns a plain-text remark on 429/504/…), so the
-        // panel can show exactly what came back rather than just a status code.
+        // The status line ("Overpass 504 Gateway Timeout") is what the UI shows. Overpass also returns a
+        // body (often a full HTML page on timeouts) — too noisy for the panel, so log it for debugging
+        // and keep the thrown message short.
         const body = (await res.text().catch(() => '')).trim();
-        throw new Error(`Overpass ${res.status} ${res.statusText}${body ? `\n${body}` : ''}`);
+        if (body) Env.warn(`[osm] Overpass ${res.status} body:`, body);
+        throw new Error(`Overpass ${res.status} ${res.statusText}`);
     }
     const json = await res.json();
     Env.log(`[osm] downloaded ${json?.elements?.length ?? 0} ${def.noun} elements in ${Math.round(performance.now() - t0)} ms`);
