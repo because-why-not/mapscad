@@ -50,14 +50,24 @@ export const EXTERNAL_DEMS: ManifestMap[] = [
         name: 'aws_terrain_elevation',
         attribution: 'Terrain Tiles © Mapzen/Tilezen, hosted on AWS Open Data',
         attributionDetail: {
+            // Terrain Tiles composite many national/global datasets, each with its own terms, so
+            // the full source list below is the required attribution (per Tilezen/Joerd).
             provider: 'Mapzen / Tilezen Terrain Tiles',
             homepage: { text: 'registry.opendata.aws/terrain-tiles', url: 'https://registry.opendata.aws/terrain-tiles/' },
-            license: { text: 'CC BY 4.0 / public domain (mixed)', url: 'https://github.com/tilezen/joerd/blob/master/docs/attribution.md' },
+            license: { text: 'Varies by source', url: 'https://github.com/tilezen/joerd/blob/master/docs/attribution.md' },
             credit: [
-                'Terrain Tiles © ',
-                { text: 'Mapzen / Tilezen', url: 'https://github.com/tilezen/joerd/blob/master/docs/attribution.md' },
-                ', hosted on ',
-                { text: 'AWS Open Data', url: 'https://registry.opendata.aws/terrain-tiles/' },
+                'Mapzen\n'
+                + 'ArcticDEM terrain data DEM(s) were created from DigitalGlobe, Inc., imagery and funded under National Science Foundation awards 1043681, 1559691, and 1542736;\n'
+                + 'Australia terrain data © Commonwealth of Australia (Geoscience Australia) 2017;\n'
+                + 'Austria terrain data © offene Daten Österreichs – Digitales Geländemodell (DGM) Österreich;\n'
+                + 'Canada terrain data contains information licensed under the Open Government Licence – Canada;\n'
+                + 'Europe terrain data produced using Copernicus data and information funded by the European Union - EU-DEM layers;\n'
+                + 'Global ETOPO1 terrain data U.S. National Oceanic and Atmospheric Administration;\n'
+                + 'Mexico terrain data source: INEGI, Continental relief, 2016;\n'
+                + 'New Zealand terrain data Copyright 2011 Crown copyright (c) Land Information New Zealand and the New Zealand Government (All rights reserved);\n'
+                + 'Norway terrain data © Kartverket;\n'
+                + 'United Kingdom terrain data © Environment Agency copyright and/or database right 2015. All rights reserved;\n'
+                + 'United States 3DEP (formerly NED) and global GMTED2010 and SRTM terrain data courtesy of the U.S. Geological Survey.',
             ],
         },
         tiles: ['https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png'],

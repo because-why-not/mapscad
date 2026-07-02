@@ -338,16 +338,6 @@
 
         {#if activeTab === 'selection'}
         <div class="overflow-y-auto flex-1 py-2">
-            {#if activeAttribution}
-                <div class="mx-3 mb-2 p-2 rounded bg-base-100 text-xs leading-5">
-                    <div>Provided by <span class="font-semibold">{activeAttribution.provider}</span></div>
-                    <div><a class="link link-primary" href={activeAttribution.homepage.url} target="_blank" rel="noopener noreferrer">{activeAttribution.homepage.text}</a></div>
-                    <div>License: <a class="link link-primary" href={activeAttribution.license.url} target="_blank" rel="noopener noreferrer">{activeAttribution.license.text}</a></div>
-                    <div class="mt-1 pt-1 border-t border-base-300 opacity-70">
-                        {#each activeAttribution.credit as span}{#if typeof span === 'string'}{span}{:else}<a class="link" href={span.url} target="_blank" rel="noopener noreferrer">{span.text}</a>{/if}{/each}
-                    </div>
-                </div>
-            {/if}
             {#each sections as section (section.title)}
                 {@const isOpen = openSection === section.title}
                 {@const hasActive = section.items.some(i => i.id === activeProviderId)}
@@ -389,6 +379,16 @@
                         </label>
                     {/if}
                     <button class="btn btn-sm btn-outline" onclick={setSunNow}>Now</button>
+                </div>
+            {/if}
+
+            {#if activeAttribution}
+                <div class="px-4 py-1 mt-2 text-xs font-bold uppercase tracking-wider opacity-50">Attribution</div>
+                <div class="mx-3 mb-2 p-2 rounded bg-base-100 text-xs leading-5">
+                    <div>Provided by <span class="font-semibold">{activeAttribution.provider}</span></div>
+                    <div><a class="link link-primary" href={activeAttribution.homepage.url} target="_blank" rel="noopener noreferrer">{activeAttribution.homepage.text}</a></div>
+                    <div>License: <a class="link link-primary" href={activeAttribution.license.url} target="_blank" rel="noopener noreferrer">{activeAttribution.license.text}</a></div>
+                    <div class="mt-1 pt-1 border-t border-base-300 opacity-70 whitespace-pre-line">{#each activeAttribution.credit as span}{#if typeof span === 'string'}{span}{:else}<a class="link" href={span.url} target="_blank" rel="noopener noreferrer">{span.text}</a>{/if}{/each}</div>
                 </div>
             {/if}
         </div>
