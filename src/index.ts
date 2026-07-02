@@ -133,7 +133,7 @@ function safeZoom(corners: LonLat[], desired: number, raster: number): number {
     const { cols, rows } = gridResolution(corners, raster);
     for (; z > zMin; z--) {
         const cov = tileCoverage(corners, previewDem!, z);
-        const est = estimateMemory({ cols, rows, tilesX: cov.tilesX, tilesY: cov.tilesY });
+        const est = estimateMemory({ cols, rows, tilesX: cov.tilesX, tilesY: cov.tilesY, tileSize: previewDem!.mmapsrv.tileSize });
         if (!isOverBudget(est.totalBytes)) break;
     }
     return z;

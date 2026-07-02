@@ -6,7 +6,9 @@
  */
 
 const BYTES_PER_FLOAT = 4;
-const TILE = 256;
+// Fallback tile edge when a source doesn't state one. Callers should pass the DEM's real
+// tileSize — a 512px tile (Mapterhorn) holds 4× the pixels of a 256px one.
+const DEFAULT_TILE_SIZE = 256;
 
 // Soft ceiling for a single mesh + its DEM working set. Conservative: browsers vary,
 // and there's also the renderer's own overhead on top of this.
@@ -17,6 +19,7 @@ export interface MemoryParams {
     rows: number;
     tilesX: number;
     tilesY: number;
+    tileSize?: number;  // source pixels per tile edge (256 default; Mapterhorn is 512)
 }
 
 export interface MemoryEstimate {
@@ -37,12 +40,12 @@ export function geometryBytes(vertices: number, triangles: number): number {
  * BEFORE anything is sampled or built (there's no mesh yet). Assumes the dense shared-vertex
  * sheet; the real mesh (holes, oval, tiling, socket) differs, so use `measureMemory` once built.
  */
-export function estimateMemory({ cols, rows, tilesX, tilesY }: MemoryParams): MemoryEstimate {
+export function estimateMemory({ cols, rows, tilesX, tilesY, tileSize = DEFAULT_TILE_SIZE }: MemoryParams): MemoryEstimate {
     const verts = cols * rows;
     const tris = Math.max(0, cols - 1) * Math.max(0, rows - 1) * 2;
     const geom = geometryBytes(verts, tris);
     const heightBytes = verts * BYTES_PER_FLOAT;
-    const tileBytes = tilesX * TILE * tilesY * TILE * 4;
+    const tileBytes = tilesX * tileSize * tilesY * tileSize * 4;
     return { geometryBytes: geom, heightBytes, tileBytes, totalBytes: geom + heightBytes + tileBytes };
 }
 
@@ -53,11 +56,12 @@ export function estimateMemory({ cols, rows, tilesX, tilesY }: MemoryParams): Me
  */
 export function measureMemory(
     geo: { vertexCount: number; triangleCount: number },
-    grid: { cols: number; rows: number; tilesX: number; tilesY: number },
+    grid: { cols: number; rows: number; tilesX: number; tilesY: number; tileSize?: number },
 ): MemoryEstimate {
     const geom = geometryBytes(geo.vertexCount, geo.triangleCount);
     const heightBytes = grid.cols * grid.rows * BYTES_PER_FLOAT;
-    const tileBytes = grid.tilesX * TILE * grid.tilesY * TILE * 4;
+    const tileSize = grid.tileSize ?? DEFAULT_TILE_SIZE;
+    const tileBytes = grid.tilesX * tileSize * grid.tilesY * tileSize * 4;
     return { geometryBytes: geom, heightBytes, tileBytes, totalBytes: geom + heightBytes + tileBytes };
 }
 

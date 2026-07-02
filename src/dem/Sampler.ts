@@ -17,6 +17,8 @@ export interface HeightGrid {
     zoom: number;            // DEM tile zoom the heights were sampled from
     tilesX: number;          // DEM tiles fetched across / down (for memory accounting)
     tilesY: number;
+    tileSize?: number;       // source pixels per tile edge (256, or 512 for Mapterhorn) — the
+                             // tile counts above are only meaningful in bytes together with this
 }
 
 const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
@@ -75,6 +77,6 @@ export function sampleHeights(
 
     return {
         heights, cols, rows, widthMeters, heightMeters, minHeight, maxHeight,
-        zoom: z, tilesX: data.tilesX, tilesY: data.tilesY,
+        zoom: z, tilesX: data.tilesX, tilesY: data.tilesY, tileSize,
     };
 }
