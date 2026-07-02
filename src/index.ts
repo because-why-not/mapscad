@@ -366,6 +366,11 @@ function updatePreviewStats(geo: ModelGeometry | null): void {
         vertices: geo.vertexCount,
         triangles: geo.triangleCount,
         zoom: grid.zoom,
+        // Ground resolution (metres per DEM pixel) at the heightmap zoom, so the user sees what
+        // the raw zoom level means physically for this latitude/source.
+        zoomResolution: currentCorners
+            ? groundResolution(currentCorners[0][1], grid.zoom, previewDem?.mmapsrv.tileSize)
+            : undefined,
         widthMeters: Math.round(grid.widthMeters),
         heightMeters: Math.round(grid.heightMeters),
         minThickness: geo.minThickness,   // thinnest/thickest solid column, export units

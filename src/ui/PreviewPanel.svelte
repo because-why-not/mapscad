@@ -119,7 +119,7 @@
             <div>Selection: {fmt(previewStats.widthMeters)} × {fmt(previewStats.heightMeters)} m</div>
             <div>Min / Max height: {fmtH(previewStats.minHeight)} / {fmtH(previewStats.maxHeight)} m</div>
             <div>Detail: {fmt(previewStats.gridCols)} × {fmt(previewStats.gridRows)} vtx ({fmtArea(previewStats.vertexSpacing)} m/vtx)</div>
-            <div>Heightmap zoom: z{previewStats.zoom}</div>
+            <div>Heightmap zoom: z{previewStats.zoom}{#if previewStats.zoomResolution != null} ({fmtArea(previewStats.zoomResolution)} m/px){/if}</div>
             <div>Vertices: {fmt(previewStats.vertices)}</div>
             <div>Triangles: {fmt(previewStats.triangles)}</div>
             <div class={memColor[previewStats.memoryLevel]}>Memory: ~{previewStats.memoryText}</div>
