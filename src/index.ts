@@ -611,7 +611,7 @@ async function init(): Promise<void> {
             id: m.name,
             // Inside a source category the header already names the source, so entries use a
             // short label (Raw / 2D Hillshade); ungrouped maps keep their prettified name.
-            name: cat ? cat.label : prettifyMapName(stripLocalPrefix(m.name)),
+            name: cat ? cat.label : (m.prettyName ?? prettifyMapName(stripLocalPrefix(m.name))),
             icon: cat?.icon ?? iconForMapType(m.mmapsrv.type),
             category: cat?.category,
             server: m.name.startsWith(LOCAL_MAP_PREFIX),

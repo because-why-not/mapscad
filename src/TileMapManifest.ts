@@ -27,6 +27,9 @@ export interface MmapSrv {
 
 export interface ManifestMap {
     name: string;
+    /** Human-readable display name with correct casing/spacing. Falls back to a prettified `name`
+     *  when absent (the server manifest omits it). */
+    prettyName?: string;
     attribution: string;
     tiles: string[];          // URL templates, e.g. ".../{z}/{x}/{y}.jpg"
     minzoom: number;

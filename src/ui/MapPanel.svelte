@@ -132,7 +132,7 @@
         const result = [];
         // Ungrouped public sources head the list; server-origin maps sink to the bottom.
         const loosePublic = providers.filter(p => !p.category && !p.server);
-        if (loosePublic.length) result.push({ title: 'Map Source', items: loosePublic });
+        if (loosePublic.length) result.push({ title: 'OpenStreetMaps', items: loosePublic });
         const rank = (name) => name === 'Raw' ? 0 : name.startsWith('2D Hillshade') ? 1 : name.startsWith('3D Hillshade') ? 2 : 3;
         // A category is "server" if any of its provider layers come from the local server.
         const catIsServer = (cat) => providers.some(p => p.category === cat && p.server);

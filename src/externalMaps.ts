@@ -14,6 +14,7 @@ import type { ManifestMap } from './TileMapManifest';
 export const EXTERNAL_MAPS: ManifestMap[] = [
     {
         name: 'openstreetmap',
+        prettyName: 'OpenStreetMap',
         attribution: '© OpenStreetMap contributors',
         tiles: ['https://tile.openstreetmap.org/{z}/{x}/{y}.png'],
         minzoom: 0,
@@ -28,6 +29,7 @@ export const EXTERNAL_MAPS: ManifestMap[] = [
     },
     {
         name: 'opentopomap',
+        prettyName: 'OpenTopoMap',
         attribution: '© OpenTopoMap (CC-BY-SA) · © OpenStreetMap contributors',
         tiles: ['https://tile.opentopomap.org/{z}/{x}/{y}.png'],
         minzoom: 0,
