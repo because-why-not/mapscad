@@ -589,10 +589,13 @@ async function init(): Promise<void> {
     // (`zr.def`, the same value a fresh draw opens at) — NEVER the range max — so a reload can't
     // silently refetch far finer DEM detail (many more tiles) than the default; an unset one (0)
     // opens at that default too. The user can still slide up to `zr.max` afterwards.
+    // The resolution limit is deliberately NOT restored — every load starts at this fixed value so a
+    // stale saved cap can't silently change the mesh density (the user can still adjust it in-session).
+    const STARTUP_RESOLUTION_LIMIT = 512;
     const savedSelection = cfg.selection;
     let zr: { min: number; max: number; def: number };
     if (savedSelection && previewDem) {
-        zr = resolutionZoomRange(savedSelection, previewDem, cfg.model.resolutionLimit);
+        zr = resolutionZoomRange(savedSelection, previewDem, STARTUP_RESOLUTION_LIMIT);
     } else {
         const range = demZoomRange(previewDem);
         zr = { ...range, def: range.max };
@@ -600,7 +603,7 @@ async function init(): Promise<void> {
     const previewZoomMin = zr.min, previewZoomMax = zr.max;
     // Cap the saved zoom to the light default, never higher; an unset one (0) opens there too.
     const heightZoom = cfg.model.heightZoom > 0 ? Math.min(cfg.model.heightZoom, zr.def) : zr.def;
-    model.applySettings({ ...cfg.model, heightZoom });
+    model.applySettings({ ...cfg.model, heightZoom, resolutionLimit: STARTUP_RESOLUTION_LIMIT });
     // Fold the resolved DEM + sanitized settings back into the config so it's consistent.
     config.update({ demId: initialDemId, model: model.getSettings() });
     const initialPreviewSettings: Record<string, any> = { ...model.getSettings(), smoothShading: cfg.display.smoothShading };
