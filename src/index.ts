@@ -699,11 +699,30 @@ async function init(): Promise<void> {
                 const data = osmData.get(id);
                 return data && !data.isEmpty() ? data.list : null;
             },
-            // Load a feature from a previously saved file: ingest + overlay exactly like a fresh download.
-            onLoadJson: (id: string, json: any) => {
-                const fetched = waysFromJson(osmFeature(id), json);
-                ingestOsm(id, fetched);
-                return fetched.length;
+            // Load a feature from one or more previously saved / track files: parse each payload and
+            // MERGE into one set (multi-file select). Real OSM ids (positive) are deduped so the same
+            // way in two overlapping files appears once; synthetic ids (GPX tracks / legacy polylines,
+            // negative) are renumbered to a single running counter so they stay unique across files —
+            // `waysFromJson` restarts them at -1 per payload. Ingested + overlaid like a fresh download.
+            onLoadJson: (id: string, payloads: any[]) => {
+                const def = osmFeature(id);
+                const seen = new Set<number>();
+                const merged: OsmElement[] = [];
+                let synthetic = -1;
+                for (const payload of payloads) {
+                    for (const el of waysFromJson(def, payload)) {
+                        if (el.id > 0) {
+                            if (seen.has(el.id)) continue; // same OSM way already loaded from an earlier file
+                            seen.add(el.id);
+                            merged.push(el);
+                        } else {
+                            const renumbered = { ...el, id: synthetic-- };
+                            merged.push(renumbered);
+                        }
+                    }
+                }
+                ingestOsm(id, merged);
+                return merged.length;
             },
             // Push the downloaded feature into the model: bind it to the grid and reveal the
             // preview's section so its raise can be configured.

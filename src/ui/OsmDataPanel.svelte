@@ -226,20 +226,23 @@
     let loadTargetId = null;
     function pickLoad(id) { loadTargetId = id; fileInput.click(); }
     async function loadJson(e) {
-        const file = e.target.files?.[0];
-        e.target.value = ''; // reset so re-selecting the same file fires onchange again
+        const files = Array.from(e.target.files ?? []);
+        e.target.value = ''; // reset so re-selecting the same file(s) fires onchange again
         const f = features.find(x => x.id === loadTargetId);
-        if (!file || !f) return;
+        if (!files.length || !f) return;
         const st = downloadState[f.id];
         st.error = '';
         try {
-            const text = await file.text();
+            // Parse every selected file into its payload; onLoadJson merges them into one set.
             // JSON files are saved feature sets; anything else is a GPS track (GPX/TCX) parsed into
             // the same id-less `{ name, coords }` array that onLoadJson already ingests.
-            const data = file.name.toLowerCase().endsWith('.json')
-                ? JSON.parse(text)
-                : parseTrackFile(text, file.name);
-            const count = onLoadJson(f.id, data);
+            const payloads = await Promise.all(files.map(async (file) => {
+                const text = await file.text();
+                return file.name.toLowerCase().endsWith('.json')
+                    ? JSON.parse(text)
+                    : parseTrackFile(text, file.name);
+            }));
+            const count = onLoadJson(f.id, payloads);
             st.stale = false;
             st.ready = count > 0;
             st.label = count ? `${count} ${f.noun}` : `No ${f.noun} found`;
@@ -289,7 +292,7 @@
                 <button class="btn btn-sm btn-block" title="Update the 3D preview with the enabled {f.noun}" onclick={() => onUpdatePreview(f.id)} disabled={!st.ready}>Update preview</button>
                 <div class="flex gap-2">
                     <button class="btn btn-sm flex-1" title="Save the {f.noun} as a JSON file" onclick={() => saveJson(() => onSaveJson(f.id), `${f.id}.json`)} disabled={!st.ready}>Save</button>
-                    <button class="btn btn-sm flex-1" title="Load {f.noun} from a saved JSON file, or a GPX/TCX track" onclick={() => pickLoad(f.id)}>Load</button>
+                    <button class="btn btn-sm flex-1" title="Load {f.noun} from one or more saved JSON files, or GPX/TCX tracks (merged)" onclick={() => pickLoad(f.id)}>Load</button>
                 </div>
                 <!-- The selection was edited after downloading: data is kept + re-projected, but may
                      not cover the shifted area. Cleared once re-downloaded. -->
@@ -336,7 +339,7 @@
             {/if}
             {/if}
         {/each}
-        <input type="file" accept=".json,.gpx,.tcx,application/json" bind:this={fileInput} onchange={loadJson} class="hidden" />
+        <input type="file" multiple accept=".json,.gpx,.tcx,application/json" bind:this={fileInput} onchange={loadJson} class="hidden" />
     {/if}
 
     <div class="px-4 py-1 mt-2 text-xs font-bold uppercase tracking-wider opacity-50">Attribution</div>
