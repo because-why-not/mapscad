@@ -2,6 +2,7 @@
     import { untrack } from 'svelte';
     import Attribution from './Attribution.svelte';
     import { OSM_DATA_API } from '../osm/dataSources';
+    import { parseTrackFile } from '../osm/TrackParser';
 
     // The OSM "Data" tab body: per-feature download / save-load, plus the object list with
     // mark → enable/disable editing. Owns all data state; the parent (MapPanel) keeps the
@@ -232,8 +233,13 @@
         const st = downloadState[f.id];
         st.error = '';
         try {
-            const json = JSON.parse(await file.text());
-            const count = onLoadJson(f.id, json);
+            const text = await file.text();
+            // JSON files are saved feature sets; anything else is a GPS track (GPX/TCX) parsed into
+            // the same id-less `{ name, coords }` array that onLoadJson already ingests.
+            const data = file.name.toLowerCase().endsWith('.json')
+                ? JSON.parse(text)
+                : parseTrackFile(text, file.name);
+            const count = onLoadJson(f.id, data);
             st.stale = false;
             st.ready = count > 0;
             st.label = count ? `${count} ${f.noun}` : `No ${f.noun} found`;
@@ -283,7 +289,7 @@
                 <button class="btn btn-sm btn-block" title="Update the 3D preview with the enabled {f.noun}" onclick={() => onUpdatePreview(f.id)} disabled={!st.ready}>Update preview</button>
                 <div class="flex gap-2">
                     <button class="btn btn-sm flex-1" title="Save the {f.noun} as a JSON file" onclick={() => saveJson(() => onSaveJson(f.id), `${f.id}.json`)} disabled={!st.ready}>Save</button>
-                    <button class="btn btn-sm flex-1" title="Load {f.noun} from a previously saved JSON file" onclick={() => pickLoad(f.id)}>Load</button>
+                    <button class="btn btn-sm flex-1" title="Load {f.noun} from a saved JSON file, or a GPX/TCX track" onclick={() => pickLoad(f.id)}>Load</button>
                 </div>
                 <!-- The selection was edited after downloading: data is kept + re-projected, but may
                      not cover the shifted area. Cleared once re-downloaded. -->
@@ -330,7 +336,7 @@
             {/if}
             {/if}
         {/each}
-        <input type="file" accept=".json,application/json" bind:this={fileInput} onchange={loadJson} class="hidden" />
+        <input type="file" accept=".json,.gpx,.tcx,application/json" bind:this={fileInput} onchange={loadJson} class="hidden" />
     {/if}
 
     <div class="px-4 py-1 mt-2 text-xs font-bold uppercase tracking-wider opacity-50">Attribution</div>
