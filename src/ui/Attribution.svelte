@@ -1,7 +1,9 @@
-<script>
+<script lang="ts">
     // An `AttributionDetail`: three at-a-glance fields (provider / homepage / license) plus the
     // official recommended credit line, whose spans may be plain text or links.
-    let { attribution } = $props();
+    import type { AttributionDetail } from '../TileMapManifest';
+
+    let { attribution }: { attribution?: AttributionDetail } = $props();
 </script>
 
 {#if attribution}

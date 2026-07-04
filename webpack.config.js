@@ -2,6 +2,7 @@ const path = require('path');
 const MiniCssExtractPlugin = require('mini-css-extract-plugin');
 const webpack = require('webpack');
 const dotenv = require('dotenv');
+const svelteConfig = require('./svelte.config.js'); // { preprocess } — lets components opt into <script lang="ts">
 
 const env = dotenv.config().parsed || {};
 // Optional self-hosted tile server. Unset => '' (the app falls back to the public
@@ -26,7 +27,7 @@ module.exports = (cliEnv, argv) => {
         },
         module: {
             rules: [
-                { test: /\.svelte$/, use: 'svelte-loader' },
+                { test: /\.svelte$/, use: { loader: 'svelte-loader', options: { preprocess: svelteConfig.preprocess } } },
                 { test: /node_modules\/svelte\/.*\.mjs$/, resolve: { fullySpecified: false } },
                 { test: /\.ts$/, use: 'ts-loader', exclude: /node_modules/ },
                 { test: /\.css$/, use: [MiniCssExtractPlugin.loader, 'css-loader', 'postcss-loader'] },

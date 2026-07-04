@@ -2,7 +2,7 @@ import { mount, flushSync } from 'svelte';
 import App from './ui/App.svelte';
 import './ui/app.css';
 import { Env } from './Env';
-import { fetchTileMapManifest, ManifestMap } from './TileMapManifest';
+import { fetchTileMapManifest, type ManifestMap } from './TileMapManifest';
 import { EXTERNAL_DEMS } from './externalDems';
 import { EXTERNAL_MAPS } from './externalMaps';
 import { prettifyMapName, iconForMapType, LOCAL_MAP_PREFIX, stripLocalPrefix } from './mapMeta';
