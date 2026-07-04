@@ -20,6 +20,7 @@
         onLoadJson = () => 0,
         onSelectElement = () => {},
         onSetEnabled = () => {},
+        onDelete = () => {},
         onHoverElement = () => {},
         onMarksChange = () => {},
         onBoxSelectToggle = () => {},
@@ -360,6 +361,7 @@
                 {onLoadJson}
                 {onSelectElement}
                 {onSetEnabled}
+                {onDelete}
                 {onHoverElement}
                 {onMarksChange}
             />

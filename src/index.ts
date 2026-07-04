@@ -251,6 +251,22 @@ function applyOsmEnabled(featureId: string, ids: number[], enabled: boolean): vo
     pushOsmElements(featureId);
 }
 
+/** Permanently remove the marked elements from a feature (the Disable button's 3-second long-press).
+ *  Same downstream refresh as enable/disable (data + overlay + list); a selection pointing at a
+ *  deleted element is cleared. Like disable, the preview only reflects it on the next Update preview. */
+function removeOsmElements(featureId: string, ids: number[]): void {
+    const data = osmData.get(featureId);
+    if (!data || !ids.length) return;
+    const set = new Set(ids);
+    const next = data.list.filter(e => !set.has(e.id));
+    osmData.set(featureId, new OsmVectorData(next));
+    osmOverlays.get(featureId)?.setElements(next);
+    pushOsmElements(featureId);
+    if (selectedOsmElement?.featureId === featureId && set.has(selectedOsmElement.elementId)) {
+        selectOsm(null, null);
+    }
+}
+
 /** Map click handler (only while no draw tool is active): select the topmost OSM element under the
  *  click, or clear the selection when the click misses every OSM feature. */
 function onMapClick(pixel: number[]): void {
@@ -737,6 +753,8 @@ async function init(): Promise<void> {
             onSelectElement: (id: string, elementId: number) => { selectOsm(id, elementId); panToOsm(id, elementId); },
             // Enable/disable the user's marked elements for a feature (Enable/Disable in the menu).
             onSetEnabled: (id: string, ids: number[], enabled: boolean) => applyOsmEnabled(id, ids, enabled),
+            // Delete the user's marked elements for a feature (Disable button, 3-second long-press).
+            onDelete: (id: string, ids: number[]) => removeOsmElements(id, ids),
             // Hovering a list row highlights it on the map (no centring); null clears the highlight.
             onHoverElement: (id: string | null, elementId: number | null) => hoverOsm(id, elementId),
             // The user's ticked (marked) elements, highlighted on the map as they stage an edit.

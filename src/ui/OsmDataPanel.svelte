@@ -26,6 +26,7 @@
         onLoadJson = () => 0,
         onSelectElement = () => {},
         onSetEnabled = () => {},
+        onDelete = () => {},
         onHoverElement = () => {},
         onMarksChange = () => {},
     } = $props();
@@ -100,6 +101,36 @@
         marked[fid] = {};
     }
     function cancelMarks(fid) { marked[fid] = {}; }
+
+    // The Disable button doubles as a delete: a normal click disables, but holding it for 3 seconds
+    // deletes the marked set instead (destructive, so gated behind a deliberate long-press). One press
+    // at a time, so a single timer + flag suffices. `holdingDelete` (a feature id) drives the button's
+    // "hold to delete" affordance while pressed.
+    const DELETE_HOLD_MS = 3000;
+    let holdTimer = null;
+    let holdFired = false;                 // the long-press already deleted → swallow the trailing click
+    let holdingDelete = $state(null);
+    function startHold(fid) {
+        holdFired = false;
+        holdingDelete = fid;
+        holdTimer = setTimeout(() => {
+            holdTimer = null;
+            holdFired = true;
+            holdingDelete = null;
+            const ids = Object.keys(marked[fid] ?? {}).map(Number);
+            if (ids.length) onDelete(fid, ids);
+            marked[fid] = {};
+        }, DELETE_HOLD_MS);
+    }
+    function cancelHold() {
+        if (holdTimer) { clearTimeout(holdTimer); holdTimer = null; }
+        holdingDelete = null;
+    }
+    function disableClicked(fid) {
+        // The click that ends a completed long-press must not also disable — swallow it once.
+        if (holdFired) { holdFired = false; return; }
+        applyEnabled(fid, false);
+    }
 
     // Clear every feature's marked set (the "Clear selection" button + box-select reset).
     let anyMarks = $derived(features.some(f => hasMarks(f.id)));
@@ -333,7 +364,15 @@
                 {/if}
                 <div class="px-4 pb-2 flex gap-2">
                     <button class="btn btn-xs flex-1" disabled={!hasMarks(f.id)} onclick={() => applyEnabled(f.id, true)}>Enable</button>
-                    <button class="btn btn-xs flex-1" disabled={!hasMarks(f.id)} onclick={() => applyEnabled(f.id, false)}>Disable</button>
+                    <button class="btn btn-xs flex-1 {holdingDelete === f.id ? 'btn-error' : ''}"
+                        title="Disable the marked {f.noun} — hold 3s to delete them instead"
+                        disabled={!hasMarks(f.id)}
+                        onpointerdown={() => startHold(f.id)}
+                        onpointerup={cancelHold}
+                        onpointerleave={cancelHold}
+                        onpointercancel={cancelHold}
+                        oncontextmenu={(e) => e.preventDefault()}
+                        onclick={() => disableClicked(f.id)}>{holdingDelete === f.id ? 'Hold to delete…' : 'Disable'}</button>
                     <button class="btn btn-xs flex-1" disabled={!hasMarks(f.id)} onclick={() => cancelMarks(f.id)}>Cancel</button>
                 </div>
             {/if}
