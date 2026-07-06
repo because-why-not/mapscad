@@ -61,6 +61,13 @@ test('downloads a small Dunedin area and matches the stored STL', async ({ page 
     await expect(page.getByText('Min / Max thickness')).toBeVisible({ timeout: 30_000 });
 
     await page.getByRole('button', { name: 'Open 3D menu' }).click();
+
+    // Guard against a silent DEM fallback. `dunedin_elevation_raw` lives only on the tile server;
+    // without it the app quietly falls back to a public DEM (Mapterhorn), which still yields real
+    // terrain differing by only ~0.5 m — enough to fail the byte compare below for a baffling
+    // reason. Assert the intended source is actually the one selected in the UI.
+    await expect(page.getByLabel('Source').locator('option:checked')).toHaveText('Dunedin');
+
     const downloadPromise = page.waitForEvent('download');
     await page.getByRole('button', { name: 'Save STL' }).click();
     const download = await downloadPromise;
