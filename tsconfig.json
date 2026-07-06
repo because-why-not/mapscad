@@ -2,8 +2,9 @@
   "compilerOptions": {
     "target": "ESNext",
     "module": "ESNext",
-    "moduleResolution": "node",
+    "moduleResolution": "bundler",
     "lib": ["ESNext", "DOM"],
+    "rootDir": "./src",
     "outDir": "./dist",
     "strict": false,
     "skipLibCheck": true,
@@ -15,8 +16,7 @@
     "strictFunctionTypes": false,
     "strictBindCallApply": false,
     "strictPropertyInitialization": false,
-    "noImplicitThis": false,
-    "alwaysStrict": false
+    "noImplicitThis": false
   },
   "include": ["src/**/*"],
   "exclude": ["node_modules", "platforms", "plugins", "www/js"]
