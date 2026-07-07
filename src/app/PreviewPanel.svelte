@@ -15,6 +15,10 @@
         zoomMax = 17,
         initialSettings = {},
         onSettingsChange = () => {},
+        // Smooth shading is a viewer-only toggle (never exported), so it has its own prop + callback
+        // straight to the 3D view — it does NOT travel through the model-settings channel below.
+        initialSmoothShading = true,
+        onSmoothShadingChange = () => {},
         onGenerate = () => {},
         onSave = () => {},
         onSave3mf = () => {},
@@ -80,7 +84,7 @@
     let waterLevel = $state(untrack(() => initialSettings.waterLevel ?? 0));
     let lowCutEnabled = $state(untrack(() => initialSettings.lowCutEnabled ?? false));
     let lowCutLevel = $state(untrack(() => initialSettings.lowCutLevel ?? 0));
-    let smoothShading = $state(untrack(() => initialSettings.smoothShading ?? true));
+    let smoothShading = $state(untrack(() => initialSmoothShading));
 
     // Per-OSM-feature raise settings, keyed by feature id, seeded from the sanitized model settings
     // (initialSettings.osm always has every registry feature). Generic so a new feature needs no
@@ -99,7 +103,7 @@
     export function setOsmAvailable(id, has) { if (id in osmAvailable) osmAvailable[id] = has; }
 
     function settings() {
-        return { heightZoom, rasterResolution, heightScale, socketEnabled, socketSize, tilesEnabled, tilesX, tilesY, waterEnabled, waterCutoff, waterLevel, lowCutEnabled, lowCutLevel, osm: $state.snapshot(osmSettings), smoothShading };
+        return { heightZoom, rasterResolution, heightScale, socketEnabled, socketSize, tilesEnabled, tilesX, tilesY, waterEnabled, waterCutoff, waterLevel, lowCutEnabled, lowCutLevel, osm: $state.snapshot(osmSettings) };
     }
     function emit() { onSettingsChange(settings()); }
     function selectAll(e) { e.target.select(); }
@@ -336,7 +340,7 @@
             <div class="px-4 py-1 mt-2 text-xs font-bold uppercase tracking-wider opacity-50">Preview</div>
             <div class="px-4 py-2">
                 <label class="flex items-center gap-2 cursor-pointer">
-                    <input type="checkbox" class="checkbox checkbox-sm" bind:checked={smoothShading} onchange={emit} />
+                    <input type="checkbox" class="checkbox checkbox-sm" bind:checked={smoothShading} onchange={() => onSmoothShadingChange(smoothShading)} />
                     <span class="text-sm">Smooth shading</span>
                 </label>
             </div>

@@ -18,9 +18,10 @@ import { OSM_LABELS } from './app/osmLabels';
 import { TerrainPreview } from './kit/ui/TerrainPreview';
 import { MapModel, SelectionShape } from './kit/MapModel';
 import { MapscadSession } from './kit/MapscadSession';
-import { PreviewConfigStore } from './kit/PreviewConfig';
+import { ProcessorConfigStore } from './kit/ProcessorConfig';
 import type { MapEngine } from './kit/ui/MapEngine';
 import { readUrlMapState, loadView, saveView, saveActive } from './app/urlState';
+import { loadSmoothShading } from './app/uiPrefs';
 import { MapscadRenderer, demZoomRange, resolutionZoomRange } from './app/renderer';
 
 // This file is the composition root: the only place that names concrete engines. It constructs the
@@ -31,7 +32,7 @@ import { MapscadRenderer, demZoomRange, resolutionZoomRange } from './app/render
 const model = new MapModel();
 // Single source of truth for preview/export config (DEM, selection, model settings, display flags)
 // + its persistence and share-link codec. Reads any share link / saved config at construction.
-const config = new PreviewConfigStore();
+const config = new ProcessorConfigStore();
 // The kit session owns the element *data* (source of truth) + preview membership + two typed events.
 const session = new MapscadSession();
 // The renderer / second adapter: drives the OL overlays + Three.js preview from the session/model
@@ -109,7 +110,9 @@ async function init(): Promise<void> {
     model.applySettings({ ...cfg.model, heightZoom, rasterResolution: Env.rasterResolution });
     // Fold the resolved DEM + sanitized settings back into the config so it's consistent.
     config.update({ demId: initialDemId, model: model.getSettings() });
-    const initialPreviewSettings: Record<string, any> = { ...model.getSettings(), smoothShading: cfg.display.smoothShading };
+    const initialPreviewSettings: Record<string, any> = { ...model.getSettings() };
+    // Smooth shading is a viewer-only pref (app-side, its own storage key) — not part of the config.
+    const smoothShading = loadSmoothShading();
 
     const tileProviders = maps.map(m => {
         // Elevation DEMs are grouped with their synthesized 2D/3D hillshades under one heading
@@ -181,8 +184,10 @@ async function init(): Promise<void> {
             previewZoomMin,
             previewZoomMax,
             initialPreviewSettings,
+            initialPreviewSmoothShading: smoothShading,
             onPreviewDemChange: (id: string) => renderer.changePreviewDem(id),
             onPreviewSettingsChange: (s: Record<string, any>) => renderer.changePreviewSettings(s),
+            onPreviewSmoothShadingChange: (v: boolean) => renderer.setSmoothShading(v),
             onPreviewGenerate: (s: Record<string, any>) => renderer.generate(s),
             onPreviewSave: (s: Record<string, any>) => renderer.saveStl(s),
             onPreviewSave3mf: (s: Record<string, any>) => renderer.save3mf(s),
@@ -208,7 +213,7 @@ async function init(): Promise<void> {
     // The preview is a pure consumer of the model: one subscription keeps both the 3D view and the
     // stats overlay in sync with whatever the model currently holds.
     const preview = new TerrainPreview(previewRoot);
-    preview.setSmoothShading(initialPreviewSettings.smoothShading ?? true);
+    preview.setSmoothShading(smoothShading);
     renderer.preview = preview;
     model.onChange(() => renderer.onModelChange());
 

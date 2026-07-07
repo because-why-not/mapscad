@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { PreviewConfigStore } from '../../src/kit/PreviewConfig';
+import { ProcessorConfigStore } from '../../src/kit/ProcessorConfig';
 import { DEFAULT_MODEL_SETTINGS } from '../../src/kit/MapModel';
 
 const sel = [[170.5, -45.87], [170.6, -45.87], [170.6, -45.9], [170.5, -45.9]];
@@ -25,10 +25,10 @@ beforeEach(() => {
 
 describe('localStorage persistence', () => {
     it('round-trips settings + selection across a fresh store', () => {
-        const a = new PreviewConfigStore();
+        const a = new ProcessorConfigStore();
         a.update({ demId: 'dunedin_elevation_raw', selection: sel as any, model: { heightScale: 3, socketEnabled: true } });
 
-        const b = new PreviewConfigStore();
+        const b = new ProcessorConfigStore();
         expect(b.get().demId).toBe('dunedin_elevation_raw');
         expect(b.get().selection).toEqual(sel);
         expect(b.get().model.heightScale).toBe(3);
@@ -39,22 +39,21 @@ describe('localStorage persistence', () => {
 describe('coerce — partial / invalid blobs never hard-fail', () => {
     it('backfills missing fields from defaults', () => {
         localStorage.setItem('previewConfig', JSON.stringify({ demId: 'x' }));
-        const store = new PreviewConfigStore();
+        const store = new ProcessorConfigStore();
         expect(store.get().demId).toBe('x');
         expect(store.get().selection).toBeNull();
         expect(store.get().model).toEqual(DEFAULT_MODEL_SETTINGS);
-        expect(store.get().display.smoothShading).toBe(true);
     });
 
     it('rejects a selection that is not exactly four corners', () => {
         localStorage.setItem('previewConfig', JSON.stringify({ selection: [[1, 2], [3, 4]] }));
-        const store = new PreviewConfigStore();
+        const store = new ProcessorConfigStore();
         expect(store.get().selection).toBeNull();
     });
 
     it('survives malformed JSON and returns defaults', () => {
         localStorage.setItem('previewConfig', '{not json');
-        const store = new PreviewConfigStore();
+        const store = new ProcessorConfigStore();
         expect(store.get().demId).toBe('');
         expect(store.get().selection).toBeNull();
     });

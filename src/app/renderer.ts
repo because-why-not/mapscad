@@ -5,7 +5,7 @@ import { sampleSelectionHeights, rectExtent, tileCoverage } from '../kit/maptile
 import type { ManifestMap } from '../kit/maptiles/TileMapManifest';
 import { SelectionShape, type MapModel, type ModelGeometry } from '../kit/MapModel';
 import type { MapscadSession } from '../kit/MapscadSession';
-import type { PreviewConfigStore } from '../kit/PreviewConfig';
+import type { ProcessorConfigStore } from '../kit/ProcessorConfig';
 import type { TerrainPreview } from '../kit/ui/TerrainPreview';
 import type { MapController } from '../kit/ui/MapController';
 import type { SelectionArea } from '../kit/ui/SelectionArea';
@@ -15,6 +15,7 @@ import { exportModel3mf } from '../kit/ThreeMFMaker';
 import { estimateMemory, measureMemory, formatBytes, memoryLevel, isOverBudget } from '../kit/memory';
 import { groundResolution, zoomForResolution, type LonLat } from '../kit/common/mathHelper';
 import { composeShareUrl } from './urlState';
+import { saveSmoothShading } from './uiPrefs';
 import { Env } from '../Env';
 import type OlMap from 'ol/Map';
 import type DragBox from 'ol/interaction/DragBox';
@@ -116,7 +117,7 @@ export class MapscadRenderer {
     constructor(
         private readonly session: MapscadSession,
         private readonly model: MapModel,
-        private readonly config: PreviewConfigStore,
+        private readonly config: ProcessorConfigStore,
     ) {
         // index.ts is the session's renderer: dataChanged → redraw overlay; previewChanged → re-bind
         // to the grid. (The object *list* is rendered by the Data panel, which subscribes itself.)
@@ -559,12 +560,18 @@ export class MapscadRenderer {
         this.resample();
     }
 
+    /** The smooth-shading checkbox — a viewer-only pref: persist it app-side and re-shade the mesh
+     *  directly. It never touches the model/config (it doesn't affect the exported geometry). */
+    setSmoothShading(on: boolean): void {
+        saveSmoothShading(on);
+        this.preview?.setSmoothShading(on);
+    }
+
     /** User changed settings in the side menu (NOT triggered when the selection changes). */
     changePreviewSettings(s: Record<string, any>): void {
         const prev = this.model.getSettings();
         this.model.applySettings(s); // rebuilds geometry from the current grid
-        this.config.update({ model: this.model.getSettings(), display: { smoothShading: s.smoothShading ?? true } });
-        this.preview?.setSmoothShading(s.smoothShading ?? true); // display-only
+        this.config.update({ model: this.model.getSettings() });
         // The raster resolution sets where the DEM zoom stops being useful (one DEM pixel per raster
         // cell), so recompute the slider range + clamp the current zoom into it when it changes.
         const corners = this.session.getSelection();

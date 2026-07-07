@@ -34,8 +34,10 @@
         previewZoomMin = 0,
         previewZoomMax = 17,
         initialPreviewSettings = {},
+        initialPreviewSmoothShading = true,
         onPreviewDemChange = () => {},
         onPreviewSettingsChange = () => {},
+        onPreviewSmoothShadingChange = () => {},
         onPreviewGenerate = () => {},
         onPreviewSave = () => {},
         onPreviewSave3mf = () => {},
@@ -193,6 +195,8 @@
         zoomMax={previewZoomMax}
         initialSettings={initialPreviewSettings}
         onSettingsChange={onPreviewSettingsChange}
+        initialSmoothShading={initialPreviewSmoothShading}
+        onSmoothShadingChange={onPreviewSmoothShadingChange}
         onGenerate={onPreviewGenerate}
         onSave={onPreviewSave}
         onSave3mf={onPreviewSave3mf}
