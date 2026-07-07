@@ -7,37 +7,29 @@ import { EXTERNAL_DEMS } from './kit/config/externalDems';
 import { EXTERNAL_MAPS } from './kit/config/externalMaps';
 import { prettifyMapName, iconForMapType, LOCAL_MAP_PREFIX, stripLocalPrefix } from './kit/config/mapMeta';
 import { availableCustomMaps, elevationGroup } from './kit/config/customMaps';
-import { MapController } from './kit/ui/MapController';
-import { OpenLayersEngine } from './kit/ui/OpenLayersEngine';
-import { MapLibreTerrainEngine } from './kit/ui/MapLibreTerrainEngine';
-import { SelectionArea } from './kit/ui/SelectionArea';
-import DragBox from 'ol/interaction/DragBox';
-import { OsmOverlay } from './kit/ui/OsmOverlay';
+import { MapViewer } from './kit/ui/MapViewer';
+import { PreviewController, demZoomRange, resolutionZoomRange } from './kit/ui/PreviewController';
 import { OSM_FEATURES } from './kit/mapelements/osmFeatures';
 import { OSM_LABELS } from './app/osmLabels';
-import { TerrainPreview } from './kit/ui/TerrainPreview';
-import { MapModel, SelectionShape } from './kit/MapModel';
+import { MapModel, type SelectionShape } from './kit/MapModel';
 import { MapscadSession } from './kit/MapscadSession';
 import { ProcessorConfigStore } from './kit/ProcessorConfig';
-import type { MapEngine } from './kit/ui/MapEngine';
-import { readUrlMapState, loadView, saveView, saveActive } from './app/urlState';
-import { loadSmoothShading } from './app/uiPrefs';
-import { MapscadRenderer, demZoomRange, resolutionZoomRange } from './app/renderer';
+import { rectExtent } from './kit/maptiles/HeightSampler';
+import { readUrlMapState, composeShareUrl, loadView, saveView, saveActive } from './app/urlState';
+import { loadSmoothShading, saveSmoothShading } from './app/uiPrefs';
 
-// This file is the composition root: the only place that names concrete engines. It constructs the
-// kit singletons + the renderer (the OL/Three adapter), fetches the manifest, mounts the Svelte App
-// (wiring its callbacks to renderer methods), then hands the built viewers to the renderer.
+// This file is the composition root — init only. It constructs the kit (session, model, config),
+// fetches the manifest and shapes the menu data, mounts the Svelte App (menus/layout), then hands
+// each viewer its mount <div> and wires the typed kit events to the App's forwarders. All behavior
+// lives in the kit: MapViewer (2D/3D map + selection + overlays), PreviewController (3D preview +
+// sampling + build), MapscadSession/.mapElements (state + element data).
 
 // The canonical 3D model: settings mutate it, the preview and STL export read it.
 const model = new MapModel();
-// Single source of truth for preview/export config (DEM, selection, model settings, display flags)
-// + its persistence and share-link codec. Reads any share link / saved config at construction.
+// Single source of truth for preview/export config (DEM, selection, model settings) + persistence.
 const config = new ProcessorConfigStore();
-// The kit session owns the element *data* (source of truth) + preview membership + two typed events.
+// The kit session: the selected region (+ selectionChanged) and the map-element manager.
 const session = new MapscadSession();
-// The renderer / second adapter: drives the OL overlays + Three.js preview from the session/model
-// events and fans UI commands back in. Its viewers/app are wired in once mounted (below).
-const renderer = new MapscadRenderer(session, model, config);
 
 /** Compact toggle label for an elevation source name (drops the _elevation[_raw] tail). */
 function demLabel(name: string): string {
@@ -45,7 +37,7 @@ function demLabel(name: string): string {
 }
 
 async function init(): Promise<void> {
-    // One-off cleanup: these were folded into the single `previewConfig` key (PreviewConfig)
+    // One-off cleanup: these were folded into the single `previewConfig` key (ProcessorConfig)
     // and are no longer read. Drop the orphans so they don't linger in users' storage.
     for (const k of ['previewSettings', 'previewDem', 'selectionCorners']) {
         try { localStorage.removeItem(k); } catch { /* ignore */ }
@@ -60,7 +52,6 @@ async function init(): Promise<void> {
     // (Mapterhorn, AWS) so the app is fully usable with no self-hosted tile server.
     const maps = [...serverMaps, ...EXTERNAL_MAPS, ...EXTERNAL_DEMS];
     const mapsById: Record<string, ManifestMap> = Object.fromEntries(maps.map(m => [m.name, m]));
-    renderer.mapsById = mapsById;
     // Resolve a bare source name to the actual map id (public bare, or server-prefixed).
     const resolveSource = (name: string): string | null =>
         mapsById[name] ? name : (mapsById[LOCAL_MAP_PREFIX + name] ? LOCAL_MAP_PREFIX + name : null);
@@ -68,8 +59,9 @@ async function init(): Promise<void> {
     // Resolve any active map source to the DEM it represents (used to default the preview source
     // when a brand-new selection is drawn). Raw DEM layers map to themselves; the synthesized 2D/3D
     // hillshades map to their demSource.
-    for (const m of maps) if (m.mmapsrv.type === 'elevation') renderer.demBySource[m.name] = m.name;
-    for (const s of customSpecs) renderer.demBySource[s.id] = s.demSource;
+    const demBySource: Record<string, string> = {};
+    for (const m of maps) if (m.mmapsrv.type === 'elevation') demBySource[m.name] = m.name;
+    for (const s of customSpecs) demBySource[s.id] = s.demSource;
     // The 3D preview can be built from any elevation DEM the server advertises (the manifest tags
     // those with mmapsrv.type === 'elevation'). Expose them all as a source toggle; each DEM has its
     // own zoom range, so switching also moves the zoom.
@@ -88,7 +80,7 @@ async function init(): Promise<void> {
     const initialDemId = (cfg.demId && mapsById[cfg.demId]?.mmapsrv.type === 'elevation')
         ? cfg.demId
         : (previewDems[0]?.id ?? '');
-    renderer.previewDem = mapsById[initialDemId];
+    const initialDem = mapsById[initialDemId];
 
     // The zoom slider's range + default. With a restored selection, cap it to the resolution the mesh
     // needs (as when drawing a new one); otherwise it's just the DEM's full range until a selection is
@@ -98,10 +90,10 @@ async function init(): Promise<void> {
     // starts at Env.rasterResolution so a stale saved value can't silently change the mesh density.
     const savedSelection = cfg.selection;
     let zr: { min: number; max: number; def: number };
-    if (savedSelection && renderer.previewDem) {
-        zr = resolutionZoomRange(savedSelection, renderer.previewDem, Env.rasterResolution);
+    if (savedSelection && initialDem) {
+        zr = resolutionZoomRange(savedSelection, initialDem, Env.rasterResolution);
     } else {
-        const range = demZoomRange(renderer.previewDem);
+        const range = demZoomRange(initialDem);
         zr = { ...range, def: range.max };
     }
     const previewZoomMin = zr.min, previewZoomMax = zr.max;
@@ -150,131 +142,130 @@ async function init(): Promise<void> {
         : (saved && allIds.includes(saved)) ? saved
         : (allIds[0] ?? '');
 
-    // Shared by the App (initial zoom badge) and the MapController (initial camera).
+    // Shared by the App (initial zoom badge) and the map viewer (initial camera).
     const initialView = urlMapState.view ?? loadView();
 
-    // Mount the Svelte UI first — it owns the split layout and provides the DOM nodes the map engines
-    // and 3D preview mount into. Every callback is a thin delegate to a renderer method.
-    renderer.app = mount(App, {
+    // The two kit viewers — constructed right after mount, but the App's callbacks close over them.
+    let mapViewer: MapViewer | null = null;
+    let previewController: PreviewController | null = null;
+
+    /** The full share/hash URL from the live map view + current selection. */
+    const shareUrl = (): string =>
+        composeShareUrl(mapViewer?.getView(), mapViewer?.activeId, config.get().selection, config.get().model.shape);
+    // Keep the address bar in sync with the live map + config, debounced so dragging doesn't flood
+    // the history API.
+    let urlSyncTimer = 0;
+    const scheduleUrlSync = (): void => {
+        clearTimeout(urlSyncTimer);
+        urlSyncTimer = window.setTimeout(() => {
+            try { history.replaceState(null, '', shareUrl()); }
+            catch (e) { Env.error('sync url', e); }
+        }, 250);
+    };
+
+    // Mount the Svelte UI first — it owns the split layout and provides the DOM nodes the viewers
+    // mount into. Every callback is a thin delegate to a kit method.
+    const app: any = mount(App, {
         target: document.getElementById('app')!,
         props: {
             tileProviders,
             customMaps,
             initialActiveProviderId: initialId,
             initialMapZoom: initialView.zoom,
-            onLayerSwitch: (id: string) => renderer.selectSource(id),
-            onSelectToggle: (active: boolean, shape?: SelectionShape) => renderer.toggleSelect(active, shape),
-            onAspectChange: (ratio: number | null) => renderer.setAspect(ratio),
-            onDataModeChange: (active: boolean) => renderer.setDataMode(active),
-            onBoxSelectToggle: (active: boolean) => renderer.toggleBoxSelect(active),
+            onLayerSwitch: (id: string) => mapViewer?.selectSource(id),
+            onSelectToggle: (active: boolean, shape?: SelectionShape) => mapViewer?.toggleSelect(active, shape),
+            onAspectChange: (ratio: number | null) => mapViewer?.setAspect(ratio),
+            onDataModeChange: (active: boolean) => mapViewer?.setDataMode(active),
+            onBoxSelectToggle: (active: boolean) => mapViewer?.toggleBoxSelect(active),
             // The menu sections to render (one per registry feature), so the UI is data-driven.
             features: OSM_FEATURES.map(f => ({ id: f.id, label: OSM_LABELS[f.id].label, noun: OSM_LABELS[f.id].noun, hasRadius: f.geometry === 'line', sizeLimit: f.sizeLimit })),
-            session, // the Data panel subscribes to the session for element data
-            onDownload: (id: string) => renderer.downloadFeature(id),
-            onSaveJson: (id: string) => renderer.saveFeatureJson(id),
-            onLoadJson: (id: string, payloads: any[]) => renderer.loadFeatureFiles(id, payloads),
-            onUpdatePreview: (id: string) => renderer.updatePreviewFeature(id),
-            onSelectElement: (id: string, elementId: number) => renderer.selectElement(id, elementId),
-            onSetEnabled: (id: string, ids: number[], enabled: boolean) => renderer.applyOsmEnabled(id, ids, enabled),
-            onDelete: (id: string, ids: number[]) => renderer.removeOsmElements(id, ids),
-            onHoverElement: (id: string | null, elementId: number | null) => renderer.hoverOsm(id, elementId),
-            onMarksChange: (id: string, ids: number[]) => renderer.setMarks(id, ids),
+            session, // the Data panel reads element data via the session's manager
+            onDownload: (id: string) => session.mapElements.download(id),
+            onSaveJson: (id: string) => session.mapElements.toJson(id),
+            onLoadJson: (id: string, payloads: any[]) => session.mapElements.loadFiles(id, payloads),
+            onUpdatePreview: (id: string) => session.mapElements.updatePreview(id),
+            onSelectElement: (id: string, elementId: number) => mapViewer?.selectElement(id, elementId),
+            onSetEnabled: (id: string, ids: number[], enabled: boolean) => session.mapElements.setEnabled(id, ids, enabled),
+            onDelete: (id: string, ids: number[]) => mapViewer?.removeElements(id, ids),
+            onHoverElement: (id: string | null, elementId: number | null) => mapViewer?.hoverOsm(id, elementId),
+            onMarksChange: (id: string, ids: number[]) => mapViewer?.setMarks(id, ids),
             previewDems,
             initialPreviewDemId: initialDemId,
             previewZoomMin,
             previewZoomMax,
             initialPreviewSettings,
             initialPreviewSmoothShading: smoothShading,
-            onPreviewDemChange: (id: string) => renderer.changePreviewDem(id),
-            onPreviewSettingsChange: (s: Record<string, any>) => renderer.changePreviewSettings(s),
-            onPreviewSmoothShadingChange: (v: boolean) => renderer.setSmoothShading(v),
-            onPreviewGenerate: (s: Record<string, any>) => renderer.generate(s),
-            onPreviewSave: (s: Record<string, any>) => renderer.saveStl(s),
-            onPreviewSave3mf: (s: Record<string, any>) => renderer.save3mf(s),
-            onPreviewResetCamera: () => renderer.resetCamera(),
-            onPreviewShareLink: () => renderer.shareUrl(),
-            onPreviewCancel: () => renderer.cancelResample(),
-            onLayoutChange: () => renderer.resize(),
+            onPreviewDemChange: (id: string) => previewController?.changeDem(id),
+            onPreviewSettingsChange: (s: Record<string, any>) => previewController?.changeSettings(s),
+            onPreviewSmoothShadingChange: (v: boolean) => { saveSmoothShading(v); previewController?.setSmoothShading(v); },
+            onPreviewGenerate: (s: Record<string, any>) => previewController?.generate(s),
+            onPreviewSave: (s: Record<string, any>) => previewController?.saveStl(s),
+            onPreviewSave3mf: (s: Record<string, any>) => previewController?.save3mf(s),
+            onPreviewResetCamera: () => previewController?.resetCamera(),
+            onPreviewShareLink: () => shareUrl(),
+            onPreviewCancel: () => previewController?.cancel(),
+            onLayoutChange: () => previewController?.resize(),
         },
     });
 
     // mount() inserts the DOM synchronously, but child-component `bind:this` refs (mapPanel,
     // previewPanel) are wired by effects that flush asynchronously. The selection-restore below runs
-    // synchronously (controller.select -> OL onReady, no awaits), so without this flush the App's
+    // synchronously (selectSource -> OL onReady, no awaits), so without this flush the App's
     // setSelectTool/setHasSelection forwarders would hit still-null child refs and no-op, leaving the
     // toolbar buttons stuck in their default state after a reload.
     flushSync();
 
-    // Read the Svelte-rendered mount nodes from the DOM (mount() inserts synchronously); more reliable
-    // than threading bind:this through nested components.
-    const mapMount = document.getElementById('map-mount')!;
-    const previewRoot = document.getElementById('preview-mount')!;
-
-    // The preview is a pure consumer of the model: one subscription keeps both the 3D view and the
-    // stats overlay in sync with whatever the model currently holds.
-    const preview = new TerrainPreview(previewRoot);
-    preview.setSmoothShading(smoothShading);
-    renderer.preview = preview;
-    model.onChange(() => renderer.onModelChange());
-
-    // Composition root: choose concrete engines here; nothing else knows about them.
-    const ol2dSpecs = customSpecs.filter(s => s.surface.type === 'hillshade-2d');
-    const mapLibreSpecs = customSpecs.filter(s => s.surface.type !== 'hillshade-2d');
-    const hillshades = ol2dSpecs.map(s => ({ id: s.id, demSource: s.demSource }));
-
-    // The region-selection tool lives on the OpenLayers 2D map; created when the OL map is ready, then
-    // restored from any previously saved selection. The 2D hillshades render here too, so the selection
-    // tool works over them.
-    const olEngine = new OpenLayersEngine(maps, map => {
-        if (renderer.selection) return;
-        renderer.olMap = map; // capture for the OSM click hit-test
-        renderer.selection = new SelectionArea(map, { onChange: (c) => renderer.onUserSelectionChange(c) });
-        // One overlay per registry feature, in zIndex order (the registry sets each zIndex).
-        for (const def of OSM_FEATURES) {
-            const overlay = new OsmOverlay(map, def);
-            renderer.osmOverlays.set(def.id, overlay);
-        }
-        // Click an OSM element to select it (vector-editor style); Delete removes the selected one.
-        map.on('singleclick', (e) => renderer.onMapClick(e.pixel));
-        // Box-select tool (Data tab): drag a box, mark every OSM element it intersects. Inactive until
-        // toggled on; suppresses pan while dragging (DragBox consumes the drag).
-        const box = new DragBox({ className: 'ol-dragbox data-box' });
-        renderer.dataBox = box;
-        box.setActive(false);
-        box.on('boxend', () => {
-            const extent = box.getGeometry().getExtent();
-            renderer.osmOverlays.forEach((overlay, featureId) => {
-                const ids = overlay.elementsInExtent(extent);
-                if (ids.length) renderer.app?.addOsmMarks(featureId, ids);
-            });
-        });
-        map.addInteraction(box);
-        const savedCorners = config.get().selection;
-        if (savedCorners) {
-            const shape = config.get().model.shape;
-            renderer.selection.setShape(shape);
-            renderer.selection.restore(savedCorners);
-            renderer.app?.setSelectTool(shape); // highlight the matching tool button
-            renderer.onSelectionChange(savedCorners); // restore() doesn't emit — fan out manually
-        }
-    }, hillshades);
-    const engines: MapEngine[] = [olEngine];
-    if (mapLibreSpecs.length) engines.push(new MapLibreTerrainEngine(mapLibreSpecs, mapsById));
-
-    const controller = new MapController({
-        engines,
-        container: mapMount,
-        initialView,
-        onActiveChange: id => renderer.app?.setActiveProvider(id),
-        onViewPersist: v => { saveView(v); renderer.app?.setMapZoom(v.zoom); renderer.scheduleUrlSync(); },
-        onActivePersist: id => { saveActive(id); renderer.scheduleUrlSync(); },
+    // Hand each viewer its mount node (read from the DOM — mount() inserts synchronously); from here
+    // the viewers own everything inside those divs, Svelte only owns where they sit in the layout.
+    const pc = new PreviewController(document.getElementById('preview-mount')!, session, model, config, {
+        mapsById,
+        demBySource,
+        initialDemId,
+        getActiveSourceId: () => mapViewer?.activeId ?? '',
     });
-    renderer.controller = controller;
+    pc.setSmoothShading(smoothShading);
+    previewController = pc;
+    const mv = new MapViewer(document.getElementById('map-mount')!, session, model, config, {
+        maps,
+        mapsById,
+        customSpecs,
+        initialView,
+    });
+    mapViewer = mv;
 
+    // --- events out of the kit → the App's menu/panel forwarders + persistence ---
+    pc.loading.on(s => app.setPreviewLoading(s));
+    pc.stats.on(s => app.setPreviewStats(s));
+    pc.zoomRange.on(r => app.setPreviewZoomRange(r.min, r.max, r.value));
+    pc.demChanged.on(id => app.setPreviewDem(id));
+    mv.activeChanged.on(id => app.setActiveProvider(id));
+    mv.viewChanged.on(v => { saveView(v); app.setMapZoom(v.zoom); scheduleUrlSync(); });
+    mv.activePersist.on(id => { saveActive(id); scheduleUrlSync(); });
+    mv.osmSelected.on(({ featureId, elementId }) => app.setOsmSelected(featureId, elementId));
+    mv.marksAdded.on(({ featureId, ids }) => app.addOsmMarks(featureId, ids));
+    mv.toolRestored.on(shape => app.setSelectTool(shape));
+    // Selection fan-out, UI-only slice (the kit handles the data + resampling itself): persist it,
+    // show/hide the 3D panel, reset or gate the Data panel, and flag kept data as possibly stale
+    // after an EDIT (the data is re-projected, but may not cover the shifted area — Overpass
+    // rate-limits make a silent wipe an expensive click to lose).
+    session.selectionChanged.on(({ corners, prev }) => {
+        config.update({ selection: corners });
+        app.setPreviewVisible(!!corners);
+        // The longest selection side (metres) gates which OSM features can be downloaded (Env limits).
+        const sideMeters = corners ? Math.max(...Object.values(rectExtent(corners))) : 0;
+        app.setHasSelection(!!corners, sideMeters, corners ? !prev : true);
+        if (corners && prev) {
+            for (const def of OSM_FEATURES) {
+                if (session.mapElements.getElements(def.id)) app.setOsmStale(def.id, true);
+            }
+        }
+    });
+    // A feature entered/left the printed model → gate its section in the preview menu.
+    session.mapElements.on('previewChanged', id => app.setOsmAvailable(id, session.mapElements.isInPreview(id)));
     // Selection / DEM / model changes alter the shareable slice → keep the URL live.
-    config.subscribe(() => renderer.scheduleUrlSync());
+    config.subscribe(() => scheduleUrlSync());
 
-    if (initialId) controller.select(initialId);
+    mv.selectSource(initialId);
 }
 
 if (document.readyState === 'loading') {

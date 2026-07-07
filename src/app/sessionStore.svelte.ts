@@ -31,12 +31,12 @@ export class SessionStore {
 
     constructor(session: MapscadSession) {
         this.#session = session;
-        this.#off = session.on('dataChanged', (id) => this.#sync(id));
+        this.#off = session.mapElements.on('dataChanged', (id) => this.#sync(id));
     }
 
-    /** Re-read one feature's element set from the session and mirror it into `$state`. */
+    /** Re-read one feature's element set from the session's manager and mirror it into `$state`. */
     #sync(id: string): void {
-        const data = this.#session.getElements(id);
+        const data = this.#session.mapElements.getElements(id);
         this.elements[id] = data
             ? data.list.map(e => ({ id: e.id, name: e.name ?? '', disabled: !!e.disabled }))
             : [];
