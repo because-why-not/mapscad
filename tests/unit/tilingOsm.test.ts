@@ -3,9 +3,9 @@
 // against the pre-tiling grid, so it floated over the compressed original extent instead of the
 // spread-apart tiles. We drive `buildModelGeometry` directly (no DOM) with a hand-made coverage.
 import { describe, it, expect } from 'vitest';
-import { buildModelGeometry, type OsmBody } from '../../src/model/buildGeometry';
-import { DEFAULT_MODEL_SETTINGS, SelectionShape, type ModelSettings } from '../../src/MapModel';
-import type { HeightGrid } from '../../src/HeightSampler';
+import { buildModelGeometry, type OsmBody } from '../../src/kit/model/buildGeometry';
+import { DEFAULT_MODEL_SETTINGS, SelectionShape, type ModelSettings } from '../../src/kit/MapModel';
+import type { HeightGrid } from '../../src/kit/maptiles/HeightSampler';
 
 function flatGrid(cols: number, rows: number, w = 60, h = 30): HeightGrid {
     const heights = new Float32Array(cols * rows); // all 0

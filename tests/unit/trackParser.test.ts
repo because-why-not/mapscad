@@ -2,7 +2,7 @@
 // TrackParser turns GPX/TCX XML into id-less `{ name, coords }` tracks (lon/lat polylines) that the
 // OSM Load flow ingests like a saved feature file. jsdom provides the DOMParser the parser relies on.
 import { describe, it, expect } from 'vitest';
-import { parseTrackFile, isTrackFile } from '../../src/osm/TrackParser';
+import { parseTrackFile, isTrackFile } from '../../src/kit/mapelements/TrackParser';
 
 const GPX = `<?xml version="1.0"?>
 <gpx version="1.1" xmlns="http://www.topografix.com/GPX/1/1">

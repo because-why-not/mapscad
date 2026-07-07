@@ -1,32 +1,32 @@
 import { mount, flushSync } from 'svelte';
-import App from './ui/App.svelte';
-import './ui/app.css';
+import App from './app/App.svelte';
+import './app/app.css';
 import { Env } from './Env';
-import { fetchTileMapManifest, type ManifestMap } from './TileMapManifest';
-import { EXTERNAL_DEMS } from './externalDems';
-import { EXTERNAL_MAPS } from './externalMaps';
-import { prettifyMapName, iconForMapType, LOCAL_MAP_PREFIX, stripLocalPrefix } from './mapMeta';
-import { availableCustomMaps, elevationGroup } from './customMaps';
-import { MapController } from './MapController';
-import { OpenLayersEngine } from './engine/OpenLayersEngine';
-import { MapLibreTerrainEngine } from './engine/MapLibreTerrainEngine';
-import { SelectionArea } from './SelectionArea';
+import { fetchTileMapManifest, type ManifestMap } from './kit/maptiles/TileMapManifest';
+import { EXTERNAL_DEMS } from './kit/config/externalDems';
+import { EXTERNAL_MAPS } from './kit/config/externalMaps';
+import { prettifyMapName, iconForMapType, LOCAL_MAP_PREFIX, stripLocalPrefix } from './kit/config/mapMeta';
+import { availableCustomMaps, elevationGroup } from './kit/config/customMaps';
+import { MapController } from './kit/ui/MapController';
+import { OpenLayersEngine } from './kit/ui/OpenLayersEngine';
+import { MapLibreTerrainEngine } from './kit/ui/MapLibreTerrainEngine';
+import { SelectionArea } from './kit/ui/SelectionArea';
 import OlMap from 'ol/Map';
 import DragBox from 'ol/interaction/DragBox';
-import { OsmOverlay } from './OsmOverlay';
-import { fetchFeatureRaw, parseWays, waysFromJson, type OsmElement } from './osm/OverpassFeature';
-import { OsmVectorData } from './osm/OsmVectorData';
-import { OSM_FEATURES, osmFeature } from './osm/osmFeatures';
-import { OSM_LABELS } from './ui/osmLabels';
-import { sampleSelectionHeights, rectExtent, tileCoverage } from './HeightSampler';
-import { TerrainPreview } from './TerrainPreview';
-import { MapModel, SelectionShape, type ModelGeometry } from './MapModel';
-import { PreviewConfigStore } from './PreviewConfig';
-import { exportModelStl } from './StlMaker';
-import { exportModel3mf } from './ThreeMFMaker';
-import { estimateMemory, measureMemory, formatBytes, memoryLevel, isOverBudget } from './memory';
-import type { GeoView, MapEngine } from './engine/MapEngine';
-import { groundResolution, zoomForResolution, type LonLat } from './mathHelper';
+import { OsmOverlay } from './kit/ui/OsmOverlay';
+import { fetchFeatureRaw, parseWays, waysFromJson, type OsmElement } from './kit/mapelements/OverpassFeature';
+import { OsmVectorData } from './kit/mapelements/OsmVectorData';
+import { OSM_FEATURES, osmFeature } from './kit/mapelements/osmFeatures';
+import { OSM_LABELS } from './app/osmLabels';
+import { sampleSelectionHeights, rectExtent, tileCoverage } from './kit/maptiles/HeightSampler';
+import { TerrainPreview } from './kit/ui/TerrainPreview';
+import { MapModel, SelectionShape, type ModelGeometry } from './kit/MapModel';
+import { PreviewConfigStore } from './kit/PreviewConfig';
+import { exportModelStl } from './kit/StlMaker';
+import { exportModel3mf } from './kit/ThreeMFMaker';
+import { estimateMemory, measureMemory, formatBytes, memoryLevel, isOverBudget } from './kit/memory';
+import type { GeoView, MapEngine } from './kit/ui/MapEngine';
+import { groundResolution, zoomForResolution, type LonLat } from './kit/common/mathHelper';
 
 // This file is the composition root: the only place that names concrete engines.
 // Everything it wires together (MapController, App, persistence) is engine-agnostic.
@@ -305,7 +305,7 @@ let buildPending = false;
 
 function getBuildWorker(): Worker {
     if (!buildWorker) {
-        buildWorker = new Worker(new URL('./model/geometry.worker.ts', import.meta.url));
+        buildWorker = new Worker(new URL('./kit/model/geometry.worker.ts', import.meta.url));
         buildWorker.onmessage = onBuildMessage;
         buildWorker.onerror = (e) => { Env.error('build worker', e.message); finishBuild(); };
     }

@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { buildQuery, osmFeature } from '../../src/osm/osmFeatures';
-import { parseWays, waysFromJson } from '../../src/osm/OverpassFeature';
+import { buildQuery, osmFeature } from '../../src/kit/mapelements/osmFeatures';
+import { parseWays, waysFromJson } from '../../src/kit/mapelements/OverpassFeature';
 
 const tracks = osmFeature('tracks');
 const buildings = osmFeature('buildings');

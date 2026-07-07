@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { PreviewConfigStore } from '../../src/PreviewConfig';
-import { DEFAULT_MODEL_SETTINGS } from '../../src/MapModel';
+import { PreviewConfigStore } from '../../src/kit/PreviewConfig';
+import { DEFAULT_MODEL_SETTINGS } from '../../src/kit/MapModel';
 
 const sel = [[170.5, -45.87], [170.6, -45.87], [170.6, -45.9], [170.5, -45.9]];
 

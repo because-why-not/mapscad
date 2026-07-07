@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { MapController } from '../../src/MapController';
-import type { GeoView, MapEngine } from '../../src/engine/MapEngine';
+import { MapController } from '../../src/kit/ui/MapController';
+import type { GeoView, MapEngine } from '../../src/kit/ui/MapEngine';
 
 /** A MapEngine whose mount() stays pending until the test resolves it, to hold the
  *  controller inside the `await engine.mount(...)` window. */

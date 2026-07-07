@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { estimateMemory, measureMemory } from '../../src/memory';
+import { estimateMemory, measureMemory } from '../../src/kit/memory';
 
 /**
  * Regression guard (from a code-review bug): memory.ts used to hardcode 256px tiles when

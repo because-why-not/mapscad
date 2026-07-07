@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { MapModel } from '../../src/MapModel';
-import type { HeightGrid } from '../../src/HeightSampler';
+import { MapModel } from '../../src/kit/MapModel';
+import type { HeightGrid } from '../../src/kit/maptiles/HeightSampler';
 
 function makeGrid(): HeightGrid {
     return {

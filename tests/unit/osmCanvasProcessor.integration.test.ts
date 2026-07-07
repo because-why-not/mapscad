@@ -6,11 +6,11 @@
 // radius, e.g. tracks/streets) and 'area' (solid fill, e.g. buildings). The mask is then draped onto
 // the terrain as its own body by buildFeatureBody (tested via mapModel/geometry).
 import { describe, it, expect, beforeAll, vi } from 'vitest';
-import { OsmCanvasProcessor } from '../../src/model/OsmCanvasProcessor';
-import { OsmVectorData } from '../../src/osm/OsmVectorData';
-import { osmFeature } from '../../src/osm/osmFeatures';
-import type { LonLat } from '../../src/mathHelper';
-import type { HeightGrid } from '../../src/HeightSampler';
+import { OsmCanvasProcessor } from '../../src/kit/model/OsmCanvasProcessor';
+import { OsmVectorData } from '../../src/kit/mapelements/OsmVectorData';
+import { osmFeature } from '../../src/kit/mapelements/osmFeatures';
+import type { LonLat } from '../../src/kit/common/mathHelper';
+import type { HeightGrid } from '../../src/kit/maptiles/HeightSampler';
 
 const LINE = osmFeature('tracks');   // geometry: 'line'
 const AREA = osmFeature('buildings'); // geometry: 'area'

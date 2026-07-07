@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { TerrariumMapData, type RawRaster } from '../../src/dem/TerrariumMapData';
+import { TerrariumMapData, type RawRaster } from '../../src/kit/maptiles/TerrariumMapData';
 
 // Build a raster from per-pixel [R,G,B,A] tuples (row-major, width*height of them).
 function raster(width: number, height: number, px: number[][], origin = [0, 0], tileSize = 256): RawRaster {

@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
-import { OsmVectorData } from '../../src/osm/OsmVectorData';
-import type { LonLat } from '../../src/mathHelper';
-import type { OsmElement } from '../../src/osm/OverpassFeature';
+import { OsmVectorData } from '../../src/kit/mapelements/OsmVectorData';
+import type { LonLat } from '../../src/kit/common/mathHelper';
+import type { OsmElement } from '../../src/kit/mapelements/OverpassFeature';
 
 // Axis-aligned 1°×1° selection (TL, TR, BR, BL) → affine maps u=lon, v=1−lat; 10×10 cells.
 const CORNERS: LonLat[] = [[0, 1], [1, 1], [1, 0], [0, 0]];

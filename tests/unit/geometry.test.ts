@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { weldIndexed } from '../../src/model/geometry';
+import { weldIndexed } from '../../src/kit/model/geometry';
 
 describe('weldIndexed', () => {
     it('collapses coincident vertices and remaps the triangles to them', () => {

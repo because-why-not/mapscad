@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { MapModel, ModelSettings, ModelBody, SelectionShape } from '../../src/MapModel';
-import type { HeightGrid } from '../../src/HeightSampler';
+import { MapModel, ModelSettings, ModelBody, SelectionShape } from '../../src/kit/MapModel';
+import type { HeightGrid } from '../../src/kit/maptiles/HeightSampler';
 
 // Build a HeightGrid from a 2D array. Row 0 is the SOUTH edge and column 0 the WEST edge,
 // matching the sampler (see CLAUDE.md: selection corners are [SW,SE,NE,NW]).

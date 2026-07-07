@@ -2,8 +2,8 @@
 // named, coloured <object> each, and emits a valid store-only OPC archive. We don't inflate (store =
 // literal bytes), so filenames and the model XML appear verbatim and can be sliced out and parsed.
 import { describe, it, expect } from 'vitest';
-import { threeMfArchive } from '../../src/ThreeMFMaker';
-import type { ModelBody } from '../../src/MapModel';
+import { threeMfArchive } from '../../src/kit/ThreeMFMaker';
+import type { ModelBody } from '../../src/kit/MapModel';
 
 // A minimal 1-triangle body of a given kind.
 function tri(kind: string): ModelBody {

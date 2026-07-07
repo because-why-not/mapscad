@@ -2,8 +2,8 @@ import { describe, it, expect } from 'vitest';
 import {
     HeightScaleProcessor, WaterProcessor, LowCutProcessor, SocketProcessor, TileDividerProcessor,
     type ElevationContext, type VertexMesh,
-} from '../../src/model/processors';
-import type { HeightGrid } from '../../src/HeightSampler';
+} from '../../src/kit/model/processors';
+import type { HeightGrid } from '../../src/kit/maptiles/HeightSampler';
 
 // A grid whose cell (r,c) encodes its coordinate as r*10+c, for easy identity checks.
 function coordGrid(cols: number, rows: number, w = 30, h = 30): HeightGrid {
