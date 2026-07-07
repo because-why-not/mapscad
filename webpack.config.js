@@ -28,8 +28,17 @@ module.exports = (cliEnv, argv) => {
         module: {
             rules: [
                 { test: /\.svelte$/, use: { loader: 'svelte-loader', options: { preprocess: svelteConfig.preprocess } } },
+                // `.svelte.ts` = a runes MODULE (reactive state/logic outside a component). svelte-loader
+                // compiles it via `compileModule` but does NOT preprocess, so it can't parse TS itself:
+                // ts-loader (transpile-only — svelte-check is the type gate, and $state has no ambient type
+                // here) strips the types first, then svelte-loader compiles the runes. Its own instance so
+                // it doesn't share config with the main `.ts` rule below.
+                {
+                    test: /\.svelte\.ts$/,
+                    use: ['svelte-loader', { loader: 'ts-loader', options: { transpileOnly: true, instance: 'svelte-modules' } }],
+                },
                 { test: /node_modules\/svelte\/.*\.mjs$/, resolve: { fullySpecified: false } },
-                { test: /\.ts$/, use: 'ts-loader', exclude: /node_modules/ },
+                { test: /\.ts$/, use: 'ts-loader', exclude: [/node_modules/, /\.svelte\.ts$/] },
                 { test: /\.css$/, use: [MiniCssExtractPlugin.loader, 'css-loader', 'postcss-loader'] },
             ],
         },

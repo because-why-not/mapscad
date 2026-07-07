@@ -1,8 +1,9 @@
 <script>
-    import { setContext } from 'svelte';
+    import { setContext, untrack } from 'svelte';
     import MapPanel from './MapPanel.svelte';
     import PreviewPanel from './PreviewPanel.svelte';
     import { SESSION_DATA } from './sessionData';
+    import { SessionStore } from './sessionStore.svelte';
 
     let {
         // Map menu data + callbacks (forwarded to MapPanel)
@@ -49,19 +50,14 @@
     let previewPanel;
     let containerEl;
 
-    // Shared session-data store (the "engineStore", Option B): subscribe to the session ONCE here and
-    // mirror each feature's element list into $state; descendants read it via getContext(SESSION_DATA)
-    // and never subscribe themselves. Only session-derived DATA lives here — UI-local state (marks,
-    // filter, selection) stays in the consuming component.
-    let osmElements = $state({});
-    setContext(SESSION_DATA, { get elements() { return osmElements; } });
-    $effect(() => {
-        if (!session) return;
-        return session.on('dataChanged', (id) => {
-            const data = session.getElements(id);
-            osmElements[id] = data ? data.list.map(e => ({ id: e.id, name: e.name ?? '', disabled: !!e.disabled })) : [];
-        });
-    });
+    // Shared session-data store (the "engineStore"): a SessionStore instance subscribes to the session
+    // ONCE and mirrors each feature's element list into rune $state (it's a `.svelte.ts` module, so its
+    // runes stay reactive across the boundary). Descendants read it via getContext(SESSION_DATA) and
+    // never subscribe themselves. Only session-derived DATA lives here — UI-local state (marks, filter,
+    // selection) stays in the consuming component.
+    const sessionStore = new SessionStore(untrack(() => session)); // session is a stable const from index.ts
+    setContext(SESSION_DATA, sessionStore);
+    $effect(() => () => sessionStore.dispose());
 
     let orientation = $state(getOrientation());
     let previewVisible = $state(false);
