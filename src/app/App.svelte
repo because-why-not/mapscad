@@ -4,60 +4,37 @@
     import PreviewPanel from './PreviewPanel.svelte';
     import { SESSION_DATA } from './sessionData';
     import { SessionStore } from './sessionStore.svelte';
+    import { KIT } from './kitContext';
 
+    // The App owns the split LAYOUT only: two panels, the drag gutter, collapse/restore. Everything
+    // else lives in the panels (menus) and the kit (behavior). It provides two contexts: KIT (the
+    // kit objects — panels call methods + subscribe to events directly) and SESSION_DATA (the shared
+    // element-list store below).
     let {
-        // Map menu data + callbacks (forwarded to MapPanel)
+        // The kit objects (session/config always set; the two viewers are filled in by index.ts
+        // right after mount — see kitContext.ts for the timing rules).
+        kit,
+        // Static menu data, shaped by index.ts from the manifest.
         tileProviders = [],
         customMaps = [],
         initialActiveProviderId = '',
-        onLayerSwitch = () => {},
-        onSelectToggle = () => {},
-        onAspectChange = () => {},
-        onDataModeChange = () => {},
-        // OSM data: the feature list to render + generic per-feature callbacks (keyed by id).
-        features = [],
-        session,   // kit session — forwarded to MapPanel → OsmDataPanel (which subscribes to it)
-        onDownload = () => 0,
-        onUpdatePreview = () => {},
-        onSaveJson = () => null,
-        onLoadJson = () => 0,
-        onSelectElement = () => {},
-        onSetEnabled = () => {},
-        onDelete = () => {},
-        onHoverElement = () => {},
-        onMarksChange = () => {},
-        onBoxSelectToggle = () => {},
         initialMapZoom = 0,
-        // 3D-view menu (forwarded to PreviewPanel)
+        features = [],
         previewDems = [],
         initialPreviewDemId = '',
         previewZoomMin = 0,
         previewZoomMax = 17,
         initialPreviewSettings = {},
-        initialPreviewSmoothShading = true,
-        onPreviewDemChange = () => {},
-        onPreviewSettingsChange = () => {},
-        onPreviewSmoothShadingChange = () => {},
-        onPreviewGenerate = () => {},
-        onPreviewSave = () => {},
-        onPreviewSave3mf = () => {},
-        onPreviewResetCamera = () => {},
-        onPreviewShareLink = () => '',
-        onPreviewCancel = () => {},
-        // Fired whenever the split layout changes, so index.ts can resize the renderers.
-        onLayoutChange = () => {},
     } = $props();
 
-    let mapPanel;
-    let previewPanel;
-    let containerEl;
+    setContext(KIT, untrack(() => kit)); // kit is a stable object from index.ts
 
-    // Shared session-data store (the "engineStore"): a SessionStore instance subscribes to the session
-    // ONCE and mirrors each feature's element list into rune $state (it's a `.svelte.ts` module, so its
-    // runes stay reactive across the boundary). Descendants read it via getContext(SESSION_DATA) and
-    // never subscribe themselves. Only session-derived DATA lives here — UI-local state (marks, filter,
+    // Shared session-data store: a SessionStore instance subscribes to the element manager ONCE and
+    // mirrors each feature's element list into rune $state (it's a `.svelte.ts` module, so its runes
+    // stay reactive across the boundary). Descendants read it via getContext(SESSION_DATA) and never
+    // subscribe themselves. Only session-derived DATA lives here — UI-local state (marks, filter,
     // selection) stays in the consuming component.
-    const sessionStore = new SessionStore(untrack(() => session)); // session is a stable const from index.ts
+    const sessionStore = new SessionStore(untrack(() => kit.session));
     setContext(SESSION_DATA, sessionStore);
     $effect(() => () => sessionStore.dispose());
 
@@ -65,6 +42,13 @@
     let previewVisible = $state(false);
     let collapsed = $state('none');     // 'none' | 'map' | 'preview'
     let ratio = $state(loadRatio());    // map-panel fraction when both are shown
+
+    // The 3D panel shows exactly while a region is selected — the layout's one piece of kit state.
+    $effect(() => kit.session.selectionChanged.on(({ corners }) => {
+        previewVisible = !!corners;
+        if (!previewVisible) collapsed = 'none';
+        notifyLayout();
+    }));
 
     let showBoth = $derived(previewVisible && collapsed === 'none');
     let mapShown = $derived(collapsed !== 'map');
@@ -81,27 +65,9 @@
         return v > 0.1 && v < 0.9 ? v : 0.5;
     }
 
-    // --- exports used by index.ts ---
-    export function setActiveProvider(id) { mapPanel?.setActiveProvider(id); }
-    export function setSelectTool(tool) { mapPanel?.setSelectTool(tool); }
-    export function setHasSelection(has, sideMeters = 0, resetData = true) { mapPanel?.setHasSelection(has, sideMeters, resetData); }
-    export function setOsmAvailable(id, has) { previewPanel?.setOsmAvailable(id, has); }
-    export function setOsmStale(id, stale) { mapPanel?.setOsmStale(id, stale); }
-    export function setOsmSelected(featureId, elementId) { mapPanel?.setOsmSelected(featureId, elementId); }
-    export function addOsmMarks(id, ids) { mapPanel?.addOsmMarks(id, ids); }
-    export function setMapZoom(z) { mapPanel?.setZoom(z); }
-    export function setPreviewStats(stats) { previewPanel?.setPreviewStats(stats); }
-    export function setPreviewLoading(state) { previewPanel?.setPreviewLoading(state); }
-    export function setPreviewZoomRange(min, max, heightZoom) { previewPanel?.setZoomRange(min, max, heightZoom); }
-    export function setPreviewDem(id) { previewPanel?.setDem(id); }
-    export function setPreviewVisible(visible) {
-        previewVisible = visible;
-        if (!visible) collapsed = 'none';
-        notifyLayout();
-    }
-
+    // The renderers size themselves to their panel, so poke them after any layout change.
     function notifyLayout() {
-        requestAnimationFrame(() => onLayoutChange());
+        requestAnimationFrame(() => kit.previewController?.resize());
     }
 
     function panelStyle(which) {
@@ -127,7 +93,7 @@
                 ? (ev.clientX - rect.left) / rect.width
                 : (ev.clientY - rect.top) / rect.height;
             ratio = Math.min(0.9, Math.max(0.1, r));
-            onLayoutChange();
+            kit.previewController?.resize();
         };
         const up = () => {
             window.removeEventListener('pointermove', move);
@@ -138,8 +104,10 @@
         window.addEventListener('pointerup', up);
     }
 
+    let containerEl;
+
     $effect(() => {
-        const onResize = () => { orientation = getOrientation(); onLayoutChange(); };
+        const onResize = () => { orientation = getOrientation(); notifyLayout(); };
         window.addEventListener('resize', onResize);
         return () => window.removeEventListener('resize', onResize);
     });
@@ -147,26 +115,11 @@
 
 <div class="split {orientation}" bind:this={containerEl}>
     <MapPanel
-        bind:this={mapPanel}
         style={mapStyle}
         {tileProviders}
         {customMaps}
         {initialActiveProviderId}
-        {onLayerSwitch}
-        {onSelectToggle}
-        {onAspectChange}
-        {onDataModeChange}
         {features}
-        {onDownload}
-        {onUpdatePreview}
-        {onSaveJson}
-        {onLoadJson}
-        {onSelectElement}
-        {onSetEnabled}
-        {onDelete}
-        {onHoverElement}
-        {onMarksChange}
-        {onBoxSelectToggle}
         initialZoom={initialMapZoom}
         canCollapse={showBoth}
         onCollapse={collapseMap}
@@ -183,26 +136,15 @@
     {/if}
 
     <PreviewPanel
-        bind:this={previewPanel}
         style={previewStyle}
         canCollapse={showBoth}
         onCollapse={collapsePreview}
         dems={previewDems}
         {features}
         initialDemId={initialPreviewDemId}
-        onDemChange={onPreviewDemChange}
         zoomMin={previewZoomMin}
         zoomMax={previewZoomMax}
         initialSettings={initialPreviewSettings}
-        onSettingsChange={onPreviewSettingsChange}
-        initialSmoothShading={initialPreviewSmoothShading}
-        onSmoothShadingChange={onPreviewSmoothShadingChange}
-        onGenerate={onPreviewGenerate}
-        onSave={onPreviewSave}
-        onSave3mf={onPreviewSave3mf}
-        onResetCamera={onPreviewResetCamera}
-        onShareLink={onPreviewShareLink}
-        onCancel={onPreviewCancel}
     />
 
     {#if collapsed !== 'none'}

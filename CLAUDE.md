@@ -19,7 +19,14 @@ Three.js preview of the printable mesh.
   Kit classes follow **events out, methods in** — they announce changes via typed `Emitter`s
   (`src/kit/common/events.ts`) and are driven via methods. `src/index.ts` is the composition
   root, *init only*: construct the kit, fetch the manifest + shape menu data, mount the App,
-  hand each viewer its mount `<div>`, wire kit events to the App's forwarders.
+  hand each viewer its mount `<div>`; its only glue is persistence + the share-URL sync.
+- **Panels talk to the kit directly — no callback props, no imperative component exports.**
+  `App.svelte` owns the split layout only and provides the kit objects via the `KIT` context
+  (`src/app/kitContext.ts`); each panel subscribes to the kit events it renders in ONE
+  `$effect` (mirroring payloads into local `$state`) and calls kit methods from its handlers.
+  **Timing rule:** the two viewers are constructed after `mount()` but before `flushSync()`,
+  so they exist by the time any `$effect` runs — subscribe in `$effect`, never at script top
+  level, and optional-chain viewer calls in handlers.
 - **`MapscadSession` (`src/kit/MapscadSession.ts`)** — the central facade a UI (or headless
   script) drives. Owns the selected region (`setSelection` emits `selectionChanged
   {corners, prev, user}`; clearing it drops all element data inside the kit) and holds

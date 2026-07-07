@@ -11,12 +11,12 @@ import { MapViewer } from './kit/ui/MapViewer';
 import { PreviewController, demZoomRange, resolutionZoomRange } from './kit/ui/PreviewController';
 import { OSM_FEATURES } from './kit/mapelements/osmFeatures';
 import { OSM_LABELS } from './app/osmLabels';
-import { MapModel, type SelectionShape } from './kit/MapModel';
+import { MapModel } from './kit/MapModel';
 import { MapscadSession } from './kit/MapscadSession';
 import { ProcessorConfigStore } from './kit/ProcessorConfig';
-import { rectExtent } from './kit/maptiles/HeightSampler';
 import { readUrlMapState, composeShareUrl, loadView, saveView, saveActive } from './app/urlState';
-import { loadSmoothShading, saveSmoothShading } from './app/uiPrefs';
+import { loadSmoothShading } from './app/uiPrefs';
+import type { Kit } from './app/kitContext';
 
 // This file is the composition root — init only. It constructs the kit (session, model, config),
 // fetches the manifest and shapes the menu data, mounts the Svelte App (menus/layout), then hands
@@ -103,8 +103,6 @@ async function init(): Promise<void> {
     // Fold the resolved DEM + sanitized settings back into the config so it's consistent.
     config.update({ demId: initialDemId, model: model.getSettings() });
     const initialPreviewSettings: Record<string, any> = { ...model.getSettings() };
-    // Smooth shading is a viewer-only pref (app-side, its own storage key) — not part of the config.
-    const smoothShading = loadSmoothShading();
 
     const tileProviders = maps.map(m => {
         // Elevation DEMs are grouped with their synthesized 2D/3D hillshades under one heading
@@ -145,123 +143,68 @@ async function init(): Promise<void> {
     // Shared by the App (initial zoom badge) and the map viewer (initial camera).
     const initialView = urlMapState.view ?? loadView();
 
-    // The two kit viewers — constructed right after mount, but the App's callbacks close over them.
-    let mapViewer: MapViewer | null = null;
-    let previewController: PreviewController | null = null;
-
-    /** The full share/hash URL from the live map view + current selection. */
-    const shareUrl = (): string =>
-        composeShareUrl(mapViewer?.getView(), mapViewer?.activeId, config.get().selection, config.get().model.shape);
-    // Keep the address bar in sync with the live map + config, debounced so dragging doesn't flood
-    // the history API.
-    let urlSyncTimer = 0;
-    const scheduleUrlSync = (): void => {
-        clearTimeout(urlSyncTimer);
-        urlSyncTimer = window.setTimeout(() => {
-            try { history.replaceState(null, '', shareUrl()); }
-            catch (e) { Env.error('sync url', e); }
-        }, 250);
-    };
+    // The kit objects handed to the UI: App provides them to every panel via context; the panels
+    // call methods and subscribe to events on them directly (no callback props, no forwarders).
+    // The two viewers are filled in right after mount — before flushSync runs the panels' effects.
+    const kit: Kit = { session, config, mapViewer: null, previewController: null };
 
     // Mount the Svelte UI first — it owns the split layout and provides the DOM nodes the viewers
-    // mount into. Every callback is a thin delegate to a kit method.
-    const app: any = mount(App, {
+    // mount into. Everything it receives beyond `kit` is static menu data.
+    mount(App, {
         target: document.getElementById('app')!,
         props: {
+            kit,
             tileProviders,
             customMaps,
             initialActiveProviderId: initialId,
             initialMapZoom: initialView.zoom,
-            onLayerSwitch: (id: string) => mapViewer?.selectSource(id),
-            onSelectToggle: (active: boolean, shape?: SelectionShape) => mapViewer?.toggleSelect(active, shape),
-            onAspectChange: (ratio: number | null) => mapViewer?.setAspect(ratio),
-            onDataModeChange: (active: boolean) => mapViewer?.setDataMode(active),
-            onBoxSelectToggle: (active: boolean) => mapViewer?.toggleBoxSelect(active),
             // The menu sections to render (one per registry feature), so the UI is data-driven.
             features: OSM_FEATURES.map(f => ({ id: f.id, label: OSM_LABELS[f.id].label, noun: OSM_LABELS[f.id].noun, hasRadius: f.geometry === 'line', sizeLimit: f.sizeLimit })),
-            session, // the Data panel reads element data via the session's manager
-            onDownload: (id: string) => session.mapElements.download(id),
-            onSaveJson: (id: string) => session.mapElements.toJson(id),
-            onLoadJson: (id: string, payloads: any[]) => session.mapElements.loadFiles(id, payloads),
-            onUpdatePreview: (id: string) => session.mapElements.updatePreview(id),
-            onSelectElement: (id: string, elementId: number) => mapViewer?.selectElement(id, elementId),
-            onSetEnabled: (id: string, ids: number[], enabled: boolean) => session.mapElements.setEnabled(id, ids, enabled),
-            onDelete: (id: string, ids: number[]) => mapViewer?.removeElements(id, ids),
-            onHoverElement: (id: string | null, elementId: number | null) => mapViewer?.hoverOsm(id, elementId),
-            onMarksChange: (id: string, ids: number[]) => mapViewer?.setMarks(id, ids),
             previewDems,
             initialPreviewDemId: initialDemId,
             previewZoomMin,
             previewZoomMax,
             initialPreviewSettings,
-            initialPreviewSmoothShading: smoothShading,
-            onPreviewDemChange: (id: string) => previewController?.changeDem(id),
-            onPreviewSettingsChange: (s: Record<string, any>) => previewController?.changeSettings(s),
-            onPreviewSmoothShadingChange: (v: boolean) => { saveSmoothShading(v); previewController?.setSmoothShading(v); },
-            onPreviewGenerate: (s: Record<string, any>) => previewController?.generate(s),
-            onPreviewSave: (s: Record<string, any>) => previewController?.saveStl(s),
-            onPreviewSave3mf: (s: Record<string, any>) => previewController?.save3mf(s),
-            onPreviewResetCamera: () => previewController?.resetCamera(),
-            onPreviewShareLink: () => shareUrl(),
-            onPreviewCancel: () => previewController?.cancel(),
-            onLayoutChange: () => previewController?.resize(),
         },
     });
 
-    // mount() inserts the DOM synchronously, but child-component `bind:this` refs (mapPanel,
-    // previewPanel) are wired by effects that flush asynchronously. The selection-restore below runs
-    // synchronously (selectSource -> OL onReady, no awaits), so without this flush the App's
-    // setSelectTool/setHasSelection forwarders would hit still-null child refs and no-op, leaving the
-    // toolbar buttons stuck in their default state after a reload.
-    flushSync();
-
-    // Hand each viewer its mount node (read from the DOM — mount() inserts synchronously); from here
-    // the viewers own everything inside those divs, Svelte only owns where they sit in the layout.
+    // Hand each viewer its mount node (mount() inserts the DOM synchronously, so the divs exist);
+    // from here the viewers own everything inside those divs, Svelte only owns where they sit.
     const pc = new PreviewController(document.getElementById('preview-mount')!, session, model, config, {
         mapsById,
         demBySource,
         initialDemId,
-        getActiveSourceId: () => mapViewer?.activeId ?? '',
+        getActiveSourceId: () => kit.mapViewer?.activeId ?? '',
     });
-    pc.setSmoothShading(smoothShading);
-    previewController = pc;
+    pc.setSmoothShading(loadSmoothShading());
+    kit.previewController = pc;
     const mv = new MapViewer(document.getElementById('map-mount')!, session, model, config, {
         maps,
         mapsById,
         customSpecs,
         initialView,
     });
-    mapViewer = mv;
+    kit.mapViewer = mv;
 
-    // --- events out of the kit → the App's menu/panel forwarders + persistence ---
-    pc.loading.on(s => app.setPreviewLoading(s));
-    pc.stats.on(s => app.setPreviewStats(s));
-    pc.zoomRange.on(r => app.setPreviewZoomRange(r.min, r.max, r.value));
-    pc.demChanged.on(id => app.setPreviewDem(id));
-    mv.activeChanged.on(id => app.setActiveProvider(id));
-    mv.viewChanged.on(v => { saveView(v); app.setMapZoom(v.zoom); scheduleUrlSync(); });
+    // Component effects (the panels' kit-event subscriptions) flush asynchronously; run them NOW —
+    // after the viewers exist, before the selection-restore below fires the events they listen to.
+    flushSync();
+
+    // --- the app-glue subscriptions: persistence + the address bar (everything else lives in the
+    // panels, which subscribe to the kit themselves) ---
+    let urlSyncTimer = 0;
+    const scheduleUrlSync = (): void => {
+        clearTimeout(urlSyncTimer);
+        urlSyncTimer = window.setTimeout(() => {
+            try {
+                const url = composeShareUrl(mv.getView(), mv.activeId, config.get().selection, config.get().model.shape);
+                history.replaceState(null, '', url);
+            } catch (e) { Env.error('sync url', e); }
+        }, 250);
+    };
+    mv.viewChanged.on(v => { saveView(v); scheduleUrlSync(); });
     mv.activePersist.on(id => { saveActive(id); scheduleUrlSync(); });
-    mv.osmSelected.on(({ featureId, elementId }) => app.setOsmSelected(featureId, elementId));
-    mv.marksAdded.on(({ featureId, ids }) => app.addOsmMarks(featureId, ids));
-    mv.toolRestored.on(shape => app.setSelectTool(shape));
-    // Selection fan-out, UI-only slice (the kit handles the data + resampling itself): persist it,
-    // show/hide the 3D panel, reset or gate the Data panel, and flag kept data as possibly stale
-    // after an EDIT (the data is re-projected, but may not cover the shifted area — Overpass
-    // rate-limits make a silent wipe an expensive click to lose).
-    session.selectionChanged.on(({ corners, prev }) => {
-        config.update({ selection: corners });
-        app.setPreviewVisible(!!corners);
-        // The longest selection side (metres) gates which OSM features can be downloaded (Env limits).
-        const sideMeters = corners ? Math.max(...Object.values(rectExtent(corners))) : 0;
-        app.setHasSelection(!!corners, sideMeters, corners ? !prev : true);
-        if (corners && prev) {
-            for (const def of OSM_FEATURES) {
-                if (session.mapElements.getElements(def.id)) app.setOsmStale(def.id, true);
-            }
-        }
-    });
-    // A feature entered/left the printed model → gate its section in the preview menu.
-    session.mapElements.on('previewChanged', id => app.setOsmAvailable(id, session.mapElements.isInPreview(id)));
+    session.selectionChanged.on(({ corners }) => config.update({ selection: corners }));
     // Selection / DEM / model changes alter the shareable slice → keep the URL live.
     config.subscribe(() => scheduleUrlSync());
 

@@ -1,8 +1,13 @@
 <script>
-    import { untrack } from 'svelte';
+    import { untrack, getContext } from 'svelte';
     import Attribution from './Attribution.svelte';
     import { OSM_DATA_API } from '../kit/mapelements/dataSources';
+    import { KIT } from './kitContext';
+    import { composeShareUrl } from './urlState';
+    import { loadSmoothShading, saveSmoothShading } from './uiPrefs';
 
+    // The 3D-view menu + overlays. Talks to the kit directly: methods in (changeDem, changeSettings,
+    // generate, save…), events out mirrored into $state by the $effect subscriptions below.
     let {
         style = '',
         canCollapse = false,
@@ -10,54 +15,51 @@
         dems = [],
         features = [],
         initialDemId = '',
-        onDemChange = () => {},
         zoomMin = 0,
         zoomMax = 17,
         initialSettings = {},
-        onSettingsChange = () => {},
-        // Smooth shading is a viewer-only toggle (never exported), so it has its own prop + callback
-        // straight to the 3D view — it does NOT travel through the model-settings channel below.
-        initialSmoothShading = true,
-        onSmoothShadingChange = () => {},
-        onGenerate = () => {},
-        onSave = () => {},
-        onSave3mf = () => {},
-        onResetCamera = () => {},
-        onShareLink = () => '',
-        onCancel = () => {},
     } = $props();
 
+    const kit = getContext(KIT);
 
     let menuOpen = $state(false);
     let previewStats = $state(null);
-    export function setPreviewStats(stats) { previewStats = stats; }
     // Collapse the stats overlay down to just its toggle arrow (it can cover the model).
     let statsCollapsed = $state(false);
 
     // Bottom loading bar: null = hidden. Download phase = { loaded, total } (DEM tiles); build phase
     // = { percent } (off-thread geometry build). The two render differently; both are cancellable.
     let previewLoading = $state(null);
-    export function setPreviewLoading(state) { previewLoading = state; }
 
     // The active elevation source, plus the zoom slider's range. Both can change at runtime
     // (switching DEMs moves the range), so they're local state, seeded from the props.
     let demId = $state(untrack(() => initialDemId));
     let zMin = $state(untrack(() => zoomMin));
     let zMax = $state(untrack(() => zoomMax));
-    export function setZoomRange(min, max, hz) {
-        zMin = min;
-        zMax = max;
-        if (hz != null) heightZoom = hz;
-    }
+
+    // Mirror the kit's preview events into local $state (runs once — `kit` isn't reactive).
+    $effect(() => {
+        const pc = kit.previewController;
+        const offs = [
+            pc.stats.on(s => previewStats = s),
+            pc.loading.on(s => previewLoading = s),
+            // The kit moved the zoom slider (DEM switch, raster change, new-selection seeding).
+            pc.zoomRange.on(({ min, max, value }) => { zMin = min; zMax = max; if (value != null) heightZoom = value; }),
+            // The kit switched the DEM itself (a new selection adopted the active map's source).
+            pc.demChanged.on(id => demId = id),
+            // A feature entered/left the printed model → gate its section in this menu.
+            kit.session.mapElements.on('previewChanged', id => {
+                if (id in osmAvailable) osmAvailable[id] = kit.session.mapElements.isInPreview(id);
+            }),
+        ];
+        return () => offs.forEach(off => off());
+    });
 
     function selectDem(id) {
         if (id === demId) return;
         demId = id;
-        onDemChange(id);
+        kit.previewController?.changeDem(id);
     }
-
-    // Set the active source without firing onDemChange (index.ts already switched the DEM).
-    export function setDem(id) { demId = id; }
 
     // Attribution shown at the bottom of the menu: the elevation source in use, plus the OSM data
     // credit whenever any downloaded feature is actually included in the model.
@@ -84,7 +86,8 @@
     let waterLevel = $state(untrack(() => initialSettings.waterLevel ?? 0));
     let lowCutEnabled = $state(untrack(() => initialSettings.lowCutEnabled ?? false));
     let lowCutLevel = $state(untrack(() => initialSettings.lowCutLevel ?? 0));
-    let smoothShading = $state(untrack(() => initialSmoothShading));
+    // Viewer-only pref, persisted app-side under its own key (never part of the model settings).
+    let smoothShading = $state(loadSmoothShading());
 
     // Per-OSM-feature raise settings, keyed by feature id, seeded from the sanitized model settings
     // (initialSettings.osm always has every registry feature). Generic so a new feature needs no
@@ -100,17 +103,18 @@
         return out;
     }));
     let osmAvailable = $state(untrack(() => Object.fromEntries(features.map(f => [f.id, false]))));
-    export function setOsmAvailable(id, has) { if (id in osmAvailable) osmAvailable[id] = has; }
 
     function settings() {
         return { heightZoom, rasterResolution, heightScale, socketEnabled, socketSize, tilesEnabled, tilesX, tilesY, waterEnabled, waterCutoff, waterLevel, lowCutEnabled, lowCutLevel, osm: $state.snapshot(osmSettings) };
     }
-    function emit() { onSettingsChange(settings()); }
+    function emit() { kit.previewController?.changeSettings(settings()); }
     function selectAll(e) { e.target.select(); }
 
     let shareLabel = $state('Share link');
     async function shareLink() {
-        const url = onShareLink();
+        // The shareable slice: live camera + active source (map viewer) and the selected area (config).
+        const url = composeShareUrl(kit.mapViewer?.getView(), kit.mapViewer?.activeId,
+            kit.config.get().selection, kit.config.get().model.shape);
         if (!url) return;
         try {
             await navigator.clipboard.writeText(url);
@@ -165,7 +169,7 @@
                     <progress class="progress progress-primary flex-1"></progress>
                 {/if}
             {/if}
-            <button class="btn btn-sm btn-error" onclick={onCancel}>Cancel</button>
+            <button class="btn btn-sm btn-error" onclick={() => kit.previewController?.cancel()}>Cancel</button>
         </div>
     {/if}
 
@@ -187,7 +191,7 @@
         class="btn btn-square bg-base-100 shadow-md absolute top-20 right-4 z-[1000] border-0"
         aria-label="Reset camera"
         title="Reset camera"
-        onclick={onResetCamera}
+        onclick={() => kit.previewController?.resetCamera()}
     >
         <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <path d="M3 12a9 9 0 1 1 3 6.7"></path>
@@ -340,17 +344,17 @@
             <div class="px-4 py-1 mt-2 text-xs font-bold uppercase tracking-wider opacity-50">Preview</div>
             <div class="px-4 py-2">
                 <label class="flex items-center gap-2 cursor-pointer">
-                    <input type="checkbox" class="checkbox checkbox-sm" bind:checked={smoothShading} onchange={() => onSmoothShadingChange(smoothShading)} />
+                    <input type="checkbox" class="checkbox checkbox-sm" bind:checked={smoothShading} onchange={() => { saveSmoothShading(smoothShading); kit.previewController?.setSmoothShading(smoothShading); }} />
                     <span class="text-sm">Smooth shading</span>
                 </label>
             </div>
 
             <!-- Actions -->
             <div class="px-4 py-3 flex flex-col gap-2">
-                <button class="btn btn-sm btn-primary" onclick={() => onGenerate(settings())}>Generate</button>
+                <button class="btn btn-sm btn-primary" onclick={() => kit.previewController?.generate(settings())}>Generate</button>
                 <div class="flex gap-2">
-                    <button class="btn btn-sm btn-outline flex-1" onclick={() => onSave(settings())}>Save STL</button>
-                    <button class="btn btn-sm btn-outline flex-1" onclick={() => onSave3mf(settings())}>Save 3MF</button>
+                    <button class="btn btn-sm btn-outline flex-1" onclick={() => kit.previewController?.saveStl(settings())}>Save STL</button>
+                    <button class="btn btn-sm btn-outline flex-1" onclick={() => kit.previewController?.save3mf(settings())}>Save 3MF</button>
                 </div>
                 <button class="btn btn-sm btn-ghost bg-base-100" onclick={shareLink}>{shareLabel}</button>
             </div>

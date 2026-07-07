@@ -1,38 +1,29 @@
 <script>
-    import { untrack } from 'svelte';
+    import { untrack, getContext } from 'svelte';
     import OsmDataPanel from './OsmDataPanel.svelte';
     import Attribution from './Attribution.svelte';
+    import { KIT } from './kitContext';
+    import { rectExtent } from '../kit/maptiles/HeightSampler';
 
+    // The map panel: mode tabs, selection toolbar, the map-source menu and the Data drawer chrome.
+    // Talks to the kit directly: methods in (selectSource, toggleSelect, setDataMode…), events out
+    // mirrored into $state by the $effect subscription below.
     let {
         style = '',
         tileProviders = [],
         customMaps = [],
         initialActiveProviderId = '',
-        onLayerSwitch = () => {},
-        onSelectToggle = () => {},
-        onAspectChange = () => {},
-        onDataModeChange = () => {},
-        // OSM data: the feature list to render ({id,label,noun,hasRadius}) + generic callbacks.
+        // OSM data: the feature list to render ({id,label,noun,hasRadius,sizeLimit}).
         features = [],
-        onDownload = () => 0,
-        onUpdatePreview = () => {},
-        onSaveJson = () => null,
-        onLoadJson = () => 0,
-        onSelectElement = () => {},
-        onSetEnabled = () => {},
-        onDelete = () => {},
-        onHoverElement = () => {},
-        onMarksChange = () => {},
-        onBoxSelectToggle = () => {},
         initialZoom = 0,
         canCollapse = false,
         onCollapse = () => {},
     } = $props();
 
+    const kit = getContext(KIT);
 
-    // Live map zoom readout; pushed in from index.ts on every view change.
+    // Live map zoom readout, from the viewer's view events.
     let mapZoom = $state(untrack(() => initialZoom));
-    export function setZoom(z) { mapZoom = z; }
 
     let menuOpen = $state(false);
     // Panel-level mode tabs: 'selection' (selection tools + map sources) and 'data'
@@ -71,29 +62,32 @@
     // user can't accidentally change the selection there. Leaving Data also turns the box tool off.
     $effect(() => {
         const inData = activeTab === 'data';
-        onDataModeChange(inData);
-        if (!inData) untrack(() => { if (boxSelectActive) { boxSelectActive = false; onBoxSelectToggle(false); } });
+        kit.mapViewer?.setDataMode(inData);
+        if (!inData) untrack(() => { if (boxSelectActive) { boxSelectActive = false; kit.mapViewer?.toggleBoxSelect(false); } });
     });
-    // The OSM data panel (child) owns all element state + the object list; index.ts's imperative
-    // exports below just forward to it via this ref.
-    let dataPanel = $state();
-    export function setOsmSelected(featureId, elementId) { dataPanel?.setSelected(featureId, elementId); }
-    export function addOsmMarks(fid, ids) { dataPanel?.addMarks(fid, ids); }
 
     // The transient box-select tool (Data tab only). Toggling it routes to the map; it never persists.
-    // Marks land back in the child via addOsmMarks (index.ts → App → here → child).
+    // The resulting marks land in OsmDataPanel via its own `marksAdded` subscription.
     let boxSelectActive = $state(false);
-    function toggleBoxSelect() { boxSelectActive = !boxSelectActive; onBoxSelectToggle(boxSelectActive); }
+    function toggleBoxSelect() { boxSelectActive = !boxSelectActive; kit.mapViewer?.toggleBoxSelect(boxSelectActive); }
 
-    export function setHasSelection(has, sideMeters = 0, resetData = true) {
-        hasSelection = has;
-        selectionSide = sideMeters; // longest selection side (m) — gates OSM downloads by size
-        if (has) selectionDirty = true; // selection changed → Data should reopen so stale data gets re-downloaded
-        // A cleared or brand-new selection resets the panel; an edit keeps the (re-projected) data and
-        // instead flags it stale (see setOsmStale), so a slight nudge doesn't discard a download.
-        if (resetData) dataPanel?.reset();
-    }
-    export function setOsmStale(id, stale) { dataPanel?.setStale(id, stale); }
+    // Mirror the kit's map events into local $state (runs once — `kit` isn't reactive).
+    $effect(() => {
+        const mv = kit.mapViewer;
+        const offs = [
+            mv.activeChanged.on(id => activeProviderId = id),
+            // Highlight the right tool when a saved selection is restored (rectangle | oval).
+            mv.toolRestored.on(shape => activeTool = shape ?? 'none'),
+            mv.viewChanged.on(v => mapZoom = v.zoom),
+            kit.session.selectionChanged.on(({ corners }) => {
+                hasSelection = !!corners;
+                // Longest selection side (m) — gates each OSM download against its size limit.
+                selectionSide = corners ? Math.max(...Object.values(rectExtent(corners))) : 0;
+                if (corners) selectionDirty = true; // Data should reopen so stale data gets re-downloaded
+            }),
+        ];
+        return () => offs.forEach(off => off());
+    });
 
     // Aspect-ratio lock for drawing/resizing (session-only). 'free' or a 'w:h' preset, or
     // 'custom' with the two numbers below. Locked to width:height = halfX/halfY.
@@ -107,7 +101,7 @@
         const [w, h] = aspectMode.split(':').map(Number);
         return h > 0 ? w / h : null;
     }
-    function emitAspect() { onAspectChange(aspectRatio()); }
+    function emitAspect() { kit.mapViewer?.setAspect(aspectRatio()); }
 
     // Structured attribution for the selected map, shown at the top of the menu (undefined for
     // server maps that only carry a plain attribution string).
@@ -166,18 +160,13 @@
     });
     function toggleSection(title) { openSection = openSection === title ? null : title; }
 
-    // Pushed in from index.ts.
-    export function setActiveProvider(id) { activeProviderId = id; }
-    // Highlight the right tool when a saved selection is restored (rectangle | oval | null).
-    export function setSelectTool(tool) { activeTool = tool ?? 'none'; }
-
     function toggleTool(tool) {
         if (activeTool === tool) {
             activeTool = 'none';
-            onSelectToggle(false, tool);
+            kit.mapViewer?.toggleSelect(false, tool);
         } else {
             activeTool = tool;
-            onSelectToggle(true, tool);
+            kit.mapViewer?.toggleSelect(true, tool);
         }
     }
 
@@ -185,7 +174,7 @@
         if (id === activeProviderId) return;
         activeProviderId = id;
         menuOpen = false;
-        onLayerSwitch(id);
+        kit.mapViewer?.selectSource(id);
     }
 
 </script>
@@ -343,21 +332,11 @@
         {/if}
         <div class="flex-1 flex flex-col min-h-0 {activeTab === 'data' ? '' : 'hidden'}">
             <OsmDataPanel
-                bind:this={dataPanel}
                 {features}
                 {hasSelection}
                 {selectionSide}
                 active={menuOpen && activeTab === 'data'}
                 onRequestOpen={() => { menuOpen = true; activeTab = 'data'; }}
-                {onDownload}
-                {onUpdatePreview}
-                {onSaveJson}
-                {onLoadJson}
-                {onSelectElement}
-                {onSetEnabled}
-                {onDelete}
-                {onHoverElement}
-                {onMarksChange}
             />
         </div>
     </div>

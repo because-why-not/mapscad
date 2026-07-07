@@ -2,12 +2,14 @@
     import { untrack, getContext } from 'svelte';
     import Attribution from './Attribution.svelte';
     import { SESSION_DATA } from './sessionData';
+    import { KIT } from './kitContext';
     import { OSM_DATA_API } from '../kit/mapelements/dataSources';
     import { parseTrackFile } from '../kit/mapelements/TrackParser';
 
     // The OSM "Data" tab body: per-feature download / save-load, plus the object list with
-    // mark → enable/disable editing. Owns all data state; the parent (MapPanel) keeps the
-    // tab/drawer chrome and forwards its imperative exports here via `bind:this`.
+    // mark → enable/disable editing. The parent (MapPanel) keeps only the tab/drawer chrome; the
+    // element data comes from the shared session store, and everything else goes straight to the
+    // kit — element I/O to `session.mapElements`, map interaction to `mapViewer`.
     //
     // Kept deliberately simple for now, but shaped to grow: today it's one flat list per OSM
     // feature; the intent is for this to become a richer scene-graph-style object list.
@@ -21,16 +23,9 @@
         active = false,
         // Ask the parent to open the drawer on the Data tab (used when an element is selected on the map).
         onRequestOpen = () => {},
-        onDownload = () => 0,
-        onUpdatePreview = () => {},
-        onSaveJson = () => null,
-        onLoadJson = () => 0,
-        onSelectElement = () => {},
-        onSetEnabled = () => {},
-        onDelete = () => {},
-        onHoverElement = () => {},
-        onMarksChange = () => {},
     } = $props();
+
+    const kit = getContext(KIT);
 
     const idleLabel = (f) => `Download ${f.noun}`;
     // A feature can't be downloaded when the selection is larger than its size limit (too many
@@ -56,27 +51,41 @@
     // button is pressed; Cancel just clears the marks.
     let marked = $state(untrack(() => Object.fromEntries(features.map(f => [f.id, {}]))));
 
-    // --- imperative API, forwarded from MapPanel (which index.ts drives) ---
-    // Flag/unflag a feature's data as possibly not covering the (edited) selection.
-    export function setStale(id, v) { if (downloadState[id]) downloadState[id].stale = v; }
-    export function setSelected(featureId, elementId) {
-        selected = featureId !== null && elementId !== null ? { featureId, elementId } : null;
-        // Selecting an element (e.g. by clicking it on the map) opens the drawer so the user sees the
-        // matching list entry highlighted — the map ↔ list connection.
-        if (selected) onRequestOpen();
-    }
-    export function addMarks(fid, ids) {
-        const m = { ...(marked[fid] ?? {}) };
-        for (const id of ids) m[id] = true;
-        marked[fid] = m;
-    }
-    // Selection changed / cleared: drop every feature's downloaded data + working state.
-    export function reset() {
+    // Selection changed / cleared: drop every feature's working state. (The element data itself is
+    // cleared by the kit — the session store empties via the dataChanged fan-out.)
+    function reset() {
         selected = null;
-        // `elements` is now derived from the session store, which the selection-clear empties via its
-        // dataChanged fan-out; here we only reset this panel's own UI state.
         for (const f of features) { downloadState[f.id].ready = false; downloadState[f.id].error = ''; downloadState[f.id].stale = false; filter[f.id] = ''; marked[f.id] = {}; }
     }
+
+    // Mirror the kit's events into local $state (runs once — `kit` isn't reactive).
+    $effect(() => {
+        const offs = [
+            // An element was selected on the map (or programmatically); nulls = cleared. Selecting one
+            // opens the drawer so the user sees the matching list entry — the map ↔ list connection.
+            kit.mapViewer.osmSelected.on(({ featureId, elementId }) => {
+                selected = featureId !== null && elementId !== null ? { featureId, elementId } : null;
+                if (selected) onRequestOpen();
+            }),
+            // The box-select tool marked elements on the map — add them to the working set.
+            kit.mapViewer.marksAdded.on(({ featureId, ids }) => {
+                const m = { ...(marked[featureId] ?? {}) };
+                for (const id of ids) m[id] = true;
+                marked[featureId] = m;
+            }),
+            // A cleared or brand-new selection resets the panel; an EDIT keeps the (re-projected) data
+            // and instead flags features with data as stale (they may not cover the shifted area), so
+            // a slight nudge doesn't discard a download — Overpass rate-limits make that expensive.
+            kit.session.selectionChanged.on(({ corners, prev }) => {
+                const isEdit = !!corners && !!prev;
+                if (!isEdit) { reset(); return; }
+                for (const f of features) {
+                    if (kit.session.mapElements.getElements(f.id)) downloadState[f.id].stale = true;
+                }
+            }),
+        ];
+        return () => offs.forEach(off => off());
+    });
 
     const isSelected = (fid, eid) => selected?.featureId === fid && selected?.elementId === eid;
 
@@ -101,7 +110,7 @@
     // only changes on the next "Update preview" (index.ts doesn't re-sync on enable/disable).
     function applyEnabled(fid, enabled) {
         const ids = Object.keys(marked[fid] ?? {}).map(Number);
-        if (ids.length) onSetEnabled(fid, ids, enabled);
+        if (ids.length) kit.session.mapElements.setEnabled(fid, ids, enabled);
         marked[fid] = {};
     }
     function cancelMarks(fid) { marked[fid] = {}; }
@@ -122,7 +131,7 @@
             holdFired = true;
             holdingDelete = null;
             const ids = Object.keys(marked[fid] ?? {}).map(Number);
-            if (ids.length) onDelete(fid, ids);
+            if (ids.length) kit.mapViewer?.removeElements(fid, ids);
             marked[fid] = {};
         }, DELETE_HOLD_MS);
     }
@@ -142,7 +151,7 @@
 
     // Push the ticked set to the map so marked elements are highlighted there too.
     $effect(() => {
-        for (const f of features) onMarksChange(f.id, Object.keys(marked[f.id] ?? {}).map(Number));
+        for (const f of features) kit.mapViewer?.setMarks(f.id, Object.keys(marked[f.id] ?? {}).map(Number));
     });
 
     // Turn the filter text into a case-insensitive matcher. A plain word like "Booth" is already a
@@ -186,13 +195,13 @@
             const first = features.find(f => (visible[f.id] ?? []).length);
             if (!first) return;
             rows = visible[first.id];
-            onSelectElement(first.id, (dir > 0 ? rows[0] : rows[rows.length - 1]).id);
+            kit.mapViewer?.selectElement(first.id, (dir > 0 ? rows[0] : rows[rows.length - 1]).id);
             return;
         }
         const idx = rows.findIndex(r => r.id === selected.elementId);
         const next = idx === -1 ? 0 : idx + dir;
         if (next < 0 || next >= rows.length) return; // stay put at the ends
-        onSelectElement(fid, rows[next].id);
+        kit.mapViewer?.selectElement(fid, rows[next].id);
     }
     function onKeyDown(e) {
         if (!active) return;
@@ -229,7 +238,7 @@
         st.label = 'Downloading…';
         st.error = ''; // clear any previous failure before retrying
         try {
-            const count = await onDownload(f.id);
+            const count = await kit.session.mapElements.download(f.id);
             marked[f.id] = {}; // fresh element set → old marks (stale ids) no longer apply
             st.stale = false; // fresh data for the current area
             st.ready = count > 0;
@@ -278,7 +287,7 @@
                     ? JSON.parse(text)
                     : parseTrackFile(text, file.name);
             }));
-            const count = onLoadJson(f.id, payloads);
+            const count = kit.session.mapElements.loadFiles(f.id, payloads);
             marked[f.id] = {}; // fresh element set → old marks (stale ids) no longer apply
             st.stale = false;
             st.ready = count > 0;
@@ -326,9 +335,9 @@
                     {#if st.busy}<span class="loading loading-spinner loading-xs"></span>{/if}
                     {st.label}
                 </button>
-                <button class="btn btn-sm btn-block" title="Update the 3D preview with the enabled {f.noun}" onclick={() => onUpdatePreview(f.id)} disabled={!st.ready}>Update preview</button>
+                <button class="btn btn-sm btn-block" title="Update the 3D preview with the enabled {f.noun}" onclick={() => kit.session.mapElements.updatePreview(f.id)} disabled={!st.ready}>Update preview</button>
                 <div class="flex gap-2">
-                    <button class="btn btn-sm flex-1" title="Save the {f.noun} as a JSON file" onclick={() => saveJson(() => onSaveJson(f.id), `${f.id}.json`)} disabled={!st.ready}>Save</button>
+                    <button class="btn btn-sm flex-1" title="Save the {f.noun} as a JSON file" onclick={() => saveJson(() => kit.session.mapElements.toJson(f.id), `${f.id}.json`)} disabled={!st.ready}>Save</button>
                     <button class="btn btn-sm flex-1" title="Load {f.noun} from one or more saved JSON files, or GPX/TCX tracks (merged)" onclick={() => pickLoad(f.id)}>Load</button>
                 </div>
                 <!-- The selection was edited after downloading: data is kept + re-projected, but may
@@ -359,9 +368,9 @@
                     <ul class="mx-4 mb-1 max-h-48 overflow-y-auto rounded border border-base-300 divide-y divide-base-300 text-sm">
                         {#each rows as el (el.id)}
                             <li data-osm-el="{f.id}:{el.id}" class="flex items-center {isSelected(f.id, el.id) ? 'bg-primary text-primary-content' : 'hover:bg-base-300'}"
-                                onmouseenter={() => onHoverElement(f.id, el.id)} onmouseleave={() => onHoverElement(null, null)}>
+                                onmouseenter={() => kit.mapViewer?.hoverOsm(f.id, el.id)} onmouseleave={() => kit.mapViewer?.hoverOsm(null, null)}>
                                 <input type="checkbox" class="checkbox checkbox-xs ml-2" title="Mark this element" checked={isMarked(f.id, el.id)} onchange={() => toggleMark(f.id, el.id)} />
-                                <button class="flex-1 text-left px-2 py-1 truncate bg-transparent border-0 {el.disabled ? 'line-through opacity-50' : ''}" title={el.label} onclick={() => onSelectElement(f.id, el.id)}>{el.label}</button>
+                                <button class="flex-1 text-left px-2 py-1 truncate bg-transparent border-0 {el.disabled ? 'line-through opacity-50' : ''}" title={el.label} onclick={() => kit.mapViewer?.selectElement(f.id, el.id)}>{el.label}</button>
                             </li>
                         {/each}
                     </ul>
