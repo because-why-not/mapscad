@@ -21,6 +21,7 @@ import { OSM_LABELS } from './app/osmLabels';
 import { sampleSelectionHeights, rectExtent, tileCoverage } from './kit/maptiles/HeightSampler';
 import { TerrainPreview } from './kit/ui/TerrainPreview';
 import { MapModel, SelectionShape, type ModelGeometry } from './kit/MapModel';
+import { MapscadSession } from './kit/MapscadSession';
 import { PreviewConfigStore } from './kit/PreviewConfig';
 import { exportModelStl } from './kit/StlMaker';
 import { exportModel3mf } from './kit/ThreeMFMaker';
@@ -51,16 +52,15 @@ const model = new MapModel();
 // config at construction.
 const config = new PreviewConfigStore();
 let currentCorners: LonLat[] | null = null;
-// OSM feature state, all keyed by feature id (see osm/osmFeatures.ts). Generic so adding a feature
-// needs no new variables here.
-//  - osmOverlays: the OL 2D-map overlays, created once the OL map is ready.
-//  - osmData:  the editable element set per feature (gridless, lon/lat) — the source of truth for
-//    the overlay, the object list, the preview, and Download. Edits (delete) replace the entry.
+// The OL 2D-map overlays, one per feature id (see mapelements/osmFeatures.ts), created once the OL
+// map is ready. The element *data* itself now lives in the session below, not here.
 const osmOverlays = new Map<string, OsmOverlay>();
-const osmData = new Map<string, OsmVectorData>();
-// Feature ids that have been sent to the preview (so their data is bound into the model). Gates the
-// model re-sync on fetch/load/resample so downloaded-but-not-previewed features stay map-only.
-const previewOsm = new Set<string>();
+// The kit session owns the element *data* (source of truth) + preview membership + the two typed
+// events. index.ts is its renderer: it subscribes here and fans the events out to the overlays,
+// object list and model — dataChanged → redraw overlay + list; previewChanged → re-bind to the grid.
+const session = new MapscadSession();
+session.on('dataChanged', renderOsmData);
+session.on('previewChanged', syncOsmField);
 // The currently selected element on the map / in the object list (one at a time, vector-editor
 // style), or null. Drives the overlay highlight, the list highlight, and keyboard Space.
 let selectedOsmElement: { featureId: string; elementId: number } | null = null;
@@ -156,7 +156,7 @@ async function resample(): Promise<void> {
         });
         if (abort.signal.aborted) return;
         model.setGrid(grid); // notifies -> preview + stats rebuild from the model
-        for (const id of previewOsm) syncOsmField(id); // re-rasterise added features to the new grid
+        session.resyncPreview(); // re-rasterise added features to the new grid
         Env.log(`[3d] terrain regenerated in ${Math.round(performance.now() - t0)} ms`);
     } catch (e) {
         if ((e as { name?: string })?.name === 'AbortError') Env.log('[3d] terrain build cancelled');
@@ -180,7 +180,7 @@ function cancelResample(): void {
  *  Called whenever the data or the grid change; the matching OsmCanvasProcessor paints them in. */
 function syncOsmField(id: string): void {
     const grid = model.getGrid();
-    const data = osmData.get(id);
+    const data = session.getElements(id);
     if (!data || !currentCorners || !grid) { model.setOsmData(id, null); return; }
     // Disabled elements stay in the list/overlay but are excluded from the printed model.
     const enabled = data.list.filter(e => !e.disabled);
@@ -194,19 +194,28 @@ function syncOsmField(id: string): void {
  *  preview) the model re-syncs — so downloading a large set just to view/edit it on the map doesn't
  *  trigger a geometry rebuild. */
 function ingestOsm(id: string, elements: OsmElement[]): void {
-    osmData.set(id, new OsmVectorData(elements));
-    osmOverlays.get(id)?.setElements(elements);
-    pushOsmElements(id);
-    if (previewOsm.has(id)) syncOsmField(id);
+    // Hand the data to the session; it emits dataChanged (→ overlay + list) and, iff the feature is
+    // already in the print, previewChanged (→ re-bind + rebuild). See renderOsmData / syncOsmField.
+    session.setElements(id, elements);
 }
 
 /** Push one feature's element list to the object-list UI: a stable id + a label (OSM name, else a
  *  running number). */
 function pushOsmElements(id: string): void {
-    const data = osmData.get(id);
+    const data = session.getElements(id);
     // Push the raw id + name; the UI does the ordering (by name), labelling and filtering.
     const elements = data ? data.list.map(e => ({ id: e.id, name: e.name ?? '', disabled: !!e.disabled })) : [];
     appInstance?.setOsmElements(id, elements);
+}
+
+/** Renderer response to a `dataChanged` event: redraw the feature's overlay and refresh the object
+ *  list. A feature with no data (deleted by clearAll) fully clears the overlay — resetting its
+ *  selection/hover/mark state; an empty-but-present set (all elements removed) just draws nothing. */
+function renderOsmData(id: string): void {
+    const data = session.getElements(id);
+    const overlay = osmOverlays.get(id);
+    if (data) overlay?.setElements(data.list); else overlay?.clear();
+    pushOsmElements(id);
 }
 
 /** Select one element (map ↔ list), or pass null to clear. Highlights it on the map and in the list. */
@@ -243,27 +252,16 @@ function panToOsm(featureId: string, elementId: number): void {
  *  list (struck-through). The preview is intentionally NOT re-synced here — disabling only affects
  *  the print on the next "Add to preview" press. */
 function applyOsmEnabled(featureId: string, ids: number[], enabled: boolean): void {
-    const data = osmData.get(featureId);
-    if (!data || !ids.length) return;
-    const set = new Set(ids);
-    const next = data.list.map(e => set.has(e.id) ? { ...e, disabled: enabled ? undefined : true } : e);
-    osmData.set(featureId, new OsmVectorData(next));
-    osmOverlays.get(featureId)?.setElements(next);
-    pushOsmElements(featureId);
+    session.setEnabled(featureId, ids, enabled); // dataChanged only → overlay + list, no preview resync
 }
 
 /** Permanently remove the marked elements from a feature (the Disable button's 3-second long-press).
  *  Same downstream refresh as enable/disable (data + overlay + list); a selection pointing at a
  *  deleted element is cleared. Like disable, the preview only reflects it on the next Update preview. */
 function removeOsmElements(featureId: string, ids: number[]): void {
-    const data = osmData.get(featureId);
-    if (!data || !ids.length) return;
-    const set = new Set(ids);
-    const next = data.list.filter(e => !set.has(e.id));
-    osmData.set(featureId, new OsmVectorData(next));
-    osmOverlays.get(featureId)?.setElements(next);
-    pushOsmElements(featureId);
-    if (selectedOsmElement?.featureId === featureId && set.has(selectedOsmElement.elementId)) {
+    session.remove(featureId, ids); // dataChanged only → overlay + list
+    // A selection pointing at a just-deleted element is cleared (UI concern, not the session's).
+    if (selectedOsmElement?.featureId === featureId && ids.includes(selectedOsmElement.elementId)) {
         selectOsm(null, null);
     }
 }
@@ -407,14 +405,10 @@ function updatePreviewStats(geo: ModelGeometry | null): void {
  *  selection is CLEARED; a mere edit keeps the data and re-projects it to the new corners instead. */
 function clearOsmData(): void {
     selectOsm(null, null);
-    previewOsm.clear();
-    for (const def of OSM_FEATURES) {
-        osmOverlays.get(def.id)?.clear();
-        osmData.delete(def.id);
-        model.setOsmData(def.id, null);
-        appInstance?.setOsmAvailable(def.id, false);
-        pushOsmElements(def.id); // empties the object list
-    }
+    // clearAll fans out dataChanged (→ overlay.clear + empties the list) + previewChanged
+    // (→ syncOsmField clears the model field) per feature; the availability reset is UI-only.
+    session.clearAll(OSM_FEATURES.map(f => f.id));
+    for (const def of OSM_FEATURES) appInstance?.setOsmAvailable(def.id, false);
 }
 
 /** Single place the selection state fans out: persistence, panel visibility, model. */
@@ -442,7 +436,7 @@ function onSelectionChange(corners: LonLat[] | null): void {
     appInstance?.setHasSelection(true, sideMeters, !isEdit);
     if (isEdit) {
         for (const def of OSM_FEATURES) {
-            if (osmData.has(def.id)) appInstance?.setOsmStale(def.id, true);
+            if (session.getElements(def.id)) appInstance?.setOsmStale(def.id, true);
         }
     }
     resample(); // re-sample the DEM + re-sync any preview-added features to the new corners
@@ -713,7 +707,7 @@ async function init(): Promise<void> {
             },
             // The current element set as savable JSON. Null when nothing's loaded.
             onSaveJson: (id: string) => {
-                const data = osmData.get(id);
+                const data = session.getElements(id);
                 return data && !data.isEmpty() ? data.list : null;
             },
             // Load a feature from one or more previously saved / track files: parse each payload and
@@ -744,10 +738,8 @@ async function init(): Promise<void> {
             // Push the downloaded feature into the model: bind it to the grid and reveal the
             // preview's section so its raise can be configured.
             onUpdatePreview: (id: string) => {
-                const data = osmData.get(id);
-                if (!data || data.isEmpty()) return;
-                previewOsm.add(id);
-                syncOsmField(id);
+                if (!session.hasElements(id)) return;
+                session.updatePreview(id); // previewChanged → syncOsmField binds it to the grid
                 appInstance?.setOsmAvailable(id, true);
             },
             // Select an element (highlight it + bring it into the map view, since the list row may be off-screen).
