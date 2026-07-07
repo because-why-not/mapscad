@@ -76,7 +76,7 @@ export function waysFromJson(def: OsmFeatureDef, json: any): OsmElement[] {
 /** Download the raw Overpass JSON response for the selection (unparsed). Throws on a non-OK response. */
 export async function fetchFeatureRaw(def: OsmFeatureDef, corners: LonLat[], signal?: AbortSignal): Promise<any> {
     const query = buildQuery(def, cornersToBBox(corners));
-    Env.log(`[osm] downloading ${def.noun} from Overpass…`);
+    Env.log(`[osm] downloading ${def.id} from Overpass…`);
     const t0 = performance.now();
     const res = await fetch(OVERPASS_URL, {
         method: 'POST',
@@ -92,7 +92,7 @@ export async function fetchFeatureRaw(def: OsmFeatureDef, corners: LonLat[], sig
         throw new Error(`Overpass ${res.status} ${res.statusText}`);
     }
     const json = await res.json();
-    Env.log(`[osm] downloaded ${json?.elements?.length ?? 0} ${def.noun} elements in ${Math.round(performance.now() - t0)} ms`);
+    Env.log(`[osm] downloaded ${json?.elements?.length ?? 0} ${def.id} elements in ${Math.round(performance.now() - t0)} ms`);
     return json;
 }
 

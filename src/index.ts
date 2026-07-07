@@ -17,6 +17,7 @@ import { OsmOverlay } from './OsmOverlay';
 import { fetchFeatureRaw, parseWays, waysFromJson, type OsmElement } from './osm/OverpassFeature';
 import { OsmVectorData } from './osm/OsmVectorData';
 import { OSM_FEATURES, osmFeature } from './osm/osmFeatures';
+import { OSM_LABELS } from './ui/osmLabels';
 import { sampleSelectionHeights, rectExtent, tileCoverage } from './HeightSampler';
 import { TerrainPreview } from './TerrainPreview';
 import { MapModel, SelectionShape, type ModelGeometry } from './MapModel';
@@ -699,7 +700,7 @@ async function init(): Promise<void> {
                 olMap?.getTargetElement()?.classList.toggle('map-crosshair', active);
             },
             // The menu sections to render (one per registry feature), so the UI is data-driven.
-            features: OSM_FEATURES.map(f => ({ id: f.id, label: f.label, noun: f.noun, hasRadius: f.geometry === 'line', sizeLimit: f.sizeLimit })),
+            features: OSM_FEATURES.map(f => ({ id: f.id, label: OSM_LABELS[f.id].label, noun: OSM_LABELS[f.id].noun, hasRadius: f.geometry === 'line', sizeLimit: f.sizeLimit })),
             // Download one OSM feature for the current selection and overlay it on the map. Returns
             // the element count so the button can report it; throws bubble to the panel.
             onDownload: async (id: string) => {

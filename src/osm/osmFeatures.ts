@@ -18,10 +18,6 @@ export type OsmGeometry = 'line' | 'area';
 export interface OsmFeatureDef {
     /** Stable id; the key everything (settings, overlays, model data) is keyed by. */
     id: string;
-    /** Section heading in the menus, e.g. "Tracks". */
-    label: string;
-    /** Plural noun for button feedback, e.g. "tracks" → "12 tracks". */
-    noun: string;
     geometry: OsmGeometry;
     /** Minimum vertex count for a usable way (2 for a line, 3 for a ring). */
     minPoints: number;
@@ -60,17 +56,17 @@ const STREET_HIGHWAYS = [
 /** The registry, in overlay-stacking order (later = on top via higher zIndex). */
 export const OSM_FEATURES: OsmFeatureDef[] = [
     {
-        id: 'buildings', label: 'Buildings', noun: 'buildings', geometry: 'area', minPoints: 3,
+        id: 'buildings', geometry: 'area', minPoints: 3,
         selector: '["building"]', strokeColor: '#1f77b4', fillColor: 'rgba(31, 119, 180, 0.35)',
         zIndex: 850, raise: 6, radius: 0, sizeLimit: Env.BUILDINGS_LIMIT,
     },
     {
-        id: 'streets', label: 'Streets', noun: 'streets', geometry: 'line', minPoints: 2,
+        id: 'streets', geometry: 'line', minPoints: 2,
         selector: highwaySelector(STREET_HIGHWAYS), strokeColor: '#ff7f0e',
         zIndex: 880, raise: 2, radius: 12, sizeLimit: Env.STREET_LIMIT,
     },
     {
-        id: 'tracks', label: 'Tracks', noun: 'tracks', geometry: 'line', minPoints: 2,
+        id: 'tracks', geometry: 'line', minPoints: 2,
         selector: highwaySelector(TRACK_HIGHWAYS), strokeColor: '#d62728',
         zIndex: 900, raise: 2, radius: 10, sizeLimit: Env.TRACK_LIMIT,
     },
