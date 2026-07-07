@@ -15,9 +15,16 @@ import { Env } from '../Env';
  */
 export type OsmGeometry = 'line' | 'area';
 
+/** Stable feature ids. String-valued so they serialize/key exactly as the raw strings did. */
+export enum OsmFeatureId {
+    Buildings = 'buildings',
+    Streets = 'streets',
+    Tracks = 'tracks',
+}
+
 export interface OsmFeatureDef {
     /** Stable id; the key everything (settings, overlays, model data) is keyed by. */
-    id: string;
+    readonly id: OsmFeatureId;
     geometry: OsmGeometry;
     /** Minimum vertex count for a usable way (2 for a line, 3 for a ring). */
     minPoints: number;
@@ -56,17 +63,17 @@ const STREET_HIGHWAYS = [
 /** The registry, in overlay-stacking order (later = on top via higher zIndex). */
 export const OSM_FEATURES: OsmFeatureDef[] = [
     {
-        id: 'buildings', geometry: 'area', minPoints: 3,
+        id: OsmFeatureId.Buildings, geometry: 'area', minPoints: 3,
         selector: '["building"]', strokeColor: '#1f77b4', fillColor: 'rgba(31, 119, 180, 0.35)',
         zIndex: 850, raise: 6, radius: 0, sizeLimit: Env.BUILDINGS_LIMIT,
     },
     {
-        id: 'streets', geometry: 'line', minPoints: 2,
+        id: OsmFeatureId.Streets, geometry: 'line', minPoints: 2,
         selector: highwaySelector(STREET_HIGHWAYS), strokeColor: '#ff7f0e',
         zIndex: 880, raise: 2, radius: 12, sizeLimit: Env.STREET_LIMIT,
     },
     {
-        id: 'tracks', geometry: 'line', minPoints: 2,
+        id: OsmFeatureId.Tracks, geometry: 'line', minPoints: 2,
         selector: highwaySelector(TRACK_HIGHWAYS), strokeColor: '#d62728',
         zIndex: 900, raise: 2, radius: 10, sizeLimit: Env.TRACK_LIMIT,
     },
