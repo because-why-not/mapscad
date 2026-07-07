@@ -23,8 +23,6 @@
         onCancel = () => {},
     } = $props();
 
-    let mountEl;
-    export function getMount() { return mountEl; }
 
     let menuOpen = $state(false);
     let previewStats = $state(null);
@@ -121,7 +119,7 @@
 </script>
 
 <div class="panel panel-preview" {style}>
-    <div class="panel-mount" id="preview-mount" bind:this={mountEl}></div>
+    <div class="panel-mount" id="preview-mount"></div>
 
     {#if previewStats}
         <div class="absolute top-4 left-4 z-[1000] bg-base-100/80 backdrop-blur rounded shadow-md text-xs font-mono leading-5 pointer-events-none">

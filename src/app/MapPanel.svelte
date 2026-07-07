@@ -29,8 +29,6 @@
         onCollapse = () => {},
     } = $props();
 
-    let mountEl;
-    export function getMount() { return mountEl; }
 
     // Live map zoom readout; pushed in from index.ts on every view change.
     let mapZoom = $state(untrack(() => initialZoom));
@@ -169,10 +167,7 @@
     function toggleSection(title) { openSection = openSection === title ? null : title; }
 
     // Pushed in from index.ts.
-    export function setTileProviders(providers) { providerList = providers; }
-    export function setCustomMaps(maps) { customList = maps; }
     export function setActiveProvider(id) { activeProviderId = id; }
-    export function setSelectActive(active) { activeTool = active ? 'rectangle' : 'none'; }
     // Highlight the right tool when a saved selection is restored (rectangle | oval | null).
     export function setSelectTool(tool) { activeTool = tool ?? 'none'; }
 
@@ -196,7 +191,7 @@
 </script>
 
 <div class="panel panel-map" {style}>
-    <div class="panel-mount" id="map-mount" bind:this={mountEl}></div>
+    <div class="panel-mount" id="map-mount"></div>
 
     <!-- Selection toolbar (below the map's zoom +/- control). Hidden in Data mode so the
          selection can't be changed while the user works with downloaded data. -->

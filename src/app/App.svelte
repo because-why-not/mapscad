@@ -84,12 +84,7 @@
     }
 
     // --- exports used by index.ts ---
-    export function getMapMount() { return mapPanel?.getMount(); }
-    export function getPreviewMount() { return previewPanel?.getMount(); }
     export function setActiveProvider(id) { mapPanel?.setActiveProvider(id); }
-    export function setTileProviders(p) { mapPanel?.setTileProviders(p); }
-    export function setCustomMaps(m) { mapPanel?.setCustomMaps(m); }
-    export function setSelectActive(active) { mapPanel?.setSelectActive(active); }
     export function setSelectTool(tool) { mapPanel?.setSelectTool(tool); }
     export function setHasSelection(has, sideMeters = 0, resetData = true) { mapPanel?.setHasSelection(has, sideMeters, resetData); }
     export function setOsmAvailable(id, has) { previewPanel?.setOsmAvailable(id, has); }
