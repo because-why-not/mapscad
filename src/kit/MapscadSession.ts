@@ -1,5 +1,6 @@
 import { OsmVectorData } from './mapelements/OsmVectorData';
 import type { OsmElement } from './mapelements/OverpassFeature';
+import type { LonLat } from './common/mathHelper';
 
 /**
  * The kit's central session: the framework-agnostic source of truth for map-element *data* — the
@@ -29,6 +30,12 @@ type Listener = (featureId: string) => void;
 export class MapscadSession {
     private elements = new Map<string, OsmVectorData>();
     private inPreview = new Set<string>();
+    // The selected region — four lon/lat corners [TL,TR,BR,BL] (see SelectionArea), or null. The
+    // session OWNS this value (option b): the map is one producer of it, but a headless script could
+    // set it directly. The grid/sampling that consume it stay in the renderer. (An explicit
+    // selectionChanged event — so viewers/scripts can drive a rebuild without the map — is a
+    // follow-up; today index.ts orchestrates the response after it writes here.)
+    private selection: LonLat[] | null = null;
     private listeners: Record<SessionEvent, Set<Listener>> = {
         dataChanged: new Set(),
         previewChanged: new Set(),
@@ -42,6 +49,19 @@ export class MapscadSession {
 
     private emit(event: SessionEvent, id: string): void {
         for (const fn of this.listeners[event]) fn(id);
+    }
+
+    // --- selection (the region that drives sampling) ---------------------------
+
+    /** The selected region as four lon/lat corners, or null. */
+    getSelection(): LonLat[] | null {
+        return this.selection;
+    }
+
+    /** Set the selected region (from the map, or a script). Pure value ownership — the renderer
+     *  reads it to sample the DEM + project OSM data; it does not fan out an event yet. */
+    setSelection(corners: LonLat[] | null): void {
+        this.selection = corners;
     }
 
     // --- queries ---------------------------------------------------------------

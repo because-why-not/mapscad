@@ -51,7 +51,6 @@ const model = new MapModel();
 // display flags) + its persistence and share-link codec. Reads any share link / saved
 // config at construction.
 const config = new PreviewConfigStore();
-let currentCorners: LonLat[] | null = null;
 // The OL 2D-map overlays, one per feature id (see mapelements/osmFeatures.ts), created once the OL
 // map is ready. The element *data* itself now lives in the session below, not here.
 const osmOverlays = new Map<string, OsmOverlay>();
@@ -139,7 +138,8 @@ let resampleAbort: AbortController | null = null;
 
 /** Re-sample the DEM over the current selection and feed the heights into the model. */
 async function resample(): Promise<void> {
-    if (!previewDem || !currentCorners) return;
+    const corners = session.getSelection();
+    if (!previewDem || !corners) return;
     resampleAbort?.abort();              // supersede any build still downloading
     const abort = new AbortController();
     resampleAbort = abort;
@@ -148,9 +148,9 @@ async function resample(): Promise<void> {
     appInstance?.setPreviewLoading({ loaded: 0, total: 0 }); // show the bottom progress bar
     try {
         const { heightZoom, rasterResolution } = model.getSettings();
-        const zoom = safeZoom(currentCorners, heightZoom, rasterResolution);
-        const { cols, rows } = gridResolution(currentCorners, rasterResolution);
-        const grid = await sampleSelectionHeights(currentCorners, previewDem, cols, rows, zoom, {
+        const zoom = safeZoom(corners, heightZoom, rasterResolution);
+        const { cols, rows } = gridResolution(corners, rasterResolution);
+        const grid = await sampleSelectionHeights(corners, previewDem, cols, rows, zoom, {
             signal: abort.signal,
             onProgress: (loaded, total) => appInstance?.setPreviewLoading({ loaded, total }),
         });
@@ -181,11 +181,12 @@ function cancelResample(): void {
 function syncOsmField(id: string): void {
     const grid = model.getGrid();
     const data = session.getElements(id);
-    if (!data || !currentCorners || !grid) { model.setOsmData(id, null); return; }
+    const corners = session.getSelection();
+    if (!data || !corners || !grid) { model.setOsmData(id, null); return; }
     // Disabled elements stay in the list/overlay but are excluded from the printed model.
     const enabled = data.list.filter(e => !e.disabled);
     const enabledData = new OsmVectorData(enabled);
-    const bound = enabledData.withGrid({ corners: currentCorners, cols: grid.cols, rows: grid.rows });
+    const bound = enabledData.withGrid({ corners, cols: grid.cols, rows: grid.rows });
     model.setOsmData(id, bound);
 }
 
@@ -366,8 +367,9 @@ function updatePreviewStats(geo: ModelGeometry | null): void {
     // Ground resolution (metres per DEM pixel) at the heightmap zoom, and the DEM's effective pixel
     // size over the selection — now distinct from the raster grid, since the DEM is interpolated to
     // fill the grid. Lets the user compare real heightmap detail against the vertex grid below it.
-    const hmRes = currentCorners
-        ? groundResolution(currentCorners[0][1], grid.zoom, previewDem?.mmapsrv.tileSize)
+    const corners = session.getSelection();
+    const hmRes = corners
+        ? groundResolution(corners[0][1], grid.zoom, previewDem?.mmapsrv.tileSize)
         : undefined;
     appInstance?.setPreviewStats({
         vertices: geo.vertexCount,
@@ -404,12 +406,12 @@ function clearOsmData(): void {
 
 /** Single place the selection state fans out: persistence, panel visibility, model. */
 function onSelectionChange(corners: LonLat[] | null): void {
-    const hadSelection = !!currentCorners;
+    const hadSelection = !!session.getSelection();
     config.update({ selection: corners });
     appInstance?.setPreviewVisible(!!corners); // App shows/hides the 3D panel
     // The longest selection side (metres) gates which OSM features can be downloaded (Env limits).
     const sideMeters = corners ? Math.max(...Object.values(rectExtent(corners))) : 0;
-    currentCorners = corners;
+    session.setSelection(corners);
 
     if (!corners) {
         // Selection cleared: nothing to sample, so drop all downloaded data + reset the data panel.
@@ -438,9 +440,9 @@ function onSelectionChange(corners: LonLat[] | null): void {
  *  the grid will use. */
 function onUserSelectionChange(corners: LonLat[] | null): void {
     // Only seed defaults for a *brand-new* selection: corners exist (one was just drawn),
-    // currentCorners is still empty (so it's new, not an edit of an existing one), and we
+    // the session has no selection yet (so it's new, not an edit of an existing one), and we
     // have a live map to read the active source / visible zoom from.
-    if (corners && !currentCorners && controller) {
+    if (corners && !session.getSelection() && controller) {
         // Default the preview source to the DEM behind the active map layer (e.g. drawing on
         // North Island's hillshade/raw picks north_island_elevation_raw), if it differs.
         const activeDem = demBySource[controller.activeId];
@@ -690,9 +692,10 @@ async function init(): Promise<void> {
             // Download one OSM feature for the current selection and overlay it on the map. Returns
             // the element count so the button can report it; throws bubble to the panel.
             onDownload: async (id: string) => {
-                if (!currentCorners) return 0;
+                const corners = session.getSelection();
+                if (!corners) return 0;
                 const def = osmFeature(id);
-                const json = await fetchFeatureRaw(def, currentCorners);
+                const json = await fetchFeatureRaw(def, corners);
                 const fetched = parseWays(def, json);
                 ingestOsm(id, fetched);
                 return fetched.length;
@@ -755,8 +758,9 @@ async function init(): Promise<void> {
                 // Reset the zoom to the new source's resolution-based default — each DEM has its own
                 // native detail, so carrying the old level over rarely makes sense (and can over-
                 // fetch). With a selection, that default + range come from the resolution the mesh needs.
-                const { min, max, def } = currentCorners
-                    ? resolutionZoomRange(currentCorners, previewDem, model.getSettings().rasterResolution)
+                const corners = session.getSelection();
+                const { min, max, def } = corners
+                    ? resolutionZoomRange(corners, previewDem, model.getSettings().rasterResolution)
                     : { ...demZoomRange(previewDem), def: demZoomRange(previewDem).max };
                 model.applySettings({ heightZoom: def });
                 config.update({ demId: id, model: model.getSettings() });
@@ -772,8 +776,9 @@ async function init(): Promise<void> {
                 preview?.setSmoothShading(s.smoothShading ?? true); // display-only
                 // The raster resolution sets where the DEM zoom stops being useful (one DEM pixel per
                 // raster cell), so recompute the slider range + clamp the current zoom into it when it changes.
-                if (s.rasterResolution !== prev.rasterResolution && currentCorners && previewDem) {
-                    const { min, max } = resolutionZoomRange(currentCorners, previewDem, s.rasterResolution);
+                const corners = session.getSelection();
+                if (s.rasterResolution !== prev.rasterResolution && corners && previewDem) {
+                    const { min, max } = resolutionZoomRange(corners, previewDem, s.rasterResolution);
                     const heightZoom = Math.max(min, Math.min(max, model.getSettings().heightZoom));
                     model.applySettings({ heightZoom });
                     config.update({ model: model.getSettings() });
