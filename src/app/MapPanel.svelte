@@ -79,7 +79,6 @@
     // The OSM data panel (child) owns all element state + the object list; index.ts's imperative
     // exports below just forward to it via this ref.
     let dataPanel = $state();
-    export function setOsmElements(id, els) { dataPanel?.setElements(id, els); }
     export function setOsmSelected(featureId, elementId) { dataPanel?.setSelected(featureId, elementId); }
     export function addOsmMarks(fid, ids) { dataPanel?.addMarks(fid, ids); }
 

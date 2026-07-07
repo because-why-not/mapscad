@@ -1,6 +1,8 @@
 <script>
+    import { setContext } from 'svelte';
     import MapPanel from './MapPanel.svelte';
     import PreviewPanel from './PreviewPanel.svelte';
+    import { SESSION_DATA } from './sessionData';
 
     let {
         // Map menu data + callbacks (forwarded to MapPanel)
@@ -13,6 +15,7 @@
         onDataModeChange = () => {},
         // OSM data: the feature list to render + generic per-feature callbacks (keyed by id).
         features = [],
+        session,   // kit session — forwarded to MapPanel → OsmDataPanel (which subscribes to it)
         onDownload = () => 0,
         onUpdatePreview = () => {},
         onSaveJson = () => null,
@@ -46,6 +49,20 @@
     let previewPanel;
     let containerEl;
 
+    // Shared session-data store (the "engineStore", Option B): subscribe to the session ONCE here and
+    // mirror each feature's element list into $state; descendants read it via getContext(SESSION_DATA)
+    // and never subscribe themselves. Only session-derived DATA lives here — UI-local state (marks,
+    // filter, selection) stays in the consuming component.
+    let osmElements = $state({});
+    setContext(SESSION_DATA, { get elements() { return osmElements; } });
+    $effect(() => {
+        if (!session) return;
+        return session.on('dataChanged', (id) => {
+            const data = session.getElements(id);
+            osmElements[id] = data ? data.list.map(e => ({ id: e.id, name: e.name ?? '', disabled: !!e.disabled })) : [];
+        });
+    });
+
     let orientation = $state(getOrientation());
     let previewVisible = $state(false);
     let collapsed = $state('none');     // 'none' | 'map' | 'preview'
@@ -77,7 +94,6 @@
     export function setHasSelection(has, sideMeters = 0, resetData = true) { mapPanel?.setHasSelection(has, sideMeters, resetData); }
     export function setOsmAvailable(id, has) { previewPanel?.setOsmAvailable(id, has); }
     export function setOsmStale(id, stale) { mapPanel?.setOsmStale(id, stale); }
-    export function setOsmElements(id, els) { mapPanel?.setOsmElements(id, els); }
     export function setOsmSelected(featureId, elementId) { mapPanel?.setOsmSelected(featureId, elementId); }
     export function addOsmMarks(id, ids) { mapPanel?.addOsmMarks(id, ids); }
     export function setMapZoom(z) { mapPanel?.setZoom(z); }

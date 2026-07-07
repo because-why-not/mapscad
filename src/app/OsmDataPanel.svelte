@@ -1,6 +1,7 @@
 <script>
-    import { untrack } from 'svelte';
+    import { untrack, getContext } from 'svelte';
     import Attribution from './Attribution.svelte';
+    import { SESSION_DATA } from './sessionData';
     import { OSM_DATA_API } from '../kit/mapelements/dataSources';
     import { parseTrackFile } from '../kit/mapelements/TrackParser';
 
@@ -43,9 +44,11 @@
     // (the data is kept + re-projected, but may not cover the shifted area) — cleared on re-download.
     let downloadState = $state(untrack(() =>
         Object.fromEntries(features.map(f => [f.id, { busy: false, label: idleLabel(f), ready: false, error: '', stale: false }]))));
-    // The raw object list per feature ({id,name,disabled}[]) and the single selected element (map ↔
-    // list), plus a per-feature name filter the user types.
-    let elements = $state(untrack(() => Object.fromEntries(features.map(f => [f.id, []]))));
+    // The raw object list per feature ({id,name,disabled}[]) comes from the shared session-data store
+    // (App.svelte subscribes to the session once and mirrors it here) — this panel just reads it.
+    const sessionData = getContext(SESSION_DATA);
+    let elements = $derived(sessionData.elements);
+    // The single selected element (map ↔ list), plus a per-feature name filter the user types.
     let filter = $state(untrack(() => Object.fromEntries(features.map(f => [f.id, '']))));
     let selected = $state(null); // { featureId, elementId } | null
     // Marked element ids ({id:true}) per feature — the working selection the Enable/Disable buttons
@@ -54,7 +57,6 @@
     let marked = $state(untrack(() => Object.fromEntries(features.map(f => [f.id, {}]))));
 
     // --- imperative API, forwarded from MapPanel (which index.ts drives) ---
-    export function setElements(id, els) { elements[id] = els; marked[id] = {}; }
     // Flag/unflag a feature's data as possibly not covering the (edited) selection.
     export function setStale(id, v) { if (downloadState[id]) downloadState[id].stale = v; }
     export function setSelected(featureId, elementId) {
@@ -71,7 +73,9 @@
     // Selection changed / cleared: drop every feature's downloaded data + working state.
     export function reset() {
         selected = null;
-        for (const f of features) { downloadState[f.id].ready = false; downloadState[f.id].error = ''; downloadState[f.id].stale = false; elements[f.id] = []; filter[f.id] = ''; marked[f.id] = {}; }
+        // `elements` is now derived from the session store, which the selection-clear empties via its
+        // dataChanged fan-out; here we only reset this panel's own UI state.
+        for (const f of features) { downloadState[f.id].ready = false; downloadState[f.id].error = ''; downloadState[f.id].stale = false; filter[f.id] = ''; marked[f.id] = {}; }
     }
 
     const isSelected = (fid, eid) => selected?.featureId === fid && selected?.elementId === eid;
@@ -226,6 +230,7 @@
         st.error = ''; // clear any previous failure before retrying
         try {
             const count = await onDownload(f.id);
+            marked[f.id] = {}; // fresh element set → old marks (stale ids) no longer apply
             st.stale = false; // fresh data for the current area
             st.ready = count > 0;
             st.label = count ? `${count} ${f.noun}` : `No ${f.noun} found`;
@@ -274,6 +279,7 @@
                     : parseTrackFile(text, file.name);
             }));
             const count = onLoadJson(f.id, payloads);
+            marked[f.id] = {}; // fresh element set → old marks (stale ids) no longer apply
             st.stale = false;
             st.ready = count > 0;
             st.label = count ? `${count} ${f.noun}` : `No ${f.noun} found`;

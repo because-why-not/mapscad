@@ -199,23 +199,14 @@ function ingestOsm(id: string, elements: OsmElement[]): void {
     session.setElements(id, elements);
 }
 
-/** Push one feature's element list to the object-list UI: a stable id + a label (OSM name, else a
- *  running number). */
-function pushOsmElements(id: string): void {
-    const data = session.getElements(id);
-    // Push the raw id + name; the UI does the ordering (by name), labelling and filtering.
-    const elements = data ? data.list.map(e => ({ id: e.id, name: e.name ?? '', disabled: !!e.disabled })) : [];
-    appInstance?.setOsmElements(id, elements);
-}
-
-/** Renderer response to a `dataChanged` event: redraw the feature's overlay and refresh the object
- *  list. A feature with no data (deleted by clearAll) fully clears the overlay — resetting its
- *  selection/hover/mark state; an empty-but-present set (all elements removed) just draws nothing. */
+/** Renderer response to a `dataChanged` event: redraw the feature's OL overlay. A feature with no
+ *  data (deleted by clearAll) fully clears the overlay — resetting its selection/hover/mark state;
+ *  an empty-but-present set (all elements removed) just draws nothing. The object *list* is no longer
+ *  pushed from here — the Data panel subscribes to the session's dataChanged itself. */
 function renderOsmData(id: string): void {
     const data = session.getElements(id);
     const overlay = osmOverlays.get(id);
     if (data) overlay?.setElements(data.list); else overlay?.clear();
-    pushOsmElements(id);
 }
 
 /** Select one element (map ↔ list), or pass null to clear. Highlights it on the map and in the list. */
@@ -695,6 +686,7 @@ async function init(): Promise<void> {
             },
             // The menu sections to render (one per registry feature), so the UI is data-driven.
             features: OSM_FEATURES.map(f => ({ id: f.id, label: OSM_LABELS[f.id].label, noun: OSM_LABELS[f.id].noun, hasRadius: f.geometry === 'line', sizeLimit: f.sizeLimit })),
+            session, // the Data panel subscribes to the session for element data (replaces setOsmElements)
             // Download one OSM feature for the current selection and overlay it on the map. Returns
             // the element count so the button can report it; throws bubble to the panel.
             onDownload: async (id: string) => {
