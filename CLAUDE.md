@@ -1,7 +1,7 @@
 # mapscad — notes for Claude
 
 Turns DEM (elevation) data into 3D-printable terrain models. TypeScript + Svelte 5
-(runes) + webpack. Two side-by-side panels: a 2D/3D map (for picking an area) and a
+(runes) + Vite. Two side-by-side panels: a 2D/3D map (for picking an area) and a
 Three.js preview of the printable mesh.
 
 > This is the **public** repo — all app code and tests live **here**. Paths below are relative to
@@ -125,21 +125,25 @@ Three.js preview of the printable mesh.
 
 ## Build & verify
 
-- **Build**: `npm run compile` (dev webpack), `npm run watch`, `npm run dev` (dev server, port
-  8003), `npm run build` (release: `webpack --mode production`, minified — the dev config is
-  deliberately left unchanged, they branch on `argv.mode` in `webpack.config.js`).
+- **Bundler is Vite** (`vite.config.ts`). The whole project is ESM (`"type": "module"` in
+  package.json — configs incl. `postcss`/`tailwind` are ESM; no `__dirname`/`require`, use
+  `import.meta.url`). `npm run dev` (dev server, port 8003 — memory-served, HMR), `npm run build`
+  (→ `dist/`, a self-contained deployable: `index.html` at repo root is the Vite entry, static
+  files in `public/`), `npm run preview` (serve the prod build). `__TILE_SERVER_URL__` is baked
+  from `.env` via Vite `define` (empty when unset → public-map fallback).
 - **Types**: `npm run check` type-checks **both** `.ts` and `.svelte` (svelte-check — a superset
-  of `tsc --noEmit`, so there's no separate tsc step). TypeScript in components works via
-  `svelte-preprocess` (`svelte.config.js`, read by both the loader and the tooling).
-  `verbatimModuleSyntax` is on, so **type-only imports MUST use `import type`** (svelte-preprocess
-  transpiles per-file, so a type imported as a value would be emitted as a runtime import and
-  crash). Components migrate to `<script lang="ts">` one at a time — JS and TS coexist.
-  **`.svelte.ts` runes modules** (e.g. `src/app/sessionStore.svelte.ts`) get their own webpack
-  rule: ts-loader (transpile-only) strips the types, then svelte-loader's `compileModule`
-  compiles the runes — svelte-loader alone can't parse TS in modules (it doesn't preprocess).
-- **Tests**: `npm run test` (vitest unit), `npm run test:e2e` (Playwright), `npm run test:all`.
-  The **golden STL** (`tests/e2e/dunedin-download.spec.ts`) is the byte-for-byte guard on geometry
-  output; regenerate intentionally with `UPDATE_GOLDEN=1 npm run test:e2e -- dunedin-download`.
+  of `tsc --noEmit`). This is the ONLY type gate: Vite/esbuild transpile without type-checking.
+  TypeScript in components works via `vitePreprocess` (`svelte.config.js`, read by both
+  vite-plugin-svelte and the tooling). `verbatimModuleSyntax` is on, so **type-only imports MUST
+  use `import type`** (esbuild transpiles per-file, so a type imported as a value would be emitted
+  as a runtime import and crash). Components migrate to `<script lang="ts">` one at a time.
+  **`.svelte.ts` runes modules** (e.g. `src/app/sessionStore.svelte.ts`) are compiled natively by
+  vite-plugin-svelte — no custom rule needed.
+- **Tests**: `npm run test` (vitest unit), `npm run test:e2e` (Playwright, boots the Vite dev
+  server), `npm run test:all`. The **golden STL** (`tests/e2e/dunedin-download.spec.ts`) is the
+  byte-for-byte guard on geometry output; its **headless twin** (`tests/unit/dunedinGolden.test.ts`)
+  runs the same pipeline in Node against checked-in tile fixtures. Regenerate both with
+  `./regenerate_fixures.sh` (needs the tile server).
 
 ## Gotchas / lessons (don't relearn these the slow way)
 
@@ -176,7 +180,7 @@ Three.js preview of the printable mesh.
   (pre-reshape), which is a different stat by design. `tileSize` is plumbed through both (512px
   Mapterhorn tiles are 4× the pixels of a 256px source).
 - **Tile server URL** is OPTIONAL — from `.env` (`LOCAL_TILE_SERVER_URL` / `TILE_SERVER_URL`)
-  baked in at build via `webpack.DefinePlugin` → `__TILE_SERVER_URL__`, defaulting to `''`
+  baked in at build via Vite `define` → `__TILE_SERVER_URL__`, defaulting to `''`
   when unset (the manifest fetch then just fails gracefully → `[]`). With no server the app
   runs entirely on the public base maps in **`src/kit/config/externalMaps.ts`** (`EXTERNAL_MAPS`:
   OpenStreetMap, OpenTopoMap) + the public DEMs in `src/kit/config/externalDems.ts`. Elevation DEMs are

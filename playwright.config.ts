@@ -1,8 +1,8 @@
 import { defineConfig, devices } from '@playwright/test';
 
-const PORT = 8003; // matches webpack.config.js devServer port
+const PORT = 8003; // matches vite.config.ts server.port
 
-// E2E smoke tests. Playwright boots the webpack dev server itself (reusing one if already
+// E2E smoke tests. Playwright boots the Vite dev server itself (reusing one if already
 // running) and drives a real browser against it.
 export default defineConfig({
     testDir: './tests/e2e',

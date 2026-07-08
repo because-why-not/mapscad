@@ -2,7 +2,7 @@ import type { ManifestMap } from './TileMapManifest';
 import { sampleHeights, type HeightGrid } from './Sampler';
 import { TerrariumMapData } from './TerrariumMapData';
 import { downloadRaster, type DownloadOptions } from './TileDownloader';
-import { DEFAULT_TILE_SIZE, haversine, groundResolution, lonLatToWorldPx, type LonLat } from '../common/mathHelper';
+import { DEFAULT_TILE_SIZE, haversine, groundResolution, zoomForResolution, lonLatToWorldPx, type LonLat } from '../common/mathHelper';
 
 /**
  * Orchestrates the DEM height pipeline: it owns the geometry (which tiles a selection
@@ -33,6 +33,46 @@ export function rectExtent(corners: LonLat[]): { widthMeters: number; heightMete
 function storedZoom(dem: ManifestMap, zoom: number): number {
     const minStored = dem.mmapsrv.minStoredZoom ?? dem.minzoom;
     return Math.max(minStored, Math.min(dem.maxzoom, Math.round(zoom)));
+}
+
+/** Heightmap zoom range a DEM supports: lowest stored level to its native max. */
+export function demZoomRange(dem: ManifestMap | undefined): { min: number; max: number } {
+    if (!dem) return { min: 0, max: 17 };
+    return { min: dem.mmapsrv.minStoredZoom ?? dem.minzoom, max: dem.maxzoom };
+}
+
+/**
+ * Zoom slider range + default for a selection, derived from the resolution the mesh will
+ * actually use. The grid is capped to `raster` samples on its long side, so its finest useful
+ * sample spacing is longSideMetres / raster; the (fractional) DEM zoom matching that spacing is
+ * the "natural" zoom — beyond it, finer tiles only add detail the grid discards (slower, and
+ * harder on the external tile servers). We round the natural zoom UP, then:
+ *   - `max`: one level finer than that (a little bilinear headroom) — the user can't pick higher.
+ *   - `def`: one level coarser — the preview opens fast and light.
+ * Both clamped to the zooms the DEM actually stores.
+ */
+export function resolutionZoomRange(corners: LonLat[], dem: ManifestMap, raster: number): { min: number; max: number; def: number } {
+    const { min: dMin, max: dMax } = demZoomRange(dem);
+    const { widthMeters, heightMeters } = rectExtent(corners);
+    const longSide = Math.max(widthMeters, heightMeters);
+    // The zoom at which one DEM pixel ≈ one raster cell — the natural match. Above it the DEM is
+    // finer than the grid can hold (wasted downloads); below it the grid interpolates the DEM.
+    const natural = Math.ceil(zoomForResolution(corners[0][1], longSide / raster, dem.mmapsrv.tileSize));
+    const max = Math.min(dMax, natural + 1);
+    const def = Math.max(dMin, Math.min(max, natural - 1));
+    return { min: dMin, max, def };
+}
+
+/** Model grid size: exactly `raster` samples on the long side, the short side scaled to the
+ *  selection's aspect ratio. Independent of the DEM zoom — the DEM is bilinearly sampled (and
+ *  interpolated when it's coarser) to fill this grid, so the raster resolution alone sets mesh
+ *  density. That lets OSM feature bodies carry finer detail than the heightmap provides. */
+export function gridResolution(corners: LonLat[], raster: number): { cols: number; rows: number } {
+    const { widthMeters, heightMeters } = rectExtent(corners);
+    const long = Math.max(widthMeters, heightMeters);
+    const cols = Math.max(2, Math.round(raster * widthMeters / long));
+    const rows = Math.max(2, Math.round(raster * heightMeters / long));
+    return { cols, rows };
 }
 
 /** The tile range (across × down) a selection covers at a given zoom. */

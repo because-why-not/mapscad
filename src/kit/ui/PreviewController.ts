@@ -1,6 +1,6 @@
 import { TerrainPreview } from './TerrainPreview';
 import { OsmVectorData } from '../mapelements/OsmVectorData';
-import { sampleSelectionHeights, rectExtent, tileCoverage } from '../maptiles/HeightSampler';
+import { sampleSelectionHeights, tileCoverage, demZoomRange, resolutionZoomRange, gridResolution } from '../maptiles/HeightSampler';
 import type { ManifestMap } from '../maptiles/TileMapManifest';
 import type { MapModel, ModelGeometry } from '../MapModel';
 import type { MapscadSession } from '../MapscadSession';
@@ -8,49 +8,9 @@ import type { ProcessorConfigStore } from '../ProcessorConfig';
 import { exportModelStl } from '../StlMaker';
 import { exportModel3mf } from '../ThreeMFMaker';
 import { estimateMemory, measureMemory, formatBytes, memoryLevel, isOverBudget } from '../memory';
-import { groundResolution, zoomForResolution, type LonLat } from '../common/mathHelper';
+import { groundResolution, type LonLat } from '../common/mathHelper';
 import { Emitter } from '../common/events';
 import { Env } from '../../Env';
-
-/** Heightmap zoom range a DEM supports: lowest stored level to its native max. */
-export function demZoomRange(dem: ManifestMap | undefined): { min: number; max: number } {
-    if (!dem) return { min: 0, max: 17 };
-    return { min: dem.mmapsrv.minStoredZoom ?? dem.minzoom, max: dem.maxzoom };
-}
-
-/**
- * Zoom slider range + default for a selection, derived from the resolution the mesh will
- * actually use. The grid is capped to `limit` samples on its long side, so its finest useful
- * sample spacing is longSideMetres / limit; the (fractional) DEM zoom matching that spacing is
- * the "natural" zoom — beyond it, finer tiles only add detail the grid discards (slower, and
- * harder on the external tile servers). We round the natural zoom UP, then:
- *   - `max`: one level finer than that (a little bilinear headroom) — the user can't pick higher.
- *   - `def`: one level coarser — the preview opens fast and light.
- * Both clamped to the zooms the DEM actually stores.
- */
-export function resolutionZoomRange(corners: LonLat[], dem: ManifestMap, raster: number): { min: number; max: number; def: number } {
-    const { min: dMin, max: dMax } = demZoomRange(dem);
-    const { widthMeters, heightMeters } = rectExtent(corners);
-    const longSide = Math.max(widthMeters, heightMeters);
-    // The zoom at which one DEM pixel ≈ one raster cell — the natural match. Above it the DEM is
-    // finer than the grid can hold (wasted downloads); below it the grid interpolates the DEM.
-    const natural = Math.ceil(zoomForResolution(corners[0][1], longSide / raster, dem.mmapsrv.tileSize));
-    const max = Math.min(dMax, natural + 1);
-    const def = Math.max(dMin, Math.min(max, natural - 1));
-    return { min: dMin, max, def };
-}
-
-/** Model grid size: exactly `raster` samples on the long side, the short side scaled to the
- *  selection's aspect ratio. Independent of the DEM zoom — the DEM is bilinearly sampled (and
- *  interpolated when it's coarser) to fill this grid, so the raster resolution alone sets mesh
- *  density. That lets OSM feature bodies carry finer detail than the heightmap provides. */
-export function gridResolution(corners: LonLat[], raster: number): { cols: number; rows: number } {
-    const { widthMeters, heightMeters } = rectExtent(corners);
-    const long = Math.max(widthMeters, heightMeters);
-    const cols = Math.max(2, Math.round(raster * widthMeters / long));
-    const rows = Math.max(2, Math.round(raster * heightMeters / long));
-    return { cols, rows };
-}
 
 /** Bottom progress bar state: DEM-download phase, off-thread build phase, or hidden (null). */
 export type PreviewLoading = { loaded: number; total: number } | { phase: 'build'; percent: number } | null;
@@ -237,7 +197,7 @@ export class PreviewController {
 
     private getBuildWorker(): Worker {
         if (!this.buildWorker) {
-            this.buildWorker = new Worker(new URL('../model/geometry.worker.ts', import.meta.url));
+            this.buildWorker = new Worker(new URL('../model/geometry.worker.ts', import.meta.url), { type: 'module' });
             this.buildWorker.onmessage = (e) => this.onBuildMessage(e);
             this.buildWorker.onerror = (e) => { Env.error('build worker', e.message); this.finishBuild(); };
         }

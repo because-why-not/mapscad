@@ -9,5 +9,5 @@ declare module '*.svelte' {
 
 declare module '*.css';
 
-// Injected by webpack DefinePlugin at build time.
+// Injected by Vite's `define` at build time (see vite.config.ts).
 declare const __TILE_SERVER_URL__: string;

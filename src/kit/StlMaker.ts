@@ -8,10 +8,18 @@ import type { MapModel, ModelGeometry, ModelBody } from './MapModel';
  * "split to objects" to print/colour each body separately.
  */
 
-export function exportModelStl(model: MapModel, baseName = 'mapscad'): void {
+/** Build the model and serialise it to binary-STL bytes — the pure, headless-safe half of the
+ *  export (no DOM). Null when there is no geometry to write. */
+export function modelToStlBytes(model: MapModel): ArrayBuffer | null {
     const geo = model.buildGeometry();
-    if (!geo || geo.bodies.length === 0) return;
-    const blob = new Blob([geometryToBinaryStl(geo.bodies)], { type: 'application/octet-stream' });
+    if (!geo || geo.bodies.length === 0) return null;
+    return geometryToBinaryStl(geo.bodies);
+}
+
+export function exportModelStl(model: MapModel, baseName = 'mapscad'): void {
+    const bytes = modelToStlBytes(model);
+    if (!bytes) return;
+    const blob = new Blob([bytes], { type: 'application/octet-stream' });
     download(blob, `${baseName}.stl`);
 }
 

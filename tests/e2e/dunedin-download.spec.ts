@@ -1,6 +1,10 @@
 import { test, expect } from '@playwright/test';
 import fs from 'fs';
 import path from 'path';
+import { fileURLToPath } from 'url';
+
+// ESM (package.json "type": "module") has no `__dirname`; derive it from the module URL.
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 // Golden-file regression test for the whole pipeline: download a small Dunedin area's DEM,
 // sample → build mesh → export STL, and compare the bytes to a stored reference.
@@ -9,13 +13,19 @@ import path from 'path';
 // boot restores the selection, samples the real DEM, and renders — exactly the user flow. We
 // then click Save and capture the STL download.
 //
-// The area is intentionally tiny (~150 m square) so the download is a handful of tiles. The DEM is
-// sampled at z17 (pinned for determinism) and bilinearly filled into the model's raster grid. The
-// app forces the raster resolution on load, so we pin it to 128 via the `rasterResolution` override
-// (seeded into localStorage below) to keep the golden mesh — and thus the fixture file — small.
+// The area is intentionally tiny (~150 m square) so the download is a handful of tiles. The DEM
+// zoom is seeded as 17, but boot caps a saved heightZoom to the resolution-based default — for this
+// area at raster 128 that's z16, which is what actually gets sampled — and bilinearly fills the
+// model's raster grid. The app forces the raster resolution on load, so we pin it to 128 via the
+// `rasterResolution` override (seeded into localStorage below) to keep the golden mesh small.
+//
+// The HEADLESS twin of this test (tests/unit/dunedinGolden.test.ts) runs the same pipeline in Node
+// against checked-in tile fixtures and compares to the SAME golden — keep their configs in sync.
 //
 // Regenerate the reference after an intentional geometry change:
 //     UPDATE_GOLDEN=1 npx playwright test dunedin-download
+// …and refresh the unit test's tile fixtures alongside it:
+//     UPDATE_TILES=1 npx vitest run dunedinGolden
 
 const RASTER = 128;
 

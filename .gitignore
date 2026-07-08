@@ -2,7 +2,6 @@
 node_modules/
 
 # Build output
-www/js/
 dist/
 
 # Playwright artifacts
@@ -24,4 +23,5 @@ npm-debug.log*
 *.swp
 
 import/
-tests/e2e/fixtures/dunedin-128.stl
+tests/e2e/fixtures/
+tests/unit/fixtures/

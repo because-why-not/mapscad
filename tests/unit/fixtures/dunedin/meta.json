@@ -1,0 +1,8 @@
+{
+ "name": "dunedin_elevation_raw",
+ "attribution": "Sourced from LINZ. CC BY 4.0",
+ "minzoom": 0,
+ "maxzoom": 17,
+ "tileSize": 256,
+ "minStoredZoom": 13
+}
