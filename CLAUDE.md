@@ -139,11 +139,19 @@ Three.js preview of the printable mesh.
   as a runtime import and crash). Components migrate to `<script lang="ts">` one at a time.
   **`.svelte.ts` runes modules** (e.g. `src/app/sessionStore.svelte.ts`) are compiled natively by
   vite-plugin-svelte — no custom rule needed.
-- **Tests**: `npm run test` (vitest unit), `npm run test:e2e` (Playwright, boots the Vite dev
-  server), `npm run test:all`. The **golden STL** (`tests/e2e/dunedin-download.spec.ts`) is the
-  byte-for-byte guard on geometry output; its **headless twin** (`tests/unit/dunedinGolden.test.ts`)
-  runs the same pipeline in Node against checked-in tile fixtures. Regenerate both with
-  `./regenerate_fixures.sh` (needs the tile server).
+- **Tests — three tiers**:
+  - `npm run test` — **vitest unit** (Node): pure kit logic. The **golden STL**'s headless twin
+    (`tests/unit/dunedinGolden.test.ts`) runs the sample→build→export pipeline in Node against
+    checked-in tile fixtures.
+  - `npm run test:e2e` — **Playwright e2e**: the whole app in a browser via the Vite dev server.
+    The **golden STL** (`tests/e2e/dunedin-download.spec.ts`) is the byte-for-byte geometry guard.
+  - `npm run scenario` — **vitest browser mode** (real headless chromium, `vitest.scenario.config.ts`,
+    `tests/scenario/*.scenario.ts`): drives the **kit API directly** — no Svelte, no served page —
+    where browser-only stages (tile Image-decode, the OSM `<canvas>` raise) run for real. This is
+    the tier for "does the kit work headlessly as an API?" ("headless" = no interactive UI, **not**
+    no browser APIs — a canvas is fine). Fully live (tile server + Overpass), so it's NOT in
+    `npm test`; trigger it on demand.
+  - Regenerate the golden + its unit fixtures with `./regenerate_fixures.sh` (needs the tile server).
 
 ## Gotchas / lessons (don't relearn these the slow way)
 
