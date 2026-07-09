@@ -10,8 +10,8 @@ export interface HeightGrid {
     heights: Float32Array;   // row-major, length cols*rows; metres
     cols: number;
     rows: number;
-    widthMeters: number;     // real-world width of the rectangle (TL→TR edge)
-    heightMeters: number;    // real-world height of the rectangle (TL→BL edge)
+    widthMeters: number;     // real-world width of the rectangle (SW→SE edge, i.e. the south edge)
+    heightMeters: number;    // real-world height of the rectangle (SW→NW edge, i.e. the west edge)
     minHeight: number;
     maxHeight: number;
     zoom: number;            // DEM tile zoom the heights were sampled from
@@ -23,12 +23,16 @@ export interface HeightGrid {
 
 const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
 
-/** Bilinear interpolation of a point inside the rectangle (u,v in [0,1]); corners TL,TR,BR,BL. */
+/**
+ * Bilinear interpolation of a point inside the rectangle (u,v in [0,1]). Corners are ordered
+ * SW, SE, NE, NW, so u runs west→east and v runs south→north (v=0 is the south edge, v=1 the north
+ * edge). The TL/TR/BR/BL names below are the legacy screen-convention labels for those same corners.
+ */
 export function rectPoint(c: LonLat[], u: number, v: number): LonLat {
-    const [TL, TR, BR, BL] = c;
-    const topLon = lerp(TL[0], TR[0], u), topLat = lerp(TL[1], TR[1], u);
-    const botLon = lerp(BL[0], BR[0], u), botLat = lerp(BL[1], BR[1], u);
-    return [lerp(topLon, botLon, v), lerp(topLat, botLat, v)];
+    const [TL, TR, BR, BL] = c; // = SW, SE, NE, NW
+    const sLon = lerp(TL[0], TR[0], u), sLat = lerp(TL[1], TR[1], u); // south edge (v=0): SW→SE
+    const nLon = lerp(BL[0], BR[0], u), nLat = lerp(BL[1], BR[1], u); // north edge (v=1): NW→NE
+    return [lerp(sLon, nLon, v), lerp(sLat, nLat, v)];
 }
 
 /**

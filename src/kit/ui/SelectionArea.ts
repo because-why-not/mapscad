@@ -180,7 +180,8 @@ export class SelectionArea {
         return styleForFeature(feature);
     }
 
-    /** Rebuild a selection from four saved lon/lat corners (order TL, TR, BR, BL). */
+    /** Rebuild a selection from four saved lon/lat corners (order SW, SE, NE, NW — corner[0] is the
+     *  south-west corner; the "TL, TR, BR, BL" screen convention does NOT apply, projection y is +north). */
     restore(corners: LonLat[]): void {
         if (!corners || corners.length !== 4) return;
         const pts = corners.map(c => fromLonLat(c));
@@ -325,22 +326,25 @@ export class SelectionArea {
         return [hx, hy];
     }
 
-    /** Four rotated corners in projection coords: TL, TR, BR, BL. */
+    /** Four rotated corners in projection coords, ordered SW, SE, NE, NW (corner[0] = south-west).
+     *  Projection y is +north, so local −halfY is the *south* edge: the "TL/TR/BR/BL" screen-space
+     *  naming is misleading and deliberately avoided here. */
     private corners(): Coordinate[] {
         const [cx, cy] = this.center!;
         const cos = Math.cos(this.rotation);
         const sin = Math.sin(this.rotation);
         const locals: Coordinate[] = [
-            [-this.halfX, -this.halfY], [this.halfX, -this.halfY],
-            [this.halfX, this.halfY], [-this.halfX, this.halfY],
+            [-this.halfX, -this.halfY], [this.halfX, -this.halfY], // SW, SE  (−halfY = south)
+            [this.halfX, this.halfY], [-this.halfX, this.halfY],   // NE, NW  (+halfY = north)
         ];
         return locals.map(([lx, ly]) => [cx + cos * lx - sin * ly, cy + sin * lx + cos * ly]);
     }
 
     private rotateHandleCoord(c: Coordinate[]): Coordinate {
         const [cx, cy] = this.center!;
-        const topMid: Coordinate = [(c[0][0] + c[1][0]) / 2, (c[0][1] + c[1][1]) / 2];
-        return [cx + (topMid[0] - cx) * ROTATE_PUSH, cy + (topMid[1] - cy) * ROTATE_PUSH];
+        // Midpoint of the corner[0]–corner[1] edge — i.e. the SW→SE (south) edge in geographic terms.
+        const edgeMid: Coordinate = [(c[0][0] + c[1][0]) / 2, (c[0][1] + c[1][1]) / 2];
+        return [cx + (edgeMid[0] - cx) * ROTATE_PUSH, cy + (edgeMid[1] - cy) * ROTATE_PUSH];
     }
 
     /** Outline ring for the current shape: the four corners, or an ellipse through them. */

@@ -21,7 +21,8 @@ export type SampleOptions = DownloadOptions;
 
 const TILE = DEFAULT_TILE_SIZE;
 
-/** Real-world width (TL→TR) and height (TL→BL) of the selection rectangle, in metres. */
+/** Real-world width (SW→SE, the south edge) and height (SW→NW, the west edge) of the selection
+ *  rectangle, in metres. Corners are ordered SW, SE, NE, NW. */
 export function rectExtent(corners: LonLat[]): { widthMeters: number; heightMeters: number } {
     return {
         widthMeters: haversine(corners[0], corners[1]),
@@ -88,10 +89,10 @@ export function tileCoverage(corners: LonLat[], dem: ManifestMap, zoom: number):
 }
 
 /**
- * @param corners selection rectangle as lon/lat, order TL, TR, BR, BL
+ * @param corners selection rectangle as lon/lat, order SW, SE, NE, NW (corner[0] = south-west)
  * @param dem     terrarium DEM manifest entry (tiles[0] is the {z}/{x}/{y} template)
- * @param cols    number of samples across the width
- * @param rows    number of samples down the height
+ * @param cols    number of samples across the width (west→east)
+ * @param rows    number of samples down the height (south→north; row 0 = the south edge)
  */
 export async function sampleSelectionHeights(
     corners: LonLat[], dem: ManifestMap, cols: number, rows: number, zoom: number,
