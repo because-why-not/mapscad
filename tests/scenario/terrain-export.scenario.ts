@@ -6,7 +6,7 @@ import { sampleSelectionHeights, resolutionZoomRange, gridResolution } from '../
 import { OsmVectorData } from '../../src/kit/mapelements/OsmVectorData';
 import { OsmFeatureId } from '../../src/kit/mapelements/osmFeatures';
 import { modelToStlBytes } from '../../src/kit/StlMaker';
-import type { LonLat } from '../../src/kit/common/mathHelper';
+import { TEST_AREA, selectionLink } from '../testArea';
 
 /**
  * SCENARIO (the third test tier — see vitest.scenario.config.ts): a real-world walkthrough of driving
@@ -20,18 +20,13 @@ import type { LonLat } from '../../src/kit/common/mathHelper';
  *
  * Read the body top-to-bottom as the recipe — it is the eight-step flow, one step per block.
  */
-
-// A ~400 m box over central Dunedin (the Octagon), corners [TL, TR, BR, BL] = NW, NE, SE, SW (lon, lat).
-// Central CBD, so the real Overpass query reliably returns named streets to overlay.
-const DUNEDIN_CBD: LonLat[] = [
-    [170.5010, -45.8724],
-    [170.5062, -45.8724],
-    [170.5062, -45.8760],
-    [170.5010, -45.8760],
-];
+// The area + share-link helper live in tests/testArea.ts, SHARED with both golden STL harnesses —
+// scenario and goldens always exercise the exact same ground.
 
 describe('scenario: turn a map area + OSM into a printable STL, headless', () => {
     it('runs the whole eight-step user flow through the kit API', async () => {
+        console.log(`[scenario] area: ${selectionLink(TEST_AREA)}`); // eyeball the location in the app
+
         // 1. INIT — the objects a caller holds onto. The session is the source of truth; the model
         //    carries the print/geometry settings. (No ProcessorConfigStore — that's just persistence.)
         const session = new MapscadSession();
@@ -39,13 +34,15 @@ describe('scenario: turn a map area + OSM into a printable STL, headless', () =>
 
         // 2. SELECT — set the print area from corner coordinates, in code (the map is just one producer
         //    of this in the app).
-        session.setSelection(DUNEDIN_CBD);
+        session.setSelection(TEST_AREA);
         const corners = session.getSelection()!;
 
         // 3. PICK SOURCE + RESOLUTION + ZOOM → download + sample the DEM. The source is an elevation
         //    entry from the live tile-server manifest; resolution + zoom are model settings; sampling
         //    downloads the covering tiles and bilinearly fills the grid. The HeightGrid is the artifact
         //    an advanced caller could run their own code over.
+        // TODO(kit): this manifest-fetch + find boilerplate should be a kit one-liner — select the
+        //    DEM by name (or auto-pick the elevation source covering the selection). Under discussion.
         const manifest = await fetchTileMapManifest();
         const dem = manifest.find(m => m.name === 'dunedin_elevation_raw' && m.mmapsrv.type === 'elevation');
         expect(dem, 'tile server must serve dunedin_elevation_raw — check .env TILE_SERVER_URL').toBeTruthy();
@@ -61,7 +58,7 @@ describe('scenario: turn a map area + OSM into a printable STL, headless', () =>
         // 4. DOWNLOAD OVERLAY DATA — real Overpass, through the session's element manager.
         const streets = OsmFeatureId.Streets;
         const downloaded = await session.mapElements.download(streets);
-        expect(downloaded).toBeGreaterThan(0); // central Dunedin has streets
+        expect(downloaded).toBeGreaterThan(0); // the test area is picked to contain streets
 
         // 5. FILTER — the caller has full access to the downloaded list and writes their OWN predicate
         //    (here: keep only NAMED streets). The kit just provides the data; the filtering is user code.

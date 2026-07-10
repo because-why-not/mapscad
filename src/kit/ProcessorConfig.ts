@@ -16,7 +16,7 @@ import { Env } from '../Env';
  */
 export interface ProcessorConfig {
     demId: string;                       // elevation source id (manifest name)
-    selection: LonLat[] | null;          // selected rectangle, order TL,TR,BR,BL
+    selection: LonLat[] | null;          // selected rectangle, order SW,SE,NE,NW (corner[0] = south-west)
     model: ModelSettings;                // export geometry — sanitized by MapModel
 }
 

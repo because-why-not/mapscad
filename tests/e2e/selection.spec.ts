@@ -53,9 +53,9 @@ test('the 1:1 aspect lock squares up a wide drag', async ({ page }) => {
     await dragOnMap(page, [-90, -40], [90, 40]);
 
     await expect.poll(() => page.url()).toContain('sel=');
-    const sel = configFromUrl(page.url())!.selection;       // [TL, TR, BR, BL]
-    const width = haversineMeters(sel[0], sel[1]);          // TL→TR
-    const height = haversineMeters(sel[0], sel[3]);         // TL→BL
+    const sel = configFromUrl(page.url())!.selection;       // [SW, SE, NE, NW] (corner[0] = south-west)
+    const width = haversineMeters(sel[0], sel[1]);          // SW→SE (south edge)
+    const height = haversineMeters(sel[0], sel[3]);         // SW→NW (west edge)
     expect(width / height).toBeGreaterThan(0.9);
     expect(width / height).toBeLessThan(1.1);
 });

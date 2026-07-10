@@ -19,14 +19,16 @@ function flatRaster(fill: [number, number, number, number]): RawRaster {
     return { data, width: 1, height: 1, originX: 0, originY: 0, zoom: 14, tileSize: 256 };
 }
 
-const CORNERS: LonLat[] = [[0, 0.01], [0.02, 0.01], [0.02, -0.01], [0, -0.01]]; // TL,TR,BR,BL near equator
+// Canonical corner order SW, SE, NE, NW — corner[0] is the south-west corner, exactly what
+// SelectionArea emits / getSelection() returns. An axis-aligned box straddling the equator.
+const CORNERS: LonLat[] = [[0, -0.01], [0.02, -0.01], [0.02, 0.01], [0, 0.01]]; // SW, SE, NE, NW
 
 describe('rectPoint', () => {
     it('returns the corners at the unit-square extremes', () => {
-        expect(rectPoint(CORNERS, 0, 0)).toEqual(CORNERS[0]); // TL
-        expect(rectPoint(CORNERS, 1, 0)).toEqual(CORNERS[1]); // TR
-        expect(rectPoint(CORNERS, 1, 1)).toEqual(CORNERS[2]); // BR
-        expect(rectPoint(CORNERS, 0, 1)).toEqual(CORNERS[3]); // BL
+        expect(rectPoint(CORNERS, 0, 0)).toEqual(CORNERS[0]); // SW (u=0 west, v=0 south)
+        expect(rectPoint(CORNERS, 1, 0)).toEqual(CORNERS[1]); // SE
+        expect(rectPoint(CORNERS, 1, 1)).toEqual(CORNERS[2]); // NE
+        expect(rectPoint(CORNERS, 0, 1)).toEqual(CORNERS[3]); // NW
     });
     it('bilinearly interpolates the centre', () => {
         expect(rectPoint(CORNERS, 0.5, 0.5)).toEqual([0.01, 0]);
@@ -72,9 +74,11 @@ describe('sampleHeights', () => {
         expect(g.maxHeight).toBe(0);
     });
 
-    it('samples varying data: a north→south gradient increases down the rows', () => {
+    it('row 0 samples the SOUTH edge: a southward-increasing gradient decreases up the rows', () => {
         // Build a raster covering the selection's pixel bbox, each pixel encoding its own
-        // (local) row as a height. South = larger Mercator y = larger height.
+        // (local) row as a height. South = larger Mercator y = larger height. With SW-first
+        // corners, grid row 0 is the selection's south edge — this pins the row orientation
+        // (the fact the sun/N-S bugs hinged on), not just "some gradient exists".
         const z = 14, tileSize = 256;
         const px = CORNERS.map(c => lonLatToWorldPx(c[0], c[1], z, tileSize));
         const minX = Math.floor(Math.min(...px.map(p => p[0]))) - 1;
@@ -89,10 +93,10 @@ describe('sampleHeights', () => {
         const data = new TerrariumMapData({ data: buf, width: W, height: H, originX: minX, originY: minY, zoom: z, tileSize });
 
         const g = sampleHeights(CORNERS, data, 4, 4, 100, 100);
-        // Down a fixed column, height must strictly increase (north→south).
+        // Row 0 = south = the largest heights; going up the rows (northward) they strictly fall.
         for (let c = 0; c < g.cols; c++) {
             for (let r = 1; r < g.rows; r++) {
-                expect(g.heights[r * g.cols + c]).toBeGreaterThan(g.heights[(r - 1) * g.cols + c]);
+                expect(g.heights[r * g.cols + c]).toBeLessThan(g.heights[(r - 1) * g.cols + c]);
             }
         }
         expect(g.maxHeight).toBeGreaterThan(g.minHeight);

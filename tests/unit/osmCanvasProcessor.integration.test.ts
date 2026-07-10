@@ -15,8 +15,9 @@ import type { HeightGrid } from '../../src/kit/maptiles/HeightSampler';
 const LINE = osmFeature('tracks');   // geometry: 'line'
 const AREA = osmFeature('buildings'); // geometry: 'area'
 
-// Axis-aligned 1°×1° selection (TL, TR, BR, BL); 1000 m square, 10×10 cells (100 m each).
-const CORNERS: LonLat[] = [[0, 1], [1, 1], [1, 0], [0, 0]];
+// Axis-aligned 1°×1° selection in canonical order SW, SE, NE, NW (corner[0] = south-west, as
+// SelectionArea emits; v = lat, row 0 = the south edge); 1000 m square, 10×10 cells (100 m each).
+const CORNERS: LonLat[] = [[0, 0], [1, 0], [1, 1], [0, 1]];
 const GRID = { corners: CORNERS, cols: 10, rows: 10 };
 // Wrap bare polylines as grid-bound elements (the processor only uses their geometry).
 const vd = (coords: LonLat[][]) => new OsmVectorData(coords.map((c, i) => ({ id: i + 1, coords: c })), GRID);
@@ -30,9 +31,9 @@ function flatGrid(value = 100): HeightGrid {
 }
 
 const idx = (col: number, row: number) => row * 10 + col;
-// A horizontal line at lat 0.55 → v 0.45 → row 4.
+// A horizontal line at lat 0.55 → v 0.55 → row 5.
 const MID_ROW_LINE: LonLat[] = [[0.05, 0.55], [0.95, 0.55]];
-// A square ring covering grid cols/rows 2..7 (lon/lat .25→2, .75→7; v = 1−lat).
+// A square ring covering grid cols/rows 2..7 (lon/lat .25→2, .75→7; v = lat, symmetric either way).
 const SQUARE: LonLat[] = [[0.25, 0.75], [0.75, 0.75], [0.75, 0.25], [0.25, 0.25]];
 
 describe('OsmCanvasProcessor.coverage (real canvas)', () => {
@@ -45,7 +46,7 @@ describe('OsmCanvasProcessor.coverage (real canvas)', () => {
         const data = vd([MID_ROW_LINE]);
         const cov = new OsmCanvasProcessor(data, LINE, 100).coverage(flatGrid(100));
         expect(cov).not.toBeNull();
-        expect(cov![idx(5, 4)]).toBeGreaterThan(0.6); // on the line
+        expect(cov![idx(5, 5)]).toBeGreaterThan(0.6); // on the line (lat .55 → row 5)
         expect(cov![idx(0, 0)]).toBe(0);              // far corner
     });
 

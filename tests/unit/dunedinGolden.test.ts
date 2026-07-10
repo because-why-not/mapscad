@@ -9,7 +9,7 @@ import type { TileFetch } from '../../src/kit/maptiles/TileDownloader';
 import type { ManifestMap } from '../../src/kit/maptiles/TileMapManifest';
 import { MapModel } from '../../src/kit/MapModel';
 import { modelToStlBytes } from '../../src/kit/StlMaker';
-import type { LonLat } from '../../src/kit/common/mathHelper';
+import { TEST_AREA } from '../testArea';
 
 /**
  * The dunedin golden test, HEADLESS: the same pipeline the e2e drives through the browser —
@@ -30,14 +30,10 @@ const FIXTURES = path.join(HERE, 'fixtures', 'dunedin');
 const META = path.join(FIXTURES, 'meta.json');
 const GOLDEN = path.join(HERE, '..', 'e2e', 'fixtures', 'dunedin-128.stl');
 
-// Mirrors the e2e's seeded config (dunedin-download.spec.ts) — keep the two in sync.
+// Mirrors the e2e's seeded config (dunedin-download.spec.ts) — keep the two in sync. The area is
+// tests/testArea.ts, SHARED with the scenario walkthrough, in canonical SW,SE,NE,NW corner order.
 const RASTER = 128;
-const SELECTION: LonLat[] = [
-    [170.512533, -45.833427],
-    [170.514467, -45.833427],
-    [170.514467, -45.834774],
-    [170.512533, -45.834774],
-];
+const SELECTION = TEST_AREA;
 const MODEL_SETTINGS = { heightZoom: 17, rasterResolution: RASTER, socketEnabled: true, socketSize: 5, heightScale: 1 };
 
 /** Decode PNG bytes/file to RGBA via node-canvas (the Node stand-in for the browser decode). */

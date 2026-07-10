@@ -2,6 +2,7 @@ import { test, expect } from '@playwright/test';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { TEST_AREA } from '../testArea';
 
 // ESM (package.json "type": "module") has no `__dirname`; derive it from the module URL.
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -13,11 +14,12 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // boot restores the selection, samples the real DEM, and renders — exactly the user flow. We
 // then click Save and capture the STL download.
 //
-// The area is intentionally tiny (~150 m square) so the download is a handful of tiles. The DEM
-// zoom is seeded as 17, but boot caps a saved heightZoom to the resolution-based default — for this
-// area at raster 128 that's z16, which is what actually gets sampled — and bilinearly fills the
-// model's raster grid. The app forces the raster resolution on load, so we pin it to 128 via the
-// `rasterResolution` override (seeded into localStorage below) to keep the golden mesh small.
+// The area (tests/testArea.ts — SHARED with the scenario walkthrough and the headless twin) keeps
+// the download to a handful of tiles. The DEM zoom is seeded as 17, but boot caps a saved
+// heightZoom to the resolution-based default for the area + raster — that capped zoom is what
+// actually gets sampled — and bilinearly fills the model's raster grid. The app forces the raster
+// resolution on load, so we pin it to 128 via the `rasterResolution` override (seeded into
+// localStorage below) to keep the golden mesh small.
 //
 // The HEADLESS twin of this test (tests/unit/dunedinGolden.test.ts) runs the same pipeline in Node
 // against checked-in tile fixtures and compares to the SAME golden — keep their configs in sync.
@@ -32,13 +34,9 @@ const RASTER = 128;
 const CONFIG = {
     version: 1,
     demId: 'dunedin_elevation_raw',
-    // [TL, TR, BR, BL] = NW, NE, SE, SW (lon, lat). ~150 m square near the DEM centre.
-    selection: [
-        [170.512533, -45.833427],
-        [170.514467, -45.833427],
-        [170.514467, -45.834774],
-        [170.512533, -45.834774],
-    ],
+    // Canonical SW,SE,NE,NW corner order (see tests/testArea.ts). Changing the area or any model
+    // setting requires rebaking the golden (UPDATE_GOLDEN=1) + the twin's tiles (UPDATE_TILES=1).
+    selection: TEST_AREA,
     model: { heightZoom: 17, rasterResolution: RASTER, socketEnabled: true, socketSize: 5, heightScale: 1 },
     display: { smoothShading: true },
 };

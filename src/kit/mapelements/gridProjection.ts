@@ -17,13 +17,13 @@ export interface GridSpace {
  * yields empty lines. Shared by `Tracks` (polylines) and `Buildings` (rings).
  */
 export function projectLonLatLines(lines: readonly LonLat[][], g: GridSpace): LonLat[][] {
-    const [TL, TR, , BL] = g.corners; // = SW, SE, _, NW
-    const eUx = TR[0] - TL[0], eUy = TR[1] - TL[1];
-    const eVx = BL[0] - TL[0], eVy = BL[1] - TL[1];
+    const [SW, SE, , NW] = g.corners;
+    const eUx = SE[0] - SW[0], eUy = SE[1] - SW[1]; // eastward basis (u / +col)
+    const eVx = NW[0] - SW[0], eVy = NW[1] - SW[1]; // northward basis (v / +row)
     const det = eUx * eVy - eUy * eVx;
     if (!det) return lines.map(() => []);
     return lines.map(line => line.map(([lon, lat]) => {
-        const dx = lon - TL[0], dy = lat - TL[1];
+        const dx = lon - SW[0], dy = lat - SW[1];
         const u = (dx * eVy - dy * eVx) / det;
         const v = (eUx * dy - eUy * dx) / det;
         return [u * g.cols - 0.5, v * g.rows - 0.5] as LonLat; // [col, row], parallel to [lon, lat]

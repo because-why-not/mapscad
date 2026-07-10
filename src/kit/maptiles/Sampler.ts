@@ -25,13 +25,14 @@ const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
 
 /**
  * Bilinear interpolation of a point inside the rectangle (u,v in [0,1]). Corners are ordered
- * SW, SE, NE, NW, so u runs west→east and v runs south→north (v=0 is the south edge, v=1 the north
- * edge). The TL/TR/BR/BL names below are the legacy screen-convention labels for those same corners.
+ * SW, SE, NE, NW, so u runs west→east and v runs south→north (v=0 is the south edge, v=1 the
+ * north edge). For an unrotated selection the cardinal names are literal; for a rotated one they
+ * label the same corners in the rectangle's own frame (corner[0] is still "grid south-west").
  */
 export function rectPoint(c: LonLat[], u: number, v: number): LonLat {
-    const [TL, TR, BR, BL] = c; // = SW, SE, NE, NW
-    const sLon = lerp(TL[0], TR[0], u), sLat = lerp(TL[1], TR[1], u); // south edge (v=0): SW→SE
-    const nLon = lerp(BL[0], BR[0], u), nLat = lerp(BL[1], BR[1], u); // north edge (v=1): NW→NE
+    const [SW, SE, NE, NW] = c;
+    const sLon = lerp(SW[0], SE[0], u), sLat = lerp(SW[1], SE[1], u); // south edge (v=0): SW→SE
+    const nLon = lerp(NW[0], NE[0], u), nLat = lerp(NW[1], NE[1], u); // north edge (v=1): NW→NE
     return [lerp(sLon, nLon, v), lerp(sLat, nLat, v)];
 }
 

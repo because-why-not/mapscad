@@ -17,7 +17,8 @@ export interface SelectionChange {
  * (it must not import `kit/ui`).
  *
  * Today it owns two things:
- *   - the **selected region** — four lon/lat corners [TL,TR,BR,BL] (see SelectionArea), or null.
+ *   - the **selected region** — four lon/lat corners [SW,SE,NE,NW] (corner[0] = south-west, the
+ *     order SelectionArea emits; grid row 0 = the south edge), or null.
  *     The map is one producer of it, but a script can call `setSelection` directly; every consumer
  *     (preview resampling, config persistence, panel visibility) subscribes to `selectionChanged`.
  *   - **`mapElements`** — the `MapElementsManager`, everything map-element: per-feature element
