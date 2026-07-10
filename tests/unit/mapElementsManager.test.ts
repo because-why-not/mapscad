@@ -126,7 +126,9 @@ describe('MapElementsManager fan-out semantics', () => {
 });
 
 describe('MapscadSession selection', () => {
-    const sel: LonLat[] = [[170.5, -45.87], [170.6, -45.87], [170.6, -45.9], [170.5, -45.9]];
+    // Canonical corner order SW, SE, NE, NW — setSelection normalizes to it, so a fixture in this
+    // order passes through verbatim (normalization itself is covered in selectionRect.test.ts).
+    const sel: LonLat[] = [[170.5, -45.9], [170.6, -45.9], [170.6, -45.87], [170.5, -45.87]];
 
     it('setSelection emits selectionChanged with corners, prev and the user flag', () => {
         const s = new MapscadSession();
