@@ -19,7 +19,6 @@ const CONFIG = {
     demId: 'dunedin_elevation_raw',
     selection: SELECTION,
     model: { heightZoom: 12, socketEnabled: true, socketSize: 5, heightScale: 1 },
-    display: { smoothShading: true },
 };
 
 // Unnamed 2-point ways → the tracks list shows "Tracks #1", "Tracks #2", …

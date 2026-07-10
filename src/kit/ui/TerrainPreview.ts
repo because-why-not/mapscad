@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import type { ModelGeometry } from '../MapModel';
+import type { PreviewConfig } from './PreviewConfig';
 import { OSM_FEATURES } from '../mapelements/osmFeatures';
 
 // Separated OSM bodies are tinted their feature colour so the multi-object (multi-colour print)
@@ -46,7 +47,7 @@ export class TerrainPreview {
     private static readonly MIN_POLAR = 0.12;  // keep the camera off the poles / below ground
     private static readonly MAX_POLAR = 1.52;
 
-    constructor(container: HTMLElement) {
+    constructor(container: HTMLElement, config?: PreviewConfig) {
         this.container = container;
 
         this.renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -88,6 +89,10 @@ export class TerrainPreview {
         this.socketLineMaterial = new THREE.LineBasicMaterial({ color: 0xff7043 });
         this.group = new THREE.Group();
         this.scene.add(this.group);
+
+        // Apply the persisted render flags (the viewer owns HOW a flag renders; the config is
+        // just the values). Without a config the built-in defaults apply.
+        if (config) this.setSmoothShading(config.get().smoothShading);
 
         this.resize();
         this.requestRender(); // initial paint of the (empty) scene

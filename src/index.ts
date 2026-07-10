@@ -16,7 +16,7 @@ import { MapModel } from './kit/MapModel';
 import { MapscadSession } from './kit/MapscadSession';
 import { ProcessorConfigStore } from './kit/ProcessorConfig';
 import { readUrlMapState, composeShareUrl, loadView, saveView, saveActive } from './app/urlState';
-import { loadSmoothShading } from './app/uiPrefs';
+import { PreviewConfig } from './kit/ui/PreviewConfig';
 import type { Kit } from './app/kitContext';
 
 // This file is the composition root — init only. It constructs the kit (session, model, config),
@@ -31,6 +31,8 @@ const model = new MapModel();
 const config = new ProcessorConfigStore();
 // The kit session: the selected region (+ selectionChanged) and the map-element manager.
 const session = new MapscadSession();
+// Viewer-only render flags (kit/ui): applied by the TerrainPreview, persisted by the controller.
+const previewCfg = new PreviewConfig();
 
 /** Compact toggle label for an elevation source name (drops the _elevation[_raw] tail). */
 function demLabel(name: string): string {
@@ -147,7 +149,7 @@ async function init(): Promise<void> {
     // The kit objects handed to the UI: App provides them to every panel via context; the panels
     // call methods and subscribe to events on them directly (no callback props, no forwarders).
     // The two viewers are filled in right after mount — before flushSync runs the panels' effects.
-    const kit: Kit = { session, config, mapViewer: null, previewController: null };
+    const kit: Kit = { session, config, previewConfig: previewCfg, mapViewer: null, previewController: null };
 
     // Mount the Svelte UI first — it owns the split layout and provides the DOM nodes the viewers
     // mount into. Everything it receives beyond `kit` is static menu data.
@@ -176,8 +178,8 @@ async function init(): Promise<void> {
         demBySource,
         initialDemId,
         getActiveSourceId: () => kit.mapViewer?.activeId ?? '',
+        previewConfig: previewCfg, // render flags: TerrainPreview applies them at construction
     });
-    pc.setSmoothShading(loadSmoothShading());
     kit.previewController = pc;
     const mv = new MapViewer(document.getElementById('map-mount')!, session, model, config, {
         maps,

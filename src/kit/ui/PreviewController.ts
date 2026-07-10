@@ -1,4 +1,5 @@
 import { TerrainPreview } from './TerrainPreview';
+import type { PreviewConfig } from './PreviewConfig';
 import { OsmVectorData } from '../mapelements/OsmVectorData';
 import { sampleSelectionHeights, tileCoverage, demZoomRange, resolutionZoomRange, gridResolution } from '../maptiles/HeightSampler';
 import type { ManifestMap } from '../maptiles/TileMapManifest';
@@ -27,6 +28,9 @@ export interface PreviewControllerOptions {
     initialDemId: string;
     /** The active 2D/3D map source — a brand-new selection defaults the preview DEM to it. */
     getActiveSourceId: () => string;
+    /** Viewer-only render flags (smooth shading, …): applied by the TerrainPreview at construction,
+     *  persisted by this controller when the UI changes one. Omit for built-in defaults. */
+    previewConfig?: PreviewConfig;
 }
 
 /**
@@ -75,7 +79,7 @@ export class PreviewController {
         private readonly config: ProcessorConfigStore,
         private readonly opts: PreviewControllerOptions,
     ) {
-        this.preview = new TerrainPreview(container);
+        this.preview = new TerrainPreview(container, opts.previewConfig);
         this.previewDem = opts.mapsById[opts.initialDemId];
 
         model.onChange(() => this.onModelChange());
@@ -352,8 +356,12 @@ export class PreviewController {
         exportModel3mf(this.model);
     }
 
-    /** Viewer-only mesh shading toggle (never touches the model — persistence is the app's business). */
-    setSmoothShading(on: boolean): void { this.preview.setSmoothShading(on); }
+    /** Viewer-only mesh shading toggle: applies to the viewer and persists in the PreviewConfig
+     *  (never touches the model/export config). */
+    setSmoothShading(on: boolean): void {
+        this.opts.previewConfig?.update({ smoothShading: on });
+        this.preview.setSmoothShading(on);
+    }
     resetCamera(): void { this.preview.resetCamera(); }
     resize(): void { this.preview.resize(); }
 }

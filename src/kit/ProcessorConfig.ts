@@ -7,8 +7,8 @@ import { Env } from '../Env';
  * DEM, the selected rectangle, and the export geometry settings. One object, one storage
  * key (`previewConfig`). The selected area is shared via the URL hash in a human-readable
  * form composed by index.ts — this store only persists to localStorage. Viewer-only display
- * toggles (e.g. smooth shading) are NOT here: they don't affect the export, so they live app-
- * side in `app/uiPrefs.ts`.
+ * toggles (e.g. smooth shading) are NOT here: they don't affect the export, so they live in
+ * `kit/ui/PreviewConfig.ts` (own storage key, no compat guarantees).
  *
  *   Add an EXPORT setting -> add the field to ModelSettings (+ default + clamp) in MapModel.ts.
  *                            It persists and shares automatically, because `config.model` is

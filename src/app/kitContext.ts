@@ -2,6 +2,7 @@ import type { MapscadSession } from '../kit/MapscadSession';
 import type { ProcessorConfigStore } from '../kit/ProcessorConfig';
 import type { MapViewer } from '../kit/ui/MapViewer';
 import type { PreviewController } from '../kit/ui/PreviewController';
+import type { PreviewConfig } from '../kit/ui/PreviewConfig';
 
 /**
  * The kit objects the UI talks to, provided once by `App.svelte` under the `KIT` context key so
@@ -16,6 +17,9 @@ import type { PreviewController } from '../kit/ui/PreviewController';
 export interface Kit {
     session: MapscadSession;
     config: ProcessorConfigStore;
+    /** Viewer-only render flags (kit/ui) — constructed with the rest of the kit, so non-null from
+     *  the start; panels seed their menu state from it. */
+    previewConfig: PreviewConfig;
     mapViewer: MapViewer | null;
     previewController: PreviewController | null;
 }

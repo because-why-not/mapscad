@@ -38,7 +38,6 @@ const CONFIG = {
     // setting requires rebaking the golden (UPDATE_GOLDEN=1) + the twin's tiles (UPDATE_TILES=1).
     selection: TEST_AREA,
     model: { heightZoom: 17, rasterResolution: RASTER, socketEnabled: true, socketSize: 5, heightScale: 1 },
-    display: { smoothShading: true },
 };
 
 const GOLDEN = path.join(__dirname, 'fixtures', 'dunedin-128.stl');

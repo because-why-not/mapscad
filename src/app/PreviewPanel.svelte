@@ -4,7 +4,6 @@
     import { OSM_DATA_API } from '../kit/mapelements/dataSources';
     import { KIT } from './kitContext';
     import { composeShareUrl } from './urlState';
-    import { loadSmoothShading, saveSmoothShading } from './uiPrefs';
 
     // The 3D-view menu + overlays. Talks to the kit directly: methods in (changeDem, changeSettings,
     // generate, save…), events out mirrored into $state by the $effect subscriptions below.
@@ -86,8 +85,8 @@
     let waterLevel = $state(untrack(() => initialSettings.waterLevel ?? 0));
     let lowCutEnabled = $state(untrack(() => initialSettings.lowCutEnabled ?? false));
     let lowCutLevel = $state(untrack(() => initialSettings.lowCutLevel ?? 0));
-    // Viewer-only pref, persisted app-side under its own key (never part of the model settings).
-    let smoothShading = $state(loadSmoothShading());
+    // Viewer-only render pref: seeded from the kit's PreviewConfig; the controller persists changes.
+    let smoothShading = $state(kit.previewConfig.get().smoothShading);
 
     // Per-OSM-feature raise settings, keyed by feature id, seeded from the sanitized model settings
     // (initialSettings.osm always has every registry feature). Generic so a new feature needs no
@@ -344,7 +343,7 @@
             <div class="px-4 py-1 mt-2 text-xs font-bold uppercase tracking-wider opacity-50">Preview</div>
             <div class="px-4 py-2">
                 <label class="flex items-center gap-2 cursor-pointer">
-                    <input type="checkbox" class="checkbox checkbox-sm" bind:checked={smoothShading} onchange={() => { saveSmoothShading(smoothShading); kit.previewController?.setSmoothShading(smoothShading); }} />
+                    <input type="checkbox" class="checkbox checkbox-sm" bind:checked={smoothShading} onchange={() => kit.previewController?.setSmoothShading(smoothShading)} />
                     <span class="text-sm">Smooth shading</span>
                 </label>
             </div>
