@@ -22,6 +22,7 @@ export default defineConfig(({ mode }) => {
             port: 8003,       // playwright's webServer + the private start script expect this
             strictPort: true, // fail loudly rather than hopping to another port
             host: true,       // listen on 0.0.0.0 (matches the old allowedHosts: 'all')
+            allowedHosts: true
         },
         worker: {
             format: 'es', // the geometry build worker is an ES module (see PreviewController)
