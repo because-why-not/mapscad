@@ -25,3 +25,6 @@ npm-debug.log*
 import/
 tests/e2e/fixtures/
 tests/unit/fixtures/
+.vite/
+.vitest-attachments/
+tests/scenario/__screenshots__/
