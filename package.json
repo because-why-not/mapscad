@@ -11,7 +11,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "scenario": "vitest run --config vitest.scenario.config.ts",
-    "scenario:debug": "SCENARIO_DEBUG=1 vitest --config vitest.scenario.config.ts",
+    "scenario:debug": "SCENARIO_DEBUG=1 vitest run --inspect-brk --no-file-parallelism --config vitest.scenario.config.ts",
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui",
     "test:all": "vitest run && playwright test"
