@@ -17,6 +17,8 @@ export type OsmGeometry = 'line' | 'area';
 
 /** Stable feature ids. String-valued so they serialize/key exactly as the raw strings did. */
 export enum OsmFeatureId {
+    Water = 'water',
+    Rivers = 'rivers',
     Buildings = 'buildings',
     Streets = 'streets',
     Tracks = 'tracks',
@@ -62,6 +64,21 @@ const STREET_HIGHWAYS = [
 
 /** The registry, in overlay-stacking order (later = on top via higher zIndex). */
 export const OSM_FEATURES: OsmFeatureDef[] = [
+    {
+        // Standing water polygons (lakes, ponds, wide riverbanks mapped as areas). Carves by
+        // default: recessed water reads well on a printed model. NOTE: only simple closed ways —
+        // large lakes mapped as multipolygon *relations* are not fetched (same limitation as
+        // buildings; buildQuery asks for ways only).
+        id: OsmFeatureId.Water, geometry: 'area', minPoints: 3,
+        selector: '["natural"="water"]', strokeColor: '#17becf', fillColor: 'rgba(23, 190, 207, 0.3)',
+        zIndex: 830, raise: -2, radius: 0, sizeLimit: Env.WATER_LIMIT,
+    },
+    {
+        // Flowing water centerlines. Carves a channel by default (negative raise).
+        id: OsmFeatureId.Rivers, geometry: 'line', minPoints: 2,
+        selector: '["waterway"~"^(river|stream|canal)$"]', strokeColor: '#0ea5e9',
+        zIndex: 840, raise: -2, radius: 10, sizeLimit: Env.RIVER_LIMIT,
+    },
     {
         id: OsmFeatureId.Buildings, geometry: 'area', minPoints: 3,
         selector: '["building"]', strokeColor: '#1f77b4', fillColor: 'rgba(31, 119, 180, 0.35)',

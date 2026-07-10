@@ -29,6 +29,8 @@ export class Env {
     static readonly BUILDINGS_LIMIT = 5000;
     static readonly STREET_LIMIT = 5000;
     static readonly TRACK_LIMIT = 10000;
+    static readonly RIVER_LIMIT = 10000;
+    static readonly WATER_LIMIT = 10000;
 
     // The model raster-grid resolution (samples along the longest side) forced on every page load —
     // the DEM is bilinearly filled into a grid this size, so it sets mesh density independent of the

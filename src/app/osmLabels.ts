@@ -3,6 +3,8 @@
  *  these differently. `label` = section heading; `noun` = plural for button feedback ("12 tracks").
  *  Shared by `OsmDataPanel` and `PreviewPanel`. */
 export const OSM_LABELS: Record<string, { label: string; noun: string }> = {
+    water: { label: 'Water', noun: 'water areas' },
+    rivers: { label: 'Rivers', noun: 'rivers' },
     buildings: { label: 'Buildings', noun: 'buildings' },
     streets: { label: 'Streets', noun: 'streets' },
     tracks: { label: 'Tracks', noun: 'tracks' },
