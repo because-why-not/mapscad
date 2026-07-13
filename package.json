@@ -1,7 +1,7 @@
 {
   "name": "mapscad",
-  "version": "1.0.0",
-  "description": "Online-only OpenLayers map viewer driven by a tile-server manifest",
+  "version": "1.1.0",
+  "description": "Mapscad - a CAD web tool for making 3D maps.",
   "type": "module",
   "scripts": {
     "dev": "vite",
