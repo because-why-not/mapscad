@@ -32,7 +32,7 @@ jobs:
       - run: npm run build
       - uses: actions/upload-pages-artifact@v5
         with:
-          path: www
+          path: dist
   deploy:
     needs: build
     runs-on: ubuntu-latest
